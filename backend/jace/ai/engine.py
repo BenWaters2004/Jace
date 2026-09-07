@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 
 from jace.config import settings
-from jace.schemas import ChatMessage, ModelInfo
+from jace.schemas import ModelInfo
 
 
 class OllamaUnavailableError(Exception):
@@ -85,7 +85,7 @@ async def get_models() -> list[ModelInfo]:
 
 async def stream_chat(
     model: str,
-    messages: list[ChatMessage],
+    messages: list[dict[str, str]],
     system_prompt: str,
 ) -> AsyncIterator[dict[str, Any]]:
     """
@@ -106,11 +106,11 @@ async def stream_chat(
         )
 
     ollama_messages.extend(
-        {
-            "role": message.role,
-            "content": message.content,
-        }
-        for message in messages
+      {
+          "role": message["role"],
+          "content": message["content"],
+      }
+      for message in messages
     )
 
     payload = {

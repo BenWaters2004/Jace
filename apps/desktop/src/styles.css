@@ -201,7 +201,7 @@ button {
 }
 
 .sidebar-spacer {
-  flex: 1;
+  display: none;
 }
 
 .settings-panel {
@@ -991,4 +991,214 @@ button {
 
 .generation-stopped {
   color: #a78365;
+}
+
+/* ----------------------------------
+   Phase 2 - Conversations
+---------------------------------- */
+
+.conversation-search {
+  margin-top: 12px;
+}
+
+
+.conversation-search input {
+  width: 100%;
+
+  padding: 9px 10px;
+
+  outline: none;
+
+  border: 1px solid #20252d;
+  border-radius: 8px;
+
+  background: #0f1319;
+  color: #c9cdd4;
+
+  font-size: 11px;
+}
+
+
+.conversation-search input::placeholder {
+  color: #555d69;
+}
+
+
+.conversation-search input:focus {
+  border-color: #39404b;
+}
+
+
+.conversation-section {
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  flex: 1;
+}
+
+
+.conversation-list {
+  min-height: 0;
+
+  overflow-y: auto;
+
+  padding-right: 2px;
+}
+
+
+.conversation-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+
+.conversation-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+
+.conversation-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+
+  border-radius: 10px;
+
+  background: #272c35;
+
+  background-clip:
+    padding-box;
+}
+
+
+.conversation-row {
+  position: relative;
+
+  display: flex;
+
+  margin-bottom: 3px;
+
+  border-radius: 8px;
+
+  transition:
+    background 100ms ease;
+}
+
+
+.conversation-row:hover {
+  background: #12161c;
+}
+
+
+.conversation-row.active {
+  background: #171c23;
+}
+
+
+.conversation-select {
+  width: 100%;
+
+  min-width: 0;
+
+  padding:
+    9px
+    54px
+    9px
+    9px;
+
+  text-align: left;
+
+  border: 0;
+
+  background: transparent;
+
+  cursor: pointer;
+}
+
+
+.conversation-title {
+  display: block;
+
+  overflow: hidden;
+
+  color: #aeb4bd;
+
+  font-size: 11px;
+  font-weight: 550;
+
+  white-space: nowrap;
+
+  text-overflow: ellipsis;
+}
+
+
+.conversation-row.active
+.conversation-title {
+  color: #e1e3e7;
+}
+
+
+.conversation-meta {
+  display: block;
+
+  margin-top: 3px;
+
+  color: #4f5763;
+
+  font-size: 8px;
+}
+
+
+.conversation-actions {
+  position: absolute;
+
+  top: 50%;
+  right: 6px;
+
+  display: flex;
+
+  gap: 2px;
+
+  transform:
+    translateY(-50%);
+
+  opacity: 0;
+
+  transition:
+    opacity 100ms ease;
+}
+
+
+.conversation-row:hover
+.conversation-actions {
+  opacity: 1;
+}
+
+
+.conversation-actions button {
+  display: grid;
+
+  place-items: center;
+
+  width: 22px;
+  height: 22px;
+
+  padding: 0;
+
+  border: 0;
+
+  border-radius: 5px;
+
+  background: #20252d;
+  color: #707986;
+
+  font-size: 11px;
+
+  cursor: pointer;
+}
+
+
+.conversation-actions button:hover {
+  background: #2b313b;
+
+  color: #d4d7dc;
 }

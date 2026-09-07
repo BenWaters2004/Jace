@@ -1,6 +1,10 @@
 import type {
   ChatRequest,
   ChatStreamEvent,
+  ConversationCreateRequest,
+  ConversationDetail,
+  ConversationListResponse,
+  ConversationUpdateRequest,
   HealthResponse,
   ModelsResponse,
   StreamDoneEvent,
@@ -15,21 +19,17 @@ async function getErrorMessage(
   response: Response,
 ): Promise<string> {
   try {
-    const body = await response.json();
+    const body =
+      await response.json();
 
     if (
-      typeof body?.detail === "string"
+      typeof body?.detail ===
+      "string"
     ) {
       return body.detail;
     }
-
-    if (
-      typeof body?.message === "string"
-    ) {
-      return body.message;
-    }
   } catch {
-    // Fall back to normal HTTP status.
+    // Use HTTP status below.
   }
 
   return (
@@ -43,19 +43,21 @@ async function request<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(
-    `${API_BASE_URL}${path}`,
-    {
-      ...options,
+  const response =
+    await fetch(
+      `${API_BASE_URL}${path}`,
+      {
+        ...options,
 
-      headers: {
-        "Content-Type":
-          "application/json",
+        headers: {
+          "Content-Type":
+            "application/json",
 
-        ...(options?.headers ?? {}),
-      },
-    },
-  );
+          ...(options?.headers ??
+            {}),
+        },
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -85,6 +87,83 @@ Promise<ModelsResponse> {
 }
 
 
+export function getConversations():
+Promise<ConversationListResponse> {
+  return request<
+    ConversationListResponse
+  >(
+    "/conversations"
+  );
+}
+
+
+export function getConversation(
+  id: string,
+):
+Promise<ConversationDetail> {
+  return request<
+    ConversationDetail
+  >(
+    `/conversations/${id}`
+  );
+}
+
+
+export function createConversation(
+  payload:
+    ConversationCreateRequest,
+):
+Promise<ConversationDetail> {
+  return request<
+    ConversationDetail
+  >(
+    "/conversations",
+    {
+      method: "POST",
+
+      body:
+        JSON.stringify(
+          payload
+        ),
+    }
+  );
+}
+
+
+export function updateConversation(
+  id: string,
+  payload:
+    ConversationUpdateRequest,
+):
+Promise<ConversationDetail> {
+  return request<
+    ConversationDetail
+  >(
+    `/conversations/${id}`,
+    {
+      method: "PATCH",
+
+      body:
+        JSON.stringify(
+          payload
+        ),
+    }
+  );
+}
+
+
+export async function deleteConversation(
+  id: string,
+): Promise<void> {
+  await request(
+    `/conversations/${id}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+
 interface StreamCallbacks {
   onToken: (
     content: string,
@@ -101,23 +180,25 @@ export async function sendChatStream(
   callbacks: StreamCallbacks,
   signal: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(
-    `${API_BASE_URL}/chat/stream`,
-    {
-      method: "POST",
+  const response =
+    await fetch(
+      `${API_BASE_URL}/chat/stream`,
+      {
+        method: "POST",
 
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
 
-      body: JSON.stringify(
-        payload
-      ),
+        body:
+          JSON.stringify(
+            payload
+          ),
 
-      signal,
-    },
-  );
+        signal,
+      }
+    );
 
 
   if (!response.ok) {
@@ -155,17 +236,11 @@ export async function sendChatStream(
       return;
     }
 
-    let event:
-      ChatStreamEvent;
-
-    try {
-      event =
-        JSON.parse(trimmed);
-    } catch {
-      throw new Error(
-        "Jace received malformed streaming data."
-      );
-    }
+    const event:
+      ChatStreamEvent =
+        JSON.parse(
+          trimmed
+        );
 
 
     switch (event.type) {
@@ -189,12 +264,6 @@ export async function sendChatStream(
         throw new Error(
           event.message
         );
-
-
-      default:
-        throw new Error(
-          "Jace received an unknown streaming event."
-        );
     }
   }
 
@@ -204,32 +273,30 @@ export async function sendChatStream(
       const {
         done,
         value,
-      } = await reader.read();
-
+      } =
+        await reader.read();
 
       if (done) {
         break;
       }
 
-
-      buffer += decoder.decode(
-        value,
-        {
-          stream: true,
-        },
-      );
-
+      buffer +=
+        decoder.decode(
+          value,
+          {
+            stream: true,
+          }
+        );
 
       const lines =
         buffer.split("\n");
 
-
       buffer =
         lines.pop() ?? "";
 
-
       for (
-        const line of lines
+        const line
+        of lines
       ) {
         processLine(
           line
@@ -237,9 +304,8 @@ export async function sendChatStream(
       }
     }
 
-
-    buffer += decoder.decode();
-
+    buffer +=
+      decoder.decode();
 
     if (buffer.trim()) {
       processLine(

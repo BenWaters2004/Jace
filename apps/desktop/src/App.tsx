@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -11,13 +12,21 @@ import type {
 } from "react";
 
 import {
+  createConversation,
+  deleteConversation,
+  getConversation,
+  getConversations,
   getHealth,
   getModels,
   sendChatStream,
+  updateConversation,
 } from "./api";
 
 import type {
+  ApiGenerationStats,
   ChatMessage,
+  ConversationDetail,
+  ConversationSummary,
   GenerationStats,
   ModelInfo,
   StreamDoneEvent,
@@ -47,20 +56,106 @@ Your role:
 You are the beginning of a larger personal AI system. Your capabilities will expand over time through explicitly provided tools and memory.`;
 
 
-function createMessage(
-  role: "user" | "assistant",
+function createLocalMessage(
+  role:
+    "user" | "assistant",
   content: string,
 ): ChatMessage {
   return {
-    id: crypto.randomUUID(),
+    id:
+      crypto.randomUUID(),
+
     role,
     content,
   };
 }
 
 
+function mapStats(
+  stats:
+    ApiGenerationStats | null,
+):
+GenerationStats | undefined {
+  if (!stats) {
+    return undefined;
+  }
+
+  return {
+    timeToFirstTokenMs:
+      stats.time_to_first_token_ms,
+
+    totalDurationMs:
+      stats.total_duration_ms,
+
+    loadDurationMs:
+      stats.load_duration_ms,
+
+    promptEvalCount:
+      stats.prompt_eval_count,
+
+    promptEvalCachedCount:
+      stats.prompt_eval_cached_count,
+
+    promptEvalDurationMs:
+      stats.prompt_eval_duration_ms,
+
+    evalCount:
+      stats.eval_count,
+
+    evalDurationMs:
+      stats.eval_duration_ms,
+
+    tokensPerSecond:
+      stats.tokens_per_second,
+  };
+}
+
+
+function mapConversationMessages(
+  conversation:
+    ConversationDetail,
+): ChatMessage[] {
+  return (
+    conversation.messages.map(
+      (message) => ({
+        id:
+          message.id,
+
+        conversation_id:
+          message.conversation_id,
+
+        role:
+          message.role,
+
+        content:
+          message.content,
+
+        status:
+          message.status,
+
+        model:
+          message.model,
+
+        created_at:
+          message.created_at,
+
+        stopped:
+          message.status
+          === "stopped",
+
+        stats:
+          mapStats(
+            message.stats
+          ),
+      })
+    )
+  );
+}
+
+
 function formatBytes(
-  bytes: number | null,
+  bytes:
+    number | null,
 ): string {
   if (!bytes) {
     return "";
@@ -72,19 +167,8 @@ function formatBytes(
     1024 /
     1024;
 
-  if (gigabytes >= 1) {
-    return (
-      `${gigabytes.toFixed(1)} GB`
-    );
-  }
-
-  const megabytes =
-    bytes /
-    1024 /
-    1024;
-
   return (
-    `${megabytes.toFixed(0)} MB`
+    `${gigabytes.toFixed(1)} GB`
   );
 }
 
@@ -94,7 +178,8 @@ function formatDuration(
     number | null,
 ): string {
   if (
-    milliseconds === null ||
+    milliseconds === null
+    ||
     milliseconds === undefined
   ) {
     return "—";
@@ -114,6 +199,38 @@ function formatDuration(
     `${(
       milliseconds / 1000
     ).toFixed(1)} s`
+  );
+}
+
+
+function formatConversationDate(
+  date: string,
+): string {
+  const value =
+    new Date(date);
+
+  const today =
+    new Date();
+
+  if (
+    value.toDateString()
+    === today.toDateString()
+  ) {
+    return value.toLocaleTimeString(
+      [],
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    );
+  }
+
+  return value.toLocaleDateString(
+    [],
+    {
+      day: "2-digit",
+      month: "short",
+    }
   );
 }
 
@@ -148,12 +265,40 @@ function App() {
     useState("");
 
   const [
+    defaultModel,
+    setDefaultModel,
+  ] =
+    useState("");
+
+  const [
     systemPrompt,
     setSystemPrompt,
   ] =
     useState(
       DEFAULT_SYSTEM_PROMPT
     );
+
+  const [
+    conversations,
+    setConversations,
+  ] =
+    useState<
+      ConversationSummary[]
+    >([]);
+
+  const [
+    activeConversationId,
+    setActiveConversationId,
+  ] =
+    useState<
+      string | null
+    >(null);
+
+  const [
+    search,
+    setSearch,
+  ] =
+    useState("");
 
   const [
     connectionState,
@@ -179,38 +324,130 @@ function App() {
 
 
   const messagesEndRef =
-    useRef<HTMLDivElement | null>(
-      null
-    );
+    useRef<
+      HTMLDivElement | null
+    >(null);
 
   const inputRef =
-    useRef<HTMLTextAreaElement | null>(
-      null
-    );
+    useRef<
+      HTMLTextAreaElement | null
+    >(null);
 
   const abortControllerRef =
     useRef<
       AbortController | null
     >(null);
 
-  const activeAssistantIdRef =
-    useRef<
-      string | null
-    >(null);
+
+  const filteredConversations =
+    useMemo(
+      () => {
+        const value =
+          search
+            .trim()
+            .toLowerCase();
+
+        if (!value) {
+          return conversations;
+        }
+
+        return conversations.filter(
+          (conversation) =>
+            conversation.title
+              .toLowerCase()
+              .includes(value)
+        );
+      },
+      [
+        conversations,
+        search,
+      ]
+    );
 
 
-  const checkConnection =
+  const refreshConversations =
+    useCallback(
+      async () => {
+        const response =
+          await getConversations();
+
+        setConversations(
+          response.conversations
+        );
+
+        return (
+          response.conversations
+        );
+      },
+      []
+    );
+
+
+  const loadConversation =
+    useCallback(
+      async (
+        conversationId: string,
+      ) => {
+        try {
+          const conversation =
+            await getConversation(
+              conversationId
+            );
+
+          setActiveConversationId(
+            conversation.id
+          );
+
+          setMessages(
+            mapConversationMessages(
+              conversation
+            )
+          );
+
+          setSystemPrompt(
+            conversation.system_prompt
+            ||
+            DEFAULT_SYSTEM_PROMPT
+          );
+
+          setSelectedModel(
+            conversation.model
+          );
+
+          setError(null);
+        } catch (
+          loadError
+        ) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Could not load conversation."
+          );
+        }
+      },
+      []
+    );
+
+
+  const initialise =
     useCallback(
       async () => {
         setConnectionState(
           "checking"
         );
 
-        setError(null);
-
         try {
-          const health =
-            await getHealth();
+          const [
+            health,
+            modelResponse,
+            conversationResponse,
+          ] =
+            await Promise.all([
+              getHealth(),
+              getModels(),
+              getConversations(),
+            ]);
+
 
           if (
             !health.ollama_connected
@@ -219,115 +456,112 @@ function App() {
               "ollama-offline"
             );
 
-            setModels([]);
-
             return;
           }
 
-          const modelResponse =
-            await getModels();
 
           setModels(
             modelResponse.models
           );
 
-          if (
-            modelResponse.models
-              .length === 0
-          ) {
-            setConnectionState(
-              "ollama-offline"
-            );
-
-            setError(
-              "Ollama is running, but no local models are installed."
-            );
-
-            return;
-          }
+          setDefaultModel(
+            health.default_model
+          );
 
           setSelectedModel(
-            (
-              currentModel,
-            ) => {
-              if (
-                currentModel &&
-                modelResponse.models
-                  .some(
-                    (model) =>
-                      model.name ===
-                      currentModel
-                  )
-              ) {
-                return currentModel;
-              }
+            health.default_model
+          );
 
-              const configuredDefault =
-                modelResponse.models
-                  .find(
-                    (model) =>
-                      model.name ===
-                      health.default_model
-                  );
-
-              return (
-                configuredDefault
-                  ?.name ??
-                modelResponse
-                  .models[0]
-                  .name
-              );
-            }
+          setConversations(
+            conversationResponse
+              .conversations
           );
 
           setConnectionState(
             "online"
           );
+
+
+          if (
+            conversationResponse
+              .conversations
+              .length > 0
+          ) {
+            await loadConversation(
+              conversationResponse
+                .conversations[0]
+                .id
+            );
+          }
         } catch (
-          connectionError
+          initialiseError
         ) {
           setConnectionState(
             "backend-offline"
           );
 
           setError(
-            connectionError
+            initialiseError
               instanceof Error
-              ? connectionError
+              ? initialiseError
                   .message
-              : "Could not connect to the Jace backend."
+              : "Could not initialise Jace."
           );
         }
       },
-      []
+      [
+        loadConversation,
+      ]
     );
 
 
   useEffect(() => {
-    void checkConnection();
+    void initialise();
   }, [
-    checkConnection,
+    initialise,
   ]);
 
 
   useEffect(() => {
     messagesEndRef.current
       ?.scrollIntoView({
-        behavior: "smooth",
+        behavior:
+          "smooth",
       });
   }, [
     messages,
   ]);
 
 
-  useEffect(() => {
-    if (!isGenerating) {
-      inputRef.current
-        ?.focus();
+  async function ensureConversation():
+  Promise<string> {
+    if (
+      activeConversationId
+    ) {
+      return (
+        activeConversationId
+      );
     }
-  }, [
-    isGenerating,
-  ]);
+
+    const conversation =
+      await createConversation(
+        {
+          model:
+            selectedModel,
+
+          system_prompt:
+            systemPrompt,
+        }
+      );
+
+    setActiveConversationId(
+      conversation.id
+    );
+
+    await refreshConversations();
+
+    return conversation.id;
+  }
 
 
   function updateAssistantMessage(
@@ -357,53 +591,69 @@ function App() {
   ) {
     event?.preventDefault();
 
-    const trimmedInput =
+    const text =
       input.trim();
 
     if (
-      !trimmedInput ||
-      isGenerating ||
-      connectionState !==
-        "online" ||
+      !text
+      ||
+      isGenerating
+      ||
+      connectionState
+        !== "online"
+      ||
       !selectedModel
     ) {
       return;
     }
 
 
-    const userMessage =
-      createMessage(
-        "user",
-        trimmedInput
+    let conversationId:
+      string;
+
+    try {
+      conversationId =
+        await ensureConversation();
+    } catch (
+      conversationError
+    ) {
+      setError(
+        conversationError
+          instanceof Error
+          ? conversationError
+              .message
+          : "Could not create conversation."
       );
 
+      return;
+    }
+
+
+    const userMessage =
+      createLocalMessage(
+        "user",
+        text
+      );
 
     const assistantMessage:
       ChatMessage = {
-        id:
-          crypto.randomUUID(),
-
-        role:
+        ...createLocalMessage(
           "assistant",
-
-        content:
-          "",
+          ""
+        ),
 
         isStreaming:
           true,
       };
 
 
-    const conversation = [
-      ...messages,
-      userMessage,
-    ];
-
-
-    setMessages([
-      ...conversation,
-      assistantMessage,
-    ]);
+    setMessages(
+      (current) => [
+        ...current,
+        userMessage,
+        assistantMessage,
+      ]
+    );
 
     setInput("");
 
@@ -420,64 +670,35 @@ function App() {
     abortControllerRef.current =
       controller;
 
-    activeAssistantIdRef.current =
-      assistantMessage.id;
-
-
-    const startedAt =
-      performance.now();
-
-    let firstTokenAt:
-      number | null =
-        null;
-
 
     try {
       await sendChatStream(
         {
+          conversation_id:
+            conversationId,
+
+          message:
+            text,
+
           model:
             selectedModel,
 
           system_prompt:
             systemPrompt,
-
-          messages:
-            conversation.map(
-              (message) => ({
-                role:
-                  message.role,
-
-                content:
-                  message.content,
-              })
-            ),
         },
 
         {
           onToken:
-            (
-              content,
-            ) => {
-              if (
-                firstTokenAt ===
-                null
-              ) {
-                firstTokenAt =
-                  performance.now();
-              }
-
-
+            (content) => {
               updateAssistantMessage(
                 assistantMessage.id,
 
-                (
-                  message,
-                ) => ({
+                (message) => ({
                   ...message,
 
                   content:
-                    message.content +
-                    content,
+                    message.content
+                    + content,
                 })
               );
             },
@@ -488,72 +709,65 @@ function App() {
               event:
                 StreamDoneEvent,
             ) => {
-              const timeToFirstToken =
-                firstTokenAt !==
-                null
-                  ? firstTokenAt -
-                    startedAt
-                  : null;
-
-
-              const stats:
-                GenerationStats =
-              {
-                timeToFirstTokenMs:
-                  timeToFirstToken,
-
-                totalDurationMs:
-                  event.metrics
-                    .total_duration_ms,
-
-                loadDurationMs:
-                  event.metrics
-                    .load_duration_ms,
-
-                promptEvalCount:
-                  event.metrics
-                    .prompt_eval_count,
-
-                promptEvalCachedCount:
-                  event.metrics
-                    .prompt_eval_cached_count,
-
-                promptEvalDurationMs:
-                  event.metrics
-                    .prompt_eval_duration_ms,
-
-                evalCount:
-                  event.metrics
-                    .eval_count,
-
-                evalDurationMs:
-                  event.metrics
-                    .eval_duration_ms,
-
-                tokensPerSecond:
-                  event.metrics
-                    .tokens_per_second,
-              };
-
-
               updateAssistantMessage(
                 assistantMessage.id,
 
-                (
-                  message,
-                ) => ({
+                (message) => ({
                   ...message,
 
                   isStreaming:
                     false,
 
-                  stats,
+                  stats: {
+                    timeToFirstTokenMs:
+                      event.metrics
+                        .time_to_first_token_ms,
+
+                    totalDurationMs:
+                      event.metrics
+                        .total_duration_ms,
+
+                    loadDurationMs:
+                      event.metrics
+                        .load_duration_ms,
+
+                    promptEvalCount:
+                      event.metrics
+                        .prompt_eval_count,
+
+                    promptEvalCachedCount:
+                      event.metrics
+                        .prompt_eval_cached_count,
+
+                    promptEvalDurationMs:
+                      event.metrics
+                        .prompt_eval_duration_ms,
+
+                    evalCount:
+                      event.metrics
+                        .eval_count,
+
+                    evalDurationMs:
+                      event.metrics
+                        .eval_duration_ms,
+
+                    tokensPerSecond:
+                      event.metrics
+                        .tokens_per_second,
+                  },
                 })
               );
             },
         },
 
         controller.signal
+      );
+
+
+      await refreshConversations();
+
+      await loadConversation(
+        conversationId
       );
     } catch (
       chatError
@@ -565,9 +779,7 @@ function App() {
         updateAssistantMessage(
           assistantMessage.id,
 
-          (
-            message,
-          ) => ({
+          (message) => ({
             ...message,
 
             isStreaming:
@@ -577,20 +789,19 @@ function App() {
               true,
           })
         );
+
+        await refreshConversations();
       } else {
         updateAssistantMessage(
           assistantMessage.id,
 
-          (
-            message,
-          ) => ({
+          (message) => ({
             ...message,
 
             isStreaming:
               false,
           })
         );
-
 
         setError(
           chatError
@@ -600,18 +811,7 @@ function App() {
         );
       }
     } finally {
-      if (
-        abortControllerRef
-          .current ===
-        controller
-      ) {
-        abortControllerRef
-          .current =
-          null;
-      }
-
-      activeAssistantIdRef
-        .current =
+      abortControllerRef.current =
         null;
 
       setIsGenerating(
@@ -622,25 +822,20 @@ function App() {
 
 
   function stopGeneration() {
-    if (
-      !abortControllerRef
-        .current
-    ) {
-      return;
-    }
-
     abortControllerRef.current
-      .abort();
+      ?.abort();
   }
 
 
   function handleKeyDown(
     event:
-      KeyboardEvent<HTMLTextAreaElement>,
+      KeyboardEvent<
+        HTMLTextAreaElement
+      >,
   ) {
     if (
-      event.key ===
-        "Enter" &&
+      event.key === "Enter"
+      &&
       !event.shiftKey
     ) {
       event.preventDefault();
@@ -655,43 +850,197 @@ function App() {
       return;
     }
 
+    setActiveConversationId(
+      null
+    );
+
     setMessages([]);
 
     setInput("");
 
+    setSearch("");
+
+    setSystemPrompt(
+      DEFAULT_SYSTEM_PROMPT
+    );
+
+    setSelectedModel(
+      defaultModel
+      ||
+      models[0]?.name
+      ||
+      ""
+    );
+
     setError(null);
 
     window.setTimeout(
-      () => {
+      () =>
         inputRef.current
-          ?.focus();
-      },
+          ?.focus(),
       0
     );
   }
 
 
-  function connectionLabel() {
-    switch (
-      connectionState
+  async function handleRename(
+    conversation:
+      ConversationSummary,
+  ) {
+    if (isGenerating) {
+      return;
+    }
+
+    const title =
+      window.prompt(
+        "Rename conversation",
+        conversation.title
+      );
+
+    if (
+      title === null
+      ||
+      !title.trim()
     ) {
-      case "online":
-        return (
-          "Local AI online"
-        );
+      return;
+    }
 
-      case "checking":
-        return "Connecting";
+    try {
+      await updateConversation(
+        conversation.id,
+        {
+          title:
+            title.trim(),
+        }
+      );
 
-      case "ollama-offline":
-        return (
-          "Ollama unavailable"
-        );
+      await refreshConversations();
+    } catch (
+      renameError
+    ) {
+      setError(
+        renameError
+          instanceof Error
+          ? renameError.message
+          : "Could not rename conversation."
+      );
+    }
+  }
 
-      case "backend-offline":
-        return (
-          "Backend offline"
-        );
+
+  async function handleDelete(
+    conversation:
+      ConversationSummary,
+  ) {
+    if (isGenerating) {
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        `Delete "${conversation.title}"?`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteConversation(
+        conversation.id
+      );
+
+      const remaining =
+        await refreshConversations();
+
+
+      if (
+        activeConversationId
+        === conversation.id
+      ) {
+        if (
+          remaining.length
+          > 0
+        ) {
+          await loadConversation(
+            remaining[0].id
+          );
+        } else {
+          handleNewChat();
+        }
+      }
+    } catch (
+      deleteError
+    ) {
+      setError(
+        deleteError
+          instanceof Error
+          ? deleteError.message
+          : "Could not delete conversation."
+      );
+    }
+  }
+
+
+  async function handleModelChange(
+    model: string,
+  ) {
+    setSelectedModel(
+      model
+    );
+
+    if (
+      !activeConversationId
+    ) {
+      return;
+    }
+
+    try {
+      await updateConversation(
+        activeConversationId,
+        {
+          model,
+        }
+      );
+
+      await refreshConversations();
+    } catch (
+      updateError
+    ) {
+      setError(
+        updateError
+          instanceof Error
+          ? updateError.message
+          : "Could not update model."
+      );
+    }
+  }
+
+
+  async function saveSystemPrompt() {
+    if (
+      !activeConversationId
+    ) {
+      return;
+    }
+
+    try {
+      await updateConversation(
+        activeConversationId,
+        {
+          system_prompt:
+            systemPrompt,
+        }
+      );
+    } catch (
+      updateError
+    ) {
+      setError(
+        updateError
+          instanceof Error
+          ? updateError.message
+          : "Could not save Jace identity."
+      );
     }
   }
 
@@ -710,7 +1059,7 @@ function App() {
             </div>
 
             <div className="brand-version">
-              v0.1.1
+              v0.2.0
             </div>
           </div>
         </div>
@@ -733,26 +1082,120 @@ function App() {
         </button>
 
 
-        <div className="sidebar-section">
+        <div className="conversation-search">
+          <input
+            type="text"
+            placeholder="Search conversations..."
+            value={
+              search
+            }
+            onChange={
+              (event) =>
+                setSearch(
+                  event.target.value
+                )
+            }
+          />
+        </div>
+
+
+        <div className="sidebar-section conversation-section">
           <span className="sidebar-heading">
             Conversations
           </span>
 
-          <div className="empty-history">
-            <div className="empty-history-icon">
-              ◇
-            </div>
+          <div className="conversation-list">
+            {filteredConversations
+              .length === 0 ? (
+              <div className="empty-history">
+                <p>
+                  No conversations
+                  yet.
+                </p>
 
-            <p>
-              Conversations are
-              currently
-              session-only.
-            </p>
+                <small>
+                  Start talking to
+                  Jace to create one.
+                </small>
+              </div>
+            ) : (
+              filteredConversations.map(
+                (conversation) => (
+                  <div
+                    key={
+                      conversation.id
+                    }
+                    className={
+                      "conversation-row"
+                      +
+                      (
+                        activeConversationId
+                        === conversation.id
+                          ? " active"
+                          : ""
+                      )
+                    }
+                  >
+                    <button
+                      className="conversation-select"
+                      onClick={
+                        () =>
+                          void loadConversation(
+                            conversation.id
+                          )
+                      }
+                      disabled={
+                        isGenerating
+                      }
+                    >
+                      <span className="conversation-title">
+                        {
+                          conversation.title
+                        }
+                      </span>
 
-            <small>
-              Persistent history
-              arrives in Phase 2.
-            </small>
+                      <span className="conversation-meta">
+                        {
+                          conversation.message_count
+                        }{" "}
+                        messages ·{" "}
+                        {
+                          formatConversationDate(
+                            conversation.updated_at
+                          )
+                        }
+                      </span>
+                    </button>
+
+                    <div className="conversation-actions">
+                      <button
+                        title="Rename"
+                        onClick={
+                          () =>
+                            void handleRename(
+                              conversation
+                            )
+                        }
+                      >
+                        ✎
+                      </button>
+
+                      <button
+                        title="Delete"
+                        onClick={
+                          () =>
+                            void handleDelete(
+                              conversation
+                            )
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                )
+              )
+            )}
           </div>
         </div>
 
@@ -761,40 +1204,25 @@ function App() {
 
 
         <div className="settings-panel">
-          <label
-            className="field-label"
-            htmlFor="model-select"
-          >
+          <label className="field-label">
             Model
           </label>
 
           <select
-            id="model-select"
             className="model-select"
             value={
               selectedModel
             }
-            onChange={
-              (event) =>
-                setSelectedModel(
-                  event.target
-                    .value
-                )
-            }
             disabled={
-              connectionState !==
-                "online" ||
               isGenerating
             }
+            onChange={
+              (event) =>
+                void handleModelChange(
+                  event.target.value
+                )
+            }
           >
-            {models.length ===
-              0 && (
-              <option value="">
-                No model
-                available
-              </option>
-            )}
-
             {models.map(
               (model) => (
                 <option
@@ -805,7 +1233,9 @@ function App() {
                     model.name
                   }
                 >
-                  {model.name}
+                  {
+                    model.name
+                  }
 
                   {model.parameter_size
                     ? ` · ${model.parameter_size}`
@@ -822,8 +1252,8 @@ function App() {
                 const model =
                   models.find(
                     (item) =>
-                      item.name ===
-                      selectedModel
+                      item.name
+                      === selectedModel
                   );
 
                 if (!model) {
@@ -834,9 +1264,11 @@ function App() {
                   <>
                     {model.size && (
                       <span>
-                        {formatBytes(
-                          model.size
-                        )}
+                        {
+                          formatBytes(
+                            model.size
+                          )
+                        }
                       </span>
                     )}
 
@@ -860,15 +1292,11 @@ function App() {
             </summary>
 
             <div className="advanced-settings-body">
-              <label
-                className="field-label"
-                htmlFor="system-prompt"
-              >
+              <label className="field-label">
                 System prompt
               </label>
 
               <textarea
-                id="system-prompt"
                 className="system-prompt"
                 value={
                   systemPrompt
@@ -876,9 +1304,12 @@ function App() {
                 onChange={
                   (event) =>
                     setSystemPrompt(
-                      event.target
-                        .value
+                      event.target.value
                     )
+                }
+                onBlur={
+                  () =>
+                    void saveSystemPrompt()
                 }
                 disabled={
                   isGenerating
@@ -888,13 +1319,11 @@ function App() {
               <button
                 className="reset-prompt-button"
                 onClick={
-                  () =>
+                  () => {
                     setSystemPrompt(
                       DEFAULT_SYSTEM_PROMPT
-                    )
-                }
-                disabled={
-                  isGenerating
+                    );
+                  }
                 }
               >
                 Reset prompt
@@ -913,29 +1342,16 @@ function App() {
 
           <div className="connection-copy">
             <strong>
-              {
-                connectionLabel()
-              }
+              {connectionState
+              === "online"
+                ? "Local AI online"
+                : "Jace unavailable"}
             </strong>
 
             <span>
               Private · local
             </span>
           </div>
-
-          {connectionState !==
-            "online" && (
-            <button
-              className="retry-button"
-              onClick={
-                () =>
-                  void checkConnection()
-              }
-              title="Retry connection"
-            >
-              ↻
-            </button>
-          )}
         </div>
       </aside>
 
@@ -944,10 +1360,16 @@ function App() {
         <header className="topbar">
           <div>
             <h1>
-              {messages.length ===
-              0
-                ? "New conversation"
-                : "Jace"}
+              {activeConversationId
+                ? (
+                    conversations.find(
+                      (item) =>
+                        item.id
+                        === activeConversationId
+                    )?.title
+                    ?? "Jace"
+                  )
+                : "New conversation"}
             </h1>
 
             <p>
@@ -965,8 +1387,8 @@ function App() {
 
 
         <div className="conversation">
-          {messages.length ===
-          0 ? (
+          {messages.length
+          === 0 ? (
             <div className="welcome">
               <div className="welcome-logo">
                 J
@@ -977,14 +1399,10 @@ function App() {
               </h2>
 
               <p>
-                Jace is running
-                locally using your
-                own AI model.
-                Nothing in this
-                conversation is
-                being sent to an
-                external AI
-                provider.
+                Conversations are now
+                stored locally and will
+                remain available after
+                Jace is restarted.
               </p>
 
               <div className="suggestion-grid">
@@ -1000,8 +1418,7 @@ function App() {
                     Capabilities
                   </span>
 
-                  Tell me what
-                  you can do
+                  What can you do?
                 </button>
 
                 <button
@@ -1016,8 +1433,7 @@ function App() {
                     Planning
                   </span>
 
-                  Plan Project
-                  Jace
+                  Plan Project Jace
                 </button>
 
                 <button
@@ -1032,8 +1448,7 @@ function App() {
                     Architecture
                   </span>
 
-                  Explain the
-                  system
+                  Explain Jace
                 </button>
               </div>
             </div>
@@ -1046,7 +1461,8 @@ function App() {
                       message.id
                     }
                     className={
-                      `message ${message.role}` +
+                      `message ${message.role}`
+                      +
                       (
                         message.isStreaming
                           ? " streaming"
@@ -1055,140 +1471,104 @@ function App() {
                     }
                   >
                     <div className="message-avatar">
-                      {message.role ===
-                      "user"
+                      {message.role
+                      === "user"
                         ? "B"
                         : "J"}
                     </div>
 
                     <div className="message-body">
                       <div className="message-author">
-                        {message.role ===
-                        "user"
+                        {message.role
+                        === "user"
                           ? "You"
                           : "Jace"}
                       </div>
 
                       <div className="message-content">
-                        {message.content}
-
-                        {!message.content &&
-                          message.stopped &&
-                          "Generation stopped."}
+                        {
+                          message.content
+                        }
                       </div>
 
 
-                      {message.role ===
-                        "assistant" &&
-                        !message.isStreaming &&
-                        (
-                          message.stats ||
-                          message.stopped
-                        ) && (
-                          <div className="generation-stats">
-                            {message.stopped && (
-                              <span className="generation-stopped">
-                                ■ Stopped
-                              </span>
-                            )}
+                      {message.stopped && (
+                        <div className="generation-stats">
+                          <span className="generation-stopped">
+                            ■ Stopped
+                          </span>
+                        </div>
+                      )}
 
-                            {message.stats
-                              ?.tokensPerSecond !==
-                              null &&
-                              message.stats
-                                ?.tokensPerSecond !==
-                                undefined && (
-                                <span>
-                                  {message.stats
-                                    .tokensPerSecond
-                                    .toFixed(
-                                      1
-                                    )}
-                                  {" "}tok/s
-                                </span>
-                              )}
 
-                            {message.stats
-                              ?.timeToFirstTokenMs !==
-                              null &&
-                              message.stats
-                                ?.timeToFirstTokenMs !==
-                                undefined && (
-                                <span>
-                                  First token{" "}
-                                  {formatDuration(
-                                    message.stats
-                                      .timeToFirstTokenMs
-                                  )}
-                                </span>
-                              )}
+                      {message.stats && (
+                        <div className="generation-stats">
+                          {message.stats
+                            .tokensPerSecond
+                            !== null && (
+                            <span>
+                              {
+                                message.stats
+                                  .tokensPerSecond
+                                  .toFixed(1)
+                              }{" "}
+                              tok/s
+                            </span>
+                          )}
 
-                            {message.stats
-                              ?.evalCount !==
-                              null &&
-                              message.stats
-                                ?.evalCount !==
-                                undefined && (
-                                <span>
-                                  {
-                                    message.stats
-                                      .evalCount
-                                  }{" "}
-                                  output tokens
-                                </span>
-                              )}
+                          {message.stats
+                            .timeToFirstTokenMs
+                            !== null && (
+                            <span>
+                              First token{" "}
+                              {
+                                formatDuration(
+                                  message.stats
+                                    .timeToFirstTokenMs
+                                )
+                              }
+                            </span>
+                          )}
 
-                            {message.stats
-                              ?.promptEvalCount !==
-                              null &&
-                              message.stats
-                                ?.promptEvalCount !==
-                                undefined && (
-                                <span>
-                                  {
-                                    message.stats
-                                      .promptEvalCount
-                                  }{" "}
-                                  prompt tokens
-                                </span>
-                              )}
+                          {message.stats
+                            .evalCount
+                            !== null && (
+                            <span>
+                              {
+                                message.stats
+                                  .evalCount
+                              }{" "}
+                              output tokens
+                            </span>
+                          )}
 
-                            {message.stats
-                              ?.totalDurationMs !==
-                              null &&
-                              message.stats
-                                ?.totalDurationMs !==
-                                undefined && (
-                                <span>
-                                  Total{" "}
-                                  {formatDuration(
-                                    message.stats
-                                      .totalDurationMs
-                                  )}
-                                </span>
-                              )}
+                          {message.stats
+                            .promptEvalCount
+                            !== null && (
+                            <span>
+                              {
+                                message.stats
+                                  .promptEvalCount
+                              }{" "}
+                              prompt tokens
+                            </span>
+                          )}
 
-                            {message.stats
-                              ?.loadDurationMs !==
-                              null &&
-                              message.stats
-                                ?.loadDurationMs !==
-                                undefined &&
-                              message.stats
-                                .loadDurationMs >
-                                100 && (
-                                <span
-                                  title="Time Ollama spent loading the model"
-                                >
-                                  Load{" "}
-                                  {formatDuration(
-                                    message.stats
-                                      .loadDurationMs
-                                  )}
-                                </span>
-                              )}
-                          </div>
-                        )}
+                          {message.stats
+                            .totalDurationMs
+                            !== null && (
+                            <span>
+                              Total{" "}
+                              {
+                                formatDuration(
+                                  message.stats
+                                    .totalDurationMs
+                                )
+                              }
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </article>
                 )
@@ -1252,26 +1632,21 @@ function App() {
               onChange={
                 (event) =>
                   setInput(
-                    event.target
-                      .value
+                    event.target.value
                   )
               }
               onKeyDown={
                 handleKeyDown
               }
               placeholder={
-                connectionState ===
-                "online"
-                  ? (
-                      isGenerating
-                        ? "Jace is responding..."
-                        : "Message Jace..."
-                    )
-                  : "Waiting for Jace..."
+                isGenerating
+                  ? "Jace is responding..."
+                  : "Message Jace..."
               }
               disabled={
-                connectionState !==
-                "online" ||
+                connectionState
+                !== "online"
+                ||
                 isGenerating
               }
               rows={1}
@@ -1294,12 +1669,10 @@ function App() {
                 type="submit"
                 className="send-button"
                 disabled={
-                  !input.trim() ||
-                  connectionState !==
-                    "online" ||
+                  !input.trim()
+                  ||
                   !selectedModel
                 }
-                title="Send"
               >
                 ↑
               </button>
@@ -1315,8 +1688,9 @@ function App() {
             </span>
 
             <span>
-              {selectedModel ||
-                "No model selected"}
+              {
+                selectedModel
+              }
             </span>
           </div>
         </div>

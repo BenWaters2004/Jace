@@ -3,3 +3,5 @@ uvicorn[standard]
 httpx
 pydantic
 pydantic-settings
+sqlalchemy>=2.0,<3.0
+aiosqlite
