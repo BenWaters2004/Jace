@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+backend/.venv/
+.venv/
+.pytest_cache/
+
+# Local configuration / secrets
+backend/.env
+.env
+.env.*
+!.env.example
+
+# Jace private local data
+/data/*
+!/data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+
+# Node / Vite / Tauri
+node_modules/
+dist/
+apps/desktop/src-tauri/target/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

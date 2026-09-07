@@ -1,317 +1,123 @@
+import { API_BASE_URL } from "./constants";
 import type {
+  AssistantSettings,
+  AssistantSettingsUpdate,
   ChatRequest,
   ChatStreamEvent,
-  ConversationCreateRequest,
   ConversationDetail,
   ConversationListResponse,
-  ConversationUpdateRequest,
   HealthResponse,
+  MemoryCreateRequest,
+  MemoryListResponse,
+  MemoryRecord,
+  MemoryUpdateRequest,
   ModelsResponse,
+  StreamContextEvent,
   StreamDoneEvent,
 } from "./types";
 
-
-const API_BASE_URL =
-  "http://127.0.0.1:8000";
-
-
-async function getErrorMessage(
-  response: Response,
-): Promise<string> {
+async function getErrorMessage(response: Response): Promise<string> {
   try {
-    const body =
-      await response.json();
-
-    if (
-      typeof body?.detail ===
-      "string"
-    ) {
-      return body.detail;
-    }
+    const body = await response.json();
+    if (typeof body?.detail === "string") return body.detail;
+    if (typeof body?.message === "string") return body.message;
   } catch {
-    // Use HTTP status below.
+    // Fall back to the HTTP status.
   }
-
-  return (
-    `${response.status} ` +
-    response.statusText
-  );
+  return `${response.status} ${response.statusText}`;
 }
 
-
-async function request<T>(
-  path: string,
-  options?: RequestInit,
-): Promise<T> {
-  const response =
-    await fetch(
-      `${API_BASE_URL}${path}`,
-      {
-        ...options,
-
-        headers: {
-          "Content-Type":
-            "application/json",
-
-          ...(options?.headers ??
-            {}),
-        },
-      }
-    );
-
-  if (!response.ok) {
-    throw new Error(
-      await getErrorMessage(
-        response
-      )
-    );
-  }
-
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers ?? {}),
+    },
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response));
   return response.json() as Promise<T>;
 }
 
+export const getHealth = () => request<HealthResponse>("/health");
+export const getModels = () => request<ModelsResponse>("/models");
+export const getSettings = () => request<AssistantSettings>("/settings");
+export const resetSettings = () => request<AssistantSettings>("/settings/reset", { method: "POST" });
+export const updateSettings = (payload: AssistantSettingsUpdate) =>
+  request<AssistantSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) });
 
-export function getHealth():
-Promise<HealthResponse> {
-  return request<HealthResponse>(
-    "/health"
-  );
+export const getConversations = () => request<ConversationListResponse>("/conversations");
+export const getConversation = (id: string) => request<ConversationDetail>(`/conversations/${id}`);
+export const createConversation = (payload: { model?: string; system_prompt?: string }) =>
+  request<ConversationDetail>("/conversations", { method: "POST", body: JSON.stringify(payload) });
+export const updateConversation = (id: string, payload: { title?: string; model?: string; system_prompt?: string }) =>
+  request<ConversationDetail>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export async function deleteConversation(id: string): Promise<void> {
+  await request(`/conversations/${id}`, { method: "DELETE" });
 }
 
-
-export function getModels():
-Promise<ModelsResponse> {
-  return request<ModelsResponse>(
-    "/models"
-  );
+export function getMemories(activeOnly = false): Promise<MemoryListResponse> {
+  return request<MemoryListResponse>(`/memories?active_only=${activeOnly ? "true" : "false"}`);
 }
-
-
-export function getConversations():
-Promise<ConversationListResponse> {
-  return request<
-    ConversationListResponse
-  >(
-    "/conversations"
-  );
+export const createMemory = (payload: MemoryCreateRequest) =>
+  request<MemoryRecord>("/memories", { method: "POST", body: JSON.stringify(payload) });
+export const updateMemory = (id: string, payload: MemoryUpdateRequest) =>
+  request<MemoryRecord>(`/memories/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export async function deleteMemory(id: string): Promise<void> {
+  await request(`/memories/${id}`, { method: "DELETE" });
 }
-
-
-export function getConversation(
-  id: string,
-):
-Promise<ConversationDetail> {
-  return request<
-    ConversationDetail
-  >(
-    `/conversations/${id}`
-  );
-}
-
-
-export function createConversation(
-  payload:
-    ConversationCreateRequest,
-):
-Promise<ConversationDetail> {
-  return request<
-    ConversationDetail
-  >(
-    "/conversations",
-    {
-      method: "POST",
-
-      body:
-        JSON.stringify(
-          payload
-        ),
-    }
-  );
-}
-
-
-export function updateConversation(
-  id: string,
-  payload:
-    ConversationUpdateRequest,
-):
-Promise<ConversationDetail> {
-  return request<
-    ConversationDetail
-  >(
-    `/conversations/${id}`,
-    {
-      method: "PATCH",
-
-      body:
-        JSON.stringify(
-          payload
-        ),
-    }
-  );
-}
-
-
-export async function deleteConversation(
-  id: string,
-): Promise<void> {
-  await request(
-    `/conversations/${id}`,
-    {
-      method: "DELETE",
-    }
-  );
-}
-
 
 interface StreamCallbacks {
-  onToken: (
-    content: string,
-  ) => void;
-
-  onDone: (
-    event: StreamDoneEvent,
-  ) => void;
+  onContext?: (event: StreamContextEvent) => void;
+  onToken: (content: string) => void;
+  onDone: (event: StreamDoneEvent) => void;
 }
-
 
 export async function sendChatStream(
   payload: ChatRequest,
   callbacks: StreamCallbacks,
   signal: AbortSignal,
 ): Promise<void> {
-  const response =
-    await fetch(
-      `${API_BASE_URL}/chat/stream`,
-      {
-        method: "POST",
+  const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response));
+  if (!response.body) throw new Error("The Jace backend did not provide a response stream.");
 
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-
-        body:
-          JSON.stringify(
-            payload
-          ),
-
-        signal,
-      }
-    );
-
-
-  if (!response.ok) {
-    throw new Error(
-      await getErrorMessage(
-        response
-      )
-    );
-  }
-
-
-  if (!response.body) {
-    throw new Error(
-      "The Jace backend did not provide a response stream."
-    );
-  }
-
-
-  const reader =
-    response.body.getReader();
-
-  const decoder =
-    new TextDecoder();
-
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
   let buffer = "";
 
-
-  function processLine(
-    line: string,
-  ) {
-    const trimmed =
-      line.trim();
-
-    if (!trimmed) {
-      return;
+  function processLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let event: ChatStreamEvent;
+    try {
+      event = JSON.parse(trimmed) as ChatStreamEvent;
+    } catch {
+      throw new Error("Jace received malformed streaming data.");
     }
 
-    const event:
-      ChatStreamEvent =
-        JSON.parse(
-          trimmed
-        );
-
-
-    switch (event.type) {
-      case "token":
-        callbacks.onToken(
-          event.content
-        );
-
-        break;
-
-
-      case "done":
-        callbacks.onDone(
-          event
-        );
-
-        break;
-
-
-      case "error":
-        throw new Error(
-          event.message
-        );
-    }
+    if (event.type === "context") callbacks.onContext?.(event);
+    else if (event.type === "token") callbacks.onToken(event.content);
+    else if (event.type === "done") callbacks.onDone(event);
+    else if (event.type === "error") throw new Error(event.message);
   }
-
 
   try {
     while (true) {
-      const {
-        done,
-        value,
-      } =
-        await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      buffer +=
-        decoder.decode(
-          value,
-          {
-            stream: true,
-          }
-        );
-
-      const lines =
-        buffer.split("\n");
-
-      buffer =
-        lines.pop() ?? "";
-
-      for (
-        const line
-        of lines
-      ) {
-        processLine(
-          line
-        );
-      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) processLine(line);
     }
-
-    buffer +=
-      decoder.decode();
-
-    if (buffer.trim()) {
-      processLine(
-        buffer
-      );
-    }
+    buffer += decoder.decode();
+    if (buffer.trim()) processLine(buffer);
   } finally {
     reader.releaseLock();
   }

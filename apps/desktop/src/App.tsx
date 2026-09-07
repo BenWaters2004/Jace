@@ -1,1703 +1,474 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-
-import type {
-  FormEvent,
-  KeyboardEvent,
-} from "react";
-
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import {
   createConversation,
+  createMemory,
   deleteConversation,
+  deleteMemory,
   getConversation,
   getConversations,
   getHealth,
+  getMemories,
   getModels,
+  getSettings,
+  resetSettings,
   sendChatStream,
   updateConversation,
+  updateMemory,
+  updateSettings,
 } from "./api";
-
+import { ChatView } from "./components/ChatView";
+import { MemoryView } from "./components/MemoryView";
+import { SettingsView } from "./components/SettingsView";
+import { Sidebar } from "./components/Sidebar";
 import type {
   ApiGenerationStats,
+  AssistantSettings,
   ChatMessage,
   ConversationDetail,
   ConversationSummary,
   GenerationStats,
+  HealthResponse,
+  MemoryCreateRequest,
+  MemoryRecord,
+  MemoryUpdateRequest,
   ModelInfo,
+  ReasoningMode,
+  Screen,
   StreamDoneEvent,
 } from "./types";
-
 import "./styles.css";
 
+type ConnectionState = "checking" | "online" | "backend-offline" | "ollama-offline";
 
-type ConnectionState =
-  | "checking"
-  | "online"
-  | "backend-offline"
-  | "ollama-offline";
+function localMessage(role: "user" | "assistant", content: string): ChatMessage {
+  return { id: crypto.randomUUID(), role, content };
+}
 
-
-const DEFAULT_SYSTEM_PROMPT = `You are Jace, a personal AI assistant running locally on the user's computer.
-
-Your role:
-- Help the user think, research, create, solve problems and manage information.
-- Be useful, accurate and clear.
-- Prefer practical answers over unnecessary verbosity.
-- Clearly distinguish known facts from assumptions or uncertainty.
-- Do not claim to have performed actions that you have not actually performed.
-- Do not claim to have access to tools, files, memory, websites or services unless they have actually been provided to you.
-- Respect the user's privacy and control over their data.
-
-You are the beginning of a larger personal AI system. Your capabilities will expand over time through explicitly provided tools and memory.`;
-
-
-function createLocalMessage(
-  role:
-    "user" | "assistant",
-  content: string,
-): ChatMessage {
+function mapStats(stats: ApiGenerationStats | null): GenerationStats | undefined {
+  if (!stats) return undefined;
   return {
-    id:
-      crypto.randomUUID(),
-
-    role,
-    content,
+    timeToFirstTokenMs: stats.time_to_first_token_ms,
+    totalDurationMs: stats.total_duration_ms,
+    loadDurationMs: stats.load_duration_ms,
+    promptEvalCount: stats.prompt_eval_count,
+    promptEvalCachedCount: stats.prompt_eval_cached_count,
+    promptEvalDurationMs: stats.prompt_eval_duration_ms,
+    evalCount: stats.eval_count,
+    evalDurationMs: stats.eval_duration_ms,
+    tokensPerSecond: stats.tokens_per_second,
   };
 }
 
-
-function mapStats(
-  stats:
-    ApiGenerationStats | null,
-):
-GenerationStats | undefined {
-  if (!stats) {
-    return undefined;
-  }
-
-  return {
-    timeToFirstTokenMs:
-      stats.time_to_first_token_ms,
-
-    totalDurationMs:
-      stats.total_duration_ms,
-
-    loadDurationMs:
-      stats.load_duration_ms,
-
-    promptEvalCount:
-      stats.prompt_eval_count,
-
-    promptEvalCachedCount:
-      stats.prompt_eval_cached_count,
-
-    promptEvalDurationMs:
-      stats.prompt_eval_duration_ms,
-
-    evalCount:
-      stats.eval_count,
-
-    evalDurationMs:
-      stats.eval_duration_ms,
-
-    tokensPerSecond:
-      stats.tokens_per_second,
-  };
+function mapMessages(conversation: ConversationDetail): ChatMessage[] {
+  return conversation.messages.map((message) => ({
+    id: message.id,
+    conversation_id: message.conversation_id,
+    role: message.role,
+    content: message.content,
+    status: message.status,
+    model: message.model,
+    created_at: message.created_at,
+    stopped: message.status === "stopped",
+    stats: mapStats(message.stats),
+  }));
 }
 
+export default function App() {
+  const [screen, setScreen] = useState<Screen>("chat");
+  const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [settings, setSettings] = useState<AssistantSettings | null>(null);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [conversationPrompt, setConversationPrompt] = useState("");
+  const [reasoningMode, setReasoningMode] = useState<ReasoningMode>("fast");
+  const [input, setInput] = useState("");
+  const [conversationSearch, setConversationSearch] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [memoryContextCount, setMemoryContextCount] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
 
-function mapConversationMessages(
-  conversation:
-    ConversationDetail,
-): ChatMessage[] {
-  return (
-    conversation.messages.map(
-      (message) => ({
-        id:
-          message.id,
-
-        conversation_id:
-          message.conversation_id,
-
-        role:
-          message.role,
-
-        content:
-          message.content,
-
-        status:
-          message.status,
-
-        model:
-          message.model,
-
-        created_at:
-          message.created_at,
-
-        stopped:
-          message.status
-          === "stopped",
-
-        stats:
-          mapStats(
-            message.stats
-          ),
-      })
-    )
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
+    [conversations, activeConversationId],
   );
-}
 
+  const refreshConversations = useCallback(async () => {
+    const response = await getConversations();
+    setConversations(response.conversations);
+    return response.conversations;
+  }, []);
 
-function formatBytes(
-  bytes:
-    number | null,
-): string {
-  if (!bytes) {
-    return "";
-  }
+  const refreshMemories = useCallback(async () => {
+    const response = await getMemories(false);
+    setMemories(response.memories);
+    return response.memories;
+  }, []);
 
-  const gigabytes =
-    bytes /
-    1024 /
-    1024 /
-    1024;
+  const loadConversation = useCallback(async (id: string) => {
+    if (isGenerating) return;
+    try {
+      const conversation = await getConversation(id);
+      setActiveConversationId(conversation.id);
+      setMessages(mapMessages(conversation));
+      setSelectedModel(conversation.model);
+      setConversationPrompt(conversation.system_prompt);
+      setMemoryContextCount(0);
+      setError(null);
+      setScreen("chat");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load conversation.");
+    }
+  }, [isGenerating]);
 
-  return (
-    `${gigabytes.toFixed(1)} GB`
-  );
-}
+  const initialise = useCallback(async () => {
+    setConnectionState("checking");
+    setError(null);
+    try {
+      const currentHealth = await getHealth();
+      setHealth(currentHealth);
+      const [profile, conversationResponse, memoryResponse] = await Promise.all([
+        getSettings(),
+        getConversations(),
+        getMemories(false),
+      ]);
+      setSettings(profile);
+      setReasoningMode(profile.reasoning_mode);
+      setSelectedModel(profile.default_model);
+      setConversationPrompt(profile.system_prompt);
+      setConversations(conversationResponse.conversations);
+      setMemories(memoryResponse.memories);
 
-
-function formatDuration(
-  milliseconds:
-    number | null,
-): string {
-  if (
-    milliseconds === null
-    ||
-    milliseconds === undefined
-  ) {
-    return "—";
-  }
-
-  if (
-    milliseconds < 1000
-  ) {
-    return (
-      `${Math.round(
-        milliseconds
-      )} ms`
-    );
-  }
-
-  return (
-    `${(
-      milliseconds / 1000
-    ).toFixed(1)} s`
-  );
-}
-
-
-function formatConversationDate(
-  date: string,
-): string {
-  const value =
-    new Date(date);
-
-  const today =
-    new Date();
-
-  if (
-    value.toDateString()
-    === today.toDateString()
-  ) {
-    return value.toLocaleTimeString(
-      [],
-      {
-        hour: "2-digit",
-        minute: "2-digit",
+      if (!currentHealth.ollama_connected) {
+        setConnectionState("ollama-offline");
+        return;
       }
-    );
-  }
 
-  return value.toLocaleDateString(
-    [],
-    {
-      day: "2-digit",
-      month: "short",
+      const modelResponse = await getModels();
+      setModels(modelResponse.models);
+      setConnectionState("online");
+
+      if (conversationResponse.conversations.length > 0) {
+        const latest = await getConversation(conversationResponse.conversations[0].id);
+        setActiveConversationId(latest.id);
+        setMessages(mapMessages(latest));
+        setSelectedModel(latest.model);
+        setConversationPrompt(latest.system_prompt);
+      }
+    } catch (initialiseError) {
+      setConnectionState("backend-offline");
+      setError(initialiseError instanceof Error ? initialiseError.message : "Could not initialise Jace.");
     }
-  );
-}
+  }, []);
 
+  useEffect(() => { void initialise(); }, [initialise]);
 
-function App() {
-  const [
-    messages,
-    setMessages,
-  ] =
-    useState<ChatMessage[]>(
-      []
-    );
-
-  const [
-    input,
-    setInput,
-  ] =
-    useState("");
-
-  const [
-    models,
-    setModels,
-  ] =
-    useState<ModelInfo[]>(
-      []
-    );
-
-  const [
-    selectedModel,
-    setSelectedModel,
-  ] =
-    useState("");
-
-  const [
-    defaultModel,
-    setDefaultModel,
-  ] =
-    useState("");
-
-  const [
-    systemPrompt,
-    setSystemPrompt,
-  ] =
-    useState(
-      DEFAULT_SYSTEM_PROMPT
-    );
-
-  const [
-    conversations,
-    setConversations,
-  ] =
-    useState<
-      ConversationSummary[]
-    >([]);
-
-  const [
-    activeConversationId,
-    setActiveConversationId,
-  ] =
-    useState<
-      string | null
-    >(null);
-
-  const [
-    search,
-    setSearch,
-  ] =
-    useState("");
-
-  const [
-    connectionState,
-    setConnectionState,
-  ] =
-    useState<ConnectionState>(
-      "checking"
-    );
-
-  const [
-    error,
-    setError,
-  ] =
-    useState<
-      string | null
-    >(null);
-
-  const [
-    isGenerating,
-    setIsGenerating,
-  ] =
-    useState(false);
-
-
-  const messagesEndRef =
-    useRef<
-      HTMLDivElement | null
-    >(null);
-
-  const inputRef =
-    useRef<
-      HTMLTextAreaElement | null
-    >(null);
-
-  const abortControllerRef =
-    useRef<
-      AbortController | null
-    >(null);
-
-
-  const filteredConversations =
-    useMemo(
-      () => {
-        const value =
-          search
-            .trim()
-            .toLowerCase();
-
-        if (!value) {
-          return conversations;
-        }
-
-        return conversations.filter(
-          (conversation) =>
-            conversation.title
-              .toLowerCase()
-              .includes(value)
-        );
-      },
-      [
-        conversations,
-        search,
-      ]
-    );
-
-
-  const refreshConversations =
-    useCallback(
-      async () => {
-        const response =
-          await getConversations();
-
-        setConversations(
-          response.conversations
-        );
-
-        return (
-          response.conversations
-        );
-      },
-      []
-    );
-
-
-  const loadConversation =
-    useCallback(
-      async (
-        conversationId: string,
-      ) => {
-        try {
-          const conversation =
-            await getConversation(
-              conversationId
-            );
-
-          setActiveConversationId(
-            conversation.id
-          );
-
-          setMessages(
-            mapConversationMessages(
-              conversation
-            )
-          );
-
-          setSystemPrompt(
-            conversation.system_prompt
-            ||
-            DEFAULT_SYSTEM_PROMPT
-          );
-
-          setSelectedModel(
-            conversation.model
-          );
-
-          setError(null);
-        } catch (
-          loadError
-        ) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Could not load conversation."
-          );
-        }
-      },
-      []
-    );
-
-
-  const initialise =
-    useCallback(
-      async () => {
-        setConnectionState(
-          "checking"
-        );
-
-        try {
-          const [
-            health,
-            modelResponse,
-            conversationResponse,
-          ] =
-            await Promise.all([
-              getHealth(),
-              getModels(),
-              getConversations(),
-            ]);
-
-
-          if (
-            !health.ollama_connected
-          ) {
-            setConnectionState(
-              "ollama-offline"
-            );
-
-            return;
-          }
-
-
-          setModels(
-            modelResponse.models
-          );
-
-          setDefaultModel(
-            health.default_model
-          );
-
-          setSelectedModel(
-            health.default_model
-          );
-
-          setConversations(
-            conversationResponse
-              .conversations
-          );
-
-          setConnectionState(
-            "online"
-          );
-
-
-          if (
-            conversationResponse
-              .conversations
-              .length > 0
-          ) {
-            await loadConversation(
-              conversationResponse
-                .conversations[0]
-                .id
-            );
-          }
-        } catch (
-          initialiseError
-        ) {
-          setConnectionState(
-            "backend-offline"
-          );
-
-          setError(
-            initialiseError
-              instanceof Error
-              ? initialiseError
-                  .message
-              : "Could not initialise Jace."
-          );
-        }
-      },
-      [
-        loadConversation,
-      ]
-    );
-
-
-  useEffect(() => {
-    void initialise();
-  }, [
-    initialise,
-  ]);
-
-
-  useEffect(() => {
-    messagesEndRef.current
-      ?.scrollIntoView({
-        behavior:
-          "smooth",
-      });
-  }, [
-    messages,
-  ]);
-
-
-  async function ensureConversation():
-  Promise<string> {
-    if (
-      activeConversationId
-    ) {
-      return (
-        activeConversationId
-      );
-    }
-
-    const conversation =
-      await createConversation(
-        {
-          model:
-            selectedModel,
-
-          system_prompt:
-            systemPrompt,
-        }
-      );
-
-    setActiveConversationId(
-      conversation.id
-    );
-
+  async function ensureConversation(): Promise<string> {
+    if (activeConversationId) return activeConversationId;
+    if (!settings) throw new Error("Jace settings are not available yet.");
+    const conversation = await createConversation({
+      model: selectedModel || settings.default_model,
+      system_prompt: conversationPrompt || settings.system_prompt,
+    });
+    setActiveConversationId(conversation.id);
     await refreshConversations();
-
     return conversation.id;
   }
 
-
-  function updateAssistantMessage(
-    assistantId: string,
-    updater: (
-      message: ChatMessage,
-    ) => ChatMessage,
-  ) {
-    setMessages(
-      (currentMessages) =>
-        currentMessages.map(
-          (message) =>
-            message.id ===
-            assistantId
-              ? updater(
-                  message
-                )
-              : message
-        )
-    );
+  function updateAssistant(id: string, updater: (message: ChatMessage) => ChatMessage) {
+    setMessages((current) => current.map((message) => message.id === id ? updater(message) : message));
   }
 
-
-  async function handleSubmit(
-    event?:
-      FormEvent<HTMLFormElement>,
-  ) {
+  async function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    const text = input.trim();
+    if (!text || isGenerating || connectionState !== "online" || !settings || !selectedModel) return;
 
-    const text =
-      input.trim();
-
-    if (
-      !text
-      ||
-      isGenerating
-      ||
-      connectionState
-        !== "online"
-      ||
-      !selectedModel
-    ) {
-      return;
-    }
-
-
-    let conversationId:
-      string;
-
+    let conversationId: string;
     try {
-      conversationId =
-        await ensureConversation();
-    } catch (
-      conversationError
-    ) {
-      setError(
-        conversationError
-          instanceof Error
-          ? conversationError
-              .message
-          : "Could not create conversation."
-      );
-
+      conversationId = await ensureConversation();
+    } catch (conversationError) {
+      setError(conversationError instanceof Error ? conversationError.message : "Could not create conversation.");
       return;
     }
 
-
-    const userMessage =
-      createLocalMessage(
-        "user",
-        text
-      );
-
-    const assistantMessage:
-      ChatMessage = {
-        ...createLocalMessage(
-          "assistant",
-          ""
-        ),
-
-        isStreaming:
-          true,
-      };
-
-
-    setMessages(
-      (current) => [
-        ...current,
-        userMessage,
-        assistantMessage,
-      ]
-    );
-
+    const user = localMessage("user", text);
+    const assistant: ChatMessage = { ...localMessage("assistant", ""), isStreaming: true };
+    setMessages((current) => [...current, user, assistant]);
     setInput("");
-
     setError(null);
+    setMemoryContextCount(0);
+    setIsGenerating(true);
 
-    setIsGenerating(
-      true
-    );
-
-
-    const controller =
-      new AbortController();
-
-    abortControllerRef.current =
-      controller;
-
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       await sendChatStream(
         {
-          conversation_id:
-            conversationId,
-
-          message:
-            text,
-
-          model:
-            selectedModel,
-
-          system_prompt:
-            systemPrompt,
+          conversation_id: conversationId,
+          message: text,
+          model: selectedModel,
+          system_prompt: conversationPrompt,
+          reasoning_mode: reasoningMode,
+          temperature: settings.temperature,
         },
-
         {
-          onToken:
-            (content) => {
-              updateAssistantMessage(
-                assistantMessage.id,
-
-                (message) => ({
-                  ...message,
-
-                  content:
-                    message.content
-                    + content,
-                })
-              );
+          onContext: (context) => setMemoryContextCount(context.memory_count),
+          onToken: (content) => updateAssistant(assistant.id, (message) => ({ ...message, content: message.content + content })),
+          onDone: (done: StreamDoneEvent) => updateAssistant(assistant.id, (message) => ({
+            ...message,
+            isStreaming: false,
+            stats: {
+              timeToFirstTokenMs: done.metrics.time_to_first_token_ms,
+              totalDurationMs: done.metrics.total_duration_ms,
+              loadDurationMs: done.metrics.load_duration_ms,
+              promptEvalCount: done.metrics.prompt_eval_count,
+              promptEvalCachedCount: done.metrics.prompt_eval_cached_count,
+              promptEvalDurationMs: done.metrics.prompt_eval_duration_ms,
+              evalCount: done.metrics.eval_count,
+              evalDurationMs: done.metrics.eval_duration_ms,
+              tokensPerSecond: done.metrics.tokens_per_second,
             },
-
-
-          onDone:
-            (
-              event:
-                StreamDoneEvent,
-            ) => {
-              updateAssistantMessage(
-                assistantMessage.id,
-
-                (message) => ({
-                  ...message,
-
-                  isStreaming:
-                    false,
-
-                  stats: {
-                    timeToFirstTokenMs:
-                      event.metrics
-                        .time_to_first_token_ms,
-
-                    totalDurationMs:
-                      event.metrics
-                        .total_duration_ms,
-
-                    loadDurationMs:
-                      event.metrics
-                        .load_duration_ms,
-
-                    promptEvalCount:
-                      event.metrics
-                        .prompt_eval_count,
-
-                    promptEvalCachedCount:
-                      event.metrics
-                        .prompt_eval_cached_count,
-
-                    promptEvalDurationMs:
-                      event.metrics
-                        .prompt_eval_duration_ms,
-
-                    evalCount:
-                      event.metrics
-                        .eval_count,
-
-                    evalDurationMs:
-                      event.metrics
-                        .eval_duration_ms,
-
-                    tokensPerSecond:
-                      event.metrics
-                        .tokens_per_second,
-                  },
-                })
-              );
-            },
+          })),
         },
-
-        controller.signal
+        controller.signal,
       );
-
-
       await refreshConversations();
+      const saved = await getConversation(conversationId);
+      setMessages(mapMessages(saved));
+      setSelectedModel(saved.model);
+      setConversationPrompt(saved.system_prompt);
 
-      await loadConversation(
-        conversationId
-      );
-    } catch (
-      chatError
-    ) {
-      if (
-        controller.signal
-          .aborted
-      ) {
-        updateAssistantMessage(
-          assistantMessage.id,
-
-          (message) => ({
-            ...message,
-
-            isStreaming:
-              false,
-
-            stopped:
-              true,
-          })
-        );
-
-        await refreshConversations();
+      // Extraction is intentionally asynchronous; refresh once shortly after the main response.
+      window.setTimeout(() => { void refreshMemories(); }, 1200);
+    } catch (chatError) {
+      if (controller.signal.aborted) {
+        updateAssistant(assistant.id, (message) => ({ ...message, isStreaming: false, stopped: true }));
       } else {
-        updateAssistantMessage(
-          assistantMessage.id,
-
-          (message) => ({
-            ...message,
-
-            isStreaming:
-              false,
-          })
-        );
-
-        setError(
-          chatError
-            instanceof Error
-            ? chatError.message
-            : "Jace could not generate a response."
-        );
+        updateAssistant(assistant.id, (message) => ({ ...message, isStreaming: false }));
+        setError(chatError instanceof Error ? chatError.message : "Jace could not generate a response.");
       }
     } finally {
-      abortControllerRef.current =
-        null;
-
-      setIsGenerating(
-        false
-      );
+      abortRef.current = null;
+      setIsGenerating(false);
     }
   }
 
-
-  function stopGeneration() {
-    abortControllerRef.current
-      ?.abort();
-  }
-
-
-  function handleKeyDown(
-    event:
-      KeyboardEvent<
-        HTMLTextAreaElement
-      >,
-  ) {
-    if (
-      event.key === "Enter"
-      &&
-      !event.shiftKey
-    ) {
-      event.preventDefault();
-
-      void handleSubmit();
-    }
-  }
-
-
-  function handleNewChat() {
-    if (isGenerating) {
-      return;
-    }
-
-    setActiveConversationId(
-      null
-    );
-
+  function newChat() {
+    if (isGenerating || !settings) return;
+    setActiveConversationId(null);
     setMessages([]);
-
     setInput("");
-
-    setSearch("");
-
-    setSystemPrompt(
-      DEFAULT_SYSTEM_PROMPT
-    );
-
-    setSelectedModel(
-      defaultModel
-      ||
-      models[0]?.name
-      ||
-      ""
-    );
-
+    setConversationSearch("");
+    setSelectedModel(settings.default_model);
+    setConversationPrompt(settings.system_prompt);
+    setReasoningMode(settings.reasoning_mode);
+    setMemoryContextCount(0);
     setError(null);
-
-    window.setTimeout(
-      () =>
-        inputRef.current
-          ?.focus(),
-      0
-    );
+    setScreen("chat");
   }
 
-
-  async function handleRename(
-    conversation:
-      ConversationSummary,
-  ) {
-    if (isGenerating) {
-      return;
-    }
-
-    const title =
-      window.prompt(
-        "Rename conversation",
-        conversation.title
-      );
-
-    if (
-      title === null
-      ||
-      !title.trim()
-    ) {
-      return;
-    }
-
+  async function renameConversation(conversation: ConversationSummary) {
+    if (isGenerating) return;
+    const title = window.prompt("Rename conversation", conversation.title);
+    if (!title?.trim()) return;
     try {
-      await updateConversation(
-        conversation.id,
-        {
-          title:
-            title.trim(),
-        }
-      );
-
+      await updateConversation(conversation.id, { title: title.trim() });
       await refreshConversations();
-    } catch (
-      renameError
-    ) {
-      setError(
-        renameError
-          instanceof Error
-          ? renameError.message
-          : "Could not rename conversation."
-      );
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : "Could not rename conversation.");
     }
   }
 
-
-  async function handleDelete(
-    conversation:
-      ConversationSummary,
-  ) {
-    if (isGenerating) {
-      return;
-    }
-
-    const confirmed =
-      window.confirm(
-        `Delete "${conversation.title}"?`
-      );
-
-    if (!confirmed) {
-      return;
-    }
-
+  async function removeConversation(conversation: ConversationSummary) {
+    if (isGenerating || !window.confirm(`Delete "${conversation.title}"?`)) return;
     try {
-      await deleteConversation(
-        conversation.id
-      );
-
-      const remaining =
-        await refreshConversations();
-
-
-      if (
-        activeConversationId
-        === conversation.id
-      ) {
-        if (
-          remaining.length
-          > 0
-        ) {
-          await loadConversation(
-            remaining[0].id
-          );
-        } else {
-          handleNewChat();
-        }
+      await deleteConversation(conversation.id);
+      const remaining = await refreshConversations();
+      if (activeConversationId === conversation.id) {
+        if (remaining.length) await loadConversation(remaining[0].id);
+        else newChat();
       }
-    } catch (
-      deleteError
-    ) {
-      setError(
-        deleteError
-          instanceof Error
-          ? deleteError.message
-          : "Could not delete conversation."
-      );
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Could not delete conversation.");
     }
   }
 
-
-  async function handleModelChange(
-    model: string,
-  ) {
-    setSelectedModel(
-      model
-    );
-
-    if (
-      !activeConversationId
-    ) {
-      return;
-    }
-
+  async function changeModel(model: string) {
+    setSelectedModel(model);
+    if (!activeConversationId) return;
     try {
-      await updateConversation(
-        activeConversationId,
-        {
-          model,
-        }
-      );
-
+      await updateConversation(activeConversationId, { model });
       await refreshConversations();
-    } catch (
-      updateError
-    ) {
-      setError(
-        updateError
-          instanceof Error
-          ? updateError.message
-          : "Could not update model."
-      );
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Could not update the conversation model.");
     }
   }
 
-
-  async function saveSystemPrompt() {
-    if (
-      !activeConversationId
-    ) {
-      return;
+  async function saveSettings(next: AssistantSettings) {
+    const updated = await updateSettings({
+      assistant_name: next.assistant_name,
+      user_name: next.user_name,
+      system_prompt: next.system_prompt,
+      default_model: next.default_model,
+      reasoning_mode: next.reasoning_mode,
+      response_style: next.response_style,
+      temperature: next.temperature,
+      memory_enabled: next.memory_enabled,
+      memory_auto_extract: next.memory_auto_extract,
+      memory_top_k: next.memory_top_k,
+      memory_min_similarity: next.memory_min_similarity,
+    });
+    setSettings(updated);
+    if (!activeConversationId) {
+      setSelectedModel(updated.default_model);
+      setConversationPrompt(updated.system_prompt);
+      setReasoningMode(updated.reasoning_mode);
     }
+  }
 
+  async function resetProfile() {
+    const updated = await resetSettings();
+    setSettings(updated);
+    if (!activeConversationId) {
+      setSelectedModel(updated.default_model);
+      setConversationPrompt(updated.system_prompt);
+      setReasoningMode(updated.reasoning_mode);
+    }
+  }
+
+  async function applySettingsToCurrent() {
+    if (!settings || !activeConversationId) return;
+    await updateConversation(activeConversationId, {
+      model: settings.default_model,
+      system_prompt: settings.system_prompt,
+    });
+    setSelectedModel(settings.default_model);
+    setConversationPrompt(settings.system_prompt);
+    setReasoningMode(settings.reasoning_mode);
+    await refreshConversations();
+  }
+
+  async function addMemory(payload: MemoryCreateRequest) {
     try {
-      await updateConversation(
-        activeConversationId,
-        {
-          system_prompt:
-            systemPrompt,
-        }
-      );
-    } catch (
-      updateError
-    ) {
-      setError(
-        updateError
-          instanceof Error
-          ? updateError.message
-          : "Could not save Jace identity."
-      );
+      await createMemory(payload);
+      await refreshMemories();
+    } catch (memoryError) {
+      setError(memoryError instanceof Error ? memoryError.message : "Could not create memory.");
+      throw memoryError;
     }
   }
 
+  async function patchMemory(id: string, payload: MemoryUpdateRequest) {
+    try {
+      await updateMemory(id, payload);
+      await refreshMemories();
+    } catch (memoryError) {
+      setError(memoryError instanceof Error ? memoryError.message : "Could not update memory.");
+      throw memoryError;
+    }
+  }
+
+  async function removeMemory(memory: MemoryRecord) {
+    if (!window.confirm(`Permanently delete the memory "${memory.subject}"?\n\nDeactivate it instead if you may want the history later.`)) return;
+    try {
+      await deleteMemory(memory.id);
+      await refreshMemories();
+    } catch (memoryError) {
+      setError(memoryError instanceof Error ? memoryError.message : "Could not delete memory.");
+    }
+  }
+
+  function openMemorySource(conversationId: string) {
+    void loadConversation(conversationId);
+  }
+
+  if (!settings) {
+    return (
+      <main className="boot-screen">
+        <div className="welcome-mark">J</div>
+        <h1>Starting Jace</h1>
+        <p>{error ?? "Connecting to the local backend..."}</p>
+        {error && <button className="primary-button" onClick={() => void initialise()}>Retry</button>}
+      </main>
+    );
+  }
+
+  const activeMemoryCount = memories.filter((memory) => memory.is_active).length;
+  const title = activeConversation?.title ?? "New conversation";
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            J
-          </div>
-
-          <div>
-            <div className="brand-name">
-              Jace
-            </div>
-
-            <div className="brand-version">
-              v0.2.0
-            </div>
-          </div>
-        </div>
-
-
-        <button
-          className="new-chat-button"
-          onClick={
-            handleNewChat
-          }
-          disabled={
-            isGenerating
-          }
-        >
-          <span className="new-chat-icon">
-            +
-          </span>
-
-          New chat
-        </button>
-
-
-        <div className="conversation-search">
-          <input
-            type="text"
-            placeholder="Search conversations..."
-            value={
-              search
-            }
-            onChange={
-              (event) =>
-                setSearch(
-                  event.target.value
-                )
-            }
-          />
-        </div>
-
-
-        <div className="sidebar-section conversation-section">
-          <span className="sidebar-heading">
-            Conversations
-          </span>
-
-          <div className="conversation-list">
-            {filteredConversations
-              .length === 0 ? (
-              <div className="empty-history">
-                <p>
-                  No conversations
-                  yet.
-                </p>
-
-                <small>
-                  Start talking to
-                  Jace to create one.
-                </small>
-              </div>
-            ) : (
-              filteredConversations.map(
-                (conversation) => (
-                  <div
-                    key={
-                      conversation.id
-                    }
-                    className={
-                      "conversation-row"
-                      +
-                      (
-                        activeConversationId
-                        === conversation.id
-                          ? " active"
-                          : ""
-                      )
-                    }
-                  >
-                    <button
-                      className="conversation-select"
-                      onClick={
-                        () =>
-                          void loadConversation(
-                            conversation.id
-                          )
-                      }
-                      disabled={
-                        isGenerating
-                      }
-                    >
-                      <span className="conversation-title">
-                        {
-                          conversation.title
-                        }
-                      </span>
-
-                      <span className="conversation-meta">
-                        {
-                          conversation.message_count
-                        }{" "}
-                        messages ·{" "}
-                        {
-                          formatConversationDate(
-                            conversation.updated_at
-                          )
-                        }
-                      </span>
-                    </button>
-
-                    <div className="conversation-actions">
-                      <button
-                        title="Rename"
-                        onClick={
-                          () =>
-                            void handleRename(
-                              conversation
-                            )
-                        }
-                      >
-                        ✎
-                      </button>
-
-                      <button
-                        title="Delete"
-                        onClick={
-                          () =>
-                            void handleDelete(
-                              conversation
-                            )
-                        }
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                )
-              )
-            )}
-          </div>
-        </div>
-
-
-        <div className="sidebar-spacer" />
-
-
-        <div className="settings-panel">
-          <label className="field-label">
-            Model
-          </label>
-
-          <select
-            className="model-select"
-            value={
-              selectedModel
-            }
-            disabled={
-              isGenerating
-            }
-            onChange={
-              (event) =>
-                void handleModelChange(
-                  event.target.value
-                )
-            }
-          >
-            {models.map(
-              (model) => (
-                <option
-                  key={
-                    model.name
-                  }
-                  value={
-                    model.name
-                  }
-                >
-                  {
-                    model.name
-                  }
-
-                  {model.parameter_size
-                    ? ` · ${model.parameter_size}`
-                    : ""}
-                </option>
-              )
-            )}
-          </select>
-
-
-          {selectedModel && (
-            <div className="model-meta">
-              {(() => {
-                const model =
-                  models.find(
-                    (item) =>
-                      item.name
-                      === selectedModel
-                  );
-
-                if (!model) {
-                  return null;
-                }
-
-                return (
-                  <>
-                    {model.size && (
-                      <span>
-                        {
-                          formatBytes(
-                            model.size
-                          )
-                        }
-                      </span>
-                    )}
-
-                    {model.quantization_level && (
-                      <span>
-                        {
-                          model.quantization_level
-                        }
-                      </span>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          )}
-
-
-          <details className="advanced-settings">
-            <summary>
-              Jace identity
-            </summary>
-
-            <div className="advanced-settings-body">
-              <label className="field-label">
-                System prompt
-              </label>
-
-              <textarea
-                className="system-prompt"
-                value={
-                  systemPrompt
-                }
-                onChange={
-                  (event) =>
-                    setSystemPrompt(
-                      event.target.value
-                    )
-                }
-                onBlur={
-                  () =>
-                    void saveSystemPrompt()
-                }
-                disabled={
-                  isGenerating
-                }
-              />
-
-              <button
-                className="reset-prompt-button"
-                onClick={
-                  () => {
-                    setSystemPrompt(
-                      DEFAULT_SYSTEM_PROMPT
-                    );
-                  }
-                }
-              >
-                Reset prompt
-              </button>
-            </div>
-          </details>
-        </div>
-
-
-        <div className="connection-card">
-          <div
-            className={
-              `status-dot ${connectionState}`
-            }
-          />
-
-          <div className="connection-copy">
-            <strong>
-              {connectionState
-              === "online"
-                ? "Local AI online"
-                : "Jace unavailable"}
-            </strong>
-
-            <span>
-              Private · local
-            </span>
-          </div>
-        </div>
-      </aside>
-
-
-      <section className="chat-panel">
-        <header className="topbar">
-          <div>
-            <h1>
-              {activeConversationId
-                ? (
-                    conversations.find(
-                      (item) =>
-                        item.id
-                        === activeConversationId
-                    )?.title
-                    ?? "Jace"
-                  )
-                : "New conversation"}
-            </h1>
-
-            <p>
-              Running entirely
-              on this computer
-            </p>
-          </div>
-
-          <div className="local-badge">
-            <span className="local-badge-dot" />
-
-            Local
-          </div>
-        </header>
-
-
-        <div className="conversation">
-          {messages.length
-          === 0 ? (
-            <div className="welcome">
-              <div className="welcome-logo">
-                J
-              </div>
-
-              <h2>
-                How can I help?
-              </h2>
-
-              <p>
-                Conversations are now
-                stored locally and will
-                remain available after
-                Jace is restarted.
-              </p>
-
-              <div className="suggestion-grid">
-                <button
-                  onClick={
-                    () =>
-                      setInput(
-                        "Explain what capabilities you currently have."
-                      )
-                  }
-                >
-                  <span>
-                    Capabilities
-                  </span>
-
-                  What can you do?
-                </button>
-
-                <button
-                  onClick={
-                    () =>
-                      setInput(
-                        "Help me plan the next stages of Project Jace."
-                      )
-                  }
-                >
-                  <span>
-                    Planning
-                  </span>
-
-                  Plan Project Jace
-                </button>
-
-                <button
-                  onClick={
-                    () =>
-                      setInput(
-                        "Explain how your current architecture works."
-                      )
-                  }
-                >
-                  <span>
-                    Architecture
-                  </span>
-
-                  Explain Jace
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="messages">
-              {messages.map(
-                (message) => (
-                  <article
-                    key={
-                      message.id
-                    }
-                    className={
-                      `message ${message.role}`
-                      +
-                      (
-                        message.isStreaming
-                          ? " streaming"
-                          : ""
-                      )
-                    }
-                  >
-                    <div className="message-avatar">
-                      {message.role
-                      === "user"
-                        ? "B"
-                        : "J"}
-                    </div>
-
-                    <div className="message-body">
-                      <div className="message-author">
-                        {message.role
-                        === "user"
-                          ? "You"
-                          : "Jace"}
-                      </div>
-
-                      <div className="message-content">
-                        {
-                          message.content
-                        }
-                      </div>
-
-
-                      {message.stopped && (
-                        <div className="generation-stats">
-                          <span className="generation-stopped">
-                            ■ Stopped
-                          </span>
-                        </div>
-                      )}
-
-
-                      {message.stats && (
-                        <div className="generation-stats">
-                          {message.stats
-                            .tokensPerSecond
-                            !== null && (
-                            <span>
-                              {
-                                message.stats
-                                  .tokensPerSecond
-                                  .toFixed(1)
-                              }{" "}
-                              tok/s
-                            </span>
-                          )}
-
-                          {message.stats
-                            .timeToFirstTokenMs
-                            !== null && (
-                            <span>
-                              First token{" "}
-                              {
-                                formatDuration(
-                                  message.stats
-                                    .timeToFirstTokenMs
-                                )
-                              }
-                            </span>
-                          )}
-
-                          {message.stats
-                            .evalCount
-                            !== null && (
-                            <span>
-                              {
-                                message.stats
-                                  .evalCount
-                              }{" "}
-                              output tokens
-                            </span>
-                          )}
-
-                          {message.stats
-                            .promptEvalCount
-                            !== null && (
-                            <span>
-                              {
-                                message.stats
-                                  .promptEvalCount
-                              }{" "}
-                              prompt tokens
-                            </span>
-                          )}
-
-                          {message.stats
-                            .totalDurationMs
-                            !== null && (
-                            <span>
-                              Total{" "}
-                              {
-                                formatDuration(
-                                  message.stats
-                                    .totalDurationMs
-                                )
-                              }
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </article>
-                )
-              )}
-
-              <div
-                ref={
-                  messagesEndRef
-                }
-              />
-            </div>
-          )}
-        </div>
-
-
-        <div className="composer-area">
-          {error && (
-            <div className="error-banner">
-              <span>
-                !
-              </span>
-
-              <div>
-                <strong>
-                  Jace encountered
-                  a problem
-                </strong>
-
-                <p>
-                  {error}
-                </p>
-              </div>
-
-              <button
-                onClick={
-                  () =>
-                    setError(
-                      null
-                    )
-                }
-              >
-                ×
-              </button>
-            </div>
-          )}
-
-
-          <form
-            className="composer"
-            onSubmit={
-              handleSubmit
-            }
-          >
-            <textarea
-              ref={
-                inputRef
-              }
-              value={
-                input
-              }
-              onChange={
-                (event) =>
-                  setInput(
-                    event.target.value
-                  )
-              }
-              onKeyDown={
-                handleKeyDown
-              }
-              placeholder={
-                isGenerating
-                  ? "Jace is responding..."
-                  : "Message Jace..."
-              }
-              disabled={
-                connectionState
-                !== "online"
-                ||
-                isGenerating
-              }
-              rows={1}
-            />
-
-
-            {isGenerating ? (
-              <button
-                type="button"
-                className="stop-button"
-                onClick={
-                  stopGeneration
-                }
-                title="Stop generating"
-              >
-                <span />
-              </button>
-            ) : (
-              <button
-                type="submit"
-                className="send-button"
-                disabled={
-                  !input.trim()
-                  ||
-                  !selectedModel
-                }
-              >
-                ↑
-              </button>
-            )}
-          </form>
-
-
-          <div className="composer-footer">
-            <span>
-              {isGenerating
-                ? "Press Stop to cancel generation"
-                : "Enter to send · Shift + Enter for a new line"}
-            </span>
-
-            <span>
-              {
-                selectedModel
-              }
-            </span>
-          </div>
-        </div>
-      </section>
+      <Sidebar
+        screen={screen}
+        assistantName={settings.assistant_name}
+        appVersion={health?.app_version ?? "0.3.0"}
+        connectionState={connectionState}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        isGenerating={isGenerating}
+        search={conversationSearch}
+        memoryCount={activeMemoryCount}
+        onSearchChange={setConversationSearch}
+        onScreenChange={setScreen}
+        onNewChat={newChat}
+        onLoadConversation={(id) => void loadConversation(id)}
+        onRenameConversation={(conversation) => void renameConversation(conversation)}
+        onDeleteConversation={(conversation) => void removeConversation(conversation)}
+      />
+
+      {screen === "chat" && (
+        <ChatView
+          title={title}
+          assistantName={settings.assistant_name}
+          userName={settings.user_name}
+          messages={messages}
+          input={input}
+          isGenerating={isGenerating}
+          error={error}
+          online={connectionState === "online"}
+          models={models}
+          selectedModel={selectedModel}
+          reasoningMode={reasoningMode}
+          memoryContextCount={memoryContextCount}
+          onInputChange={setInput}
+          onSubmit={(event) => void submit(event)}
+          onStop={() => abortRef.current?.abort()}
+          onDismissError={() => setError(null)}
+          onModelChange={(model) => void changeModel(model)}
+          onReasoningChange={setReasoningMode}
+        />
+      )}
+
+      {screen === "memory" && (
+        <MemoryView
+          memories={memories}
+          enabled={settings.memory_enabled}
+          onRefresh={() => void refreshMemories()}
+          onCreate={addMemory}
+          onUpdate={patchMemory}
+          onDelete={removeMemory}
+          onOpenSource={openMemorySource}
+        />
+      )}
+
+      {screen === "settings" && (
+        <SettingsView
+          settings={settings}
+          models={models}
+          hasActiveConversation={activeConversationId !== null}
+          onSave={saveSettings}
+          onReset={resetProfile}
+          onApplyToCurrentConversation={applySettingsToCurrent}
+        />
+      )}
     </main>
   );
 }
-
-
-export default App;
