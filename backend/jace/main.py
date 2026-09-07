@@ -70,7 +70,11 @@ from jace.memory.service import (
     search_memories,
     update_memory,
 )
-
+from jace.memory.extractor import (
+    detect_memory_command,
+    process_explicit_command,
+    schedule_memory_extraction,
+)
 
 @asynccontextmanager
 async def lifespan(
@@ -847,11 +851,90 @@ async def send_streaming_chat(
             ),
         )
 
-        await store_user_message(
-            session,
-            conversation,
-            request.message,
+        user_message = (
+            await store_user_message(
+                session,
+                conversation,
+                request.message,
+            )
         )
+
+        user_message_id = (
+            user_message.id
+        )
+
+        memory_command = (
+            detect_memory_command(
+                request.message
+            )
+        )
+
+        memory_command_handled = (
+            memory_command
+            is not None
+        )
+
+        memory_action_context = ""
+
+
+        if memory_command is not None:
+            try:
+                result = (
+                    await process_explicit_command(
+                        session,
+
+                        command=(
+                            memory_command
+                        ),
+
+                        conversation_id=(
+                            conversation.id
+                        ),
+
+                        source_message_id=(
+                            user_message_id
+                        ),
+                    )
+                )
+
+                memory_action_context = f"""
+
+
+        MEMORY SYSTEM ACTION
+
+        The Jace application has already processed
+        the user's explicit memory instruction.
+
+        Result:
+        {result}
+
+        This is an actual completed application action.
+        You may accurately acknowledge the result.
+        Do not claim that you lack persistent memory.
+
+        END MEMORY SYSTEM ACTION
+        """
+
+            except (
+                OllamaUnavailableError,
+                OllamaRequestError,
+            ) as exc:
+
+                memory_action_context = f"""
+
+
+        MEMORY SYSTEM ACTION
+
+        The user's explicit memory instruction
+        could not be completed.
+
+        Reason:
+        {str(exc)}
+
+        Do not claim that the action succeeded.
+
+        END MEMORY SYSTEM ACTION
+        """
 
         conversation = (
             await get_conversation(
@@ -890,9 +973,10 @@ async def send_streaming_chat(
         content: str,
         status: str,
         metrics: dict | None = None,
-    ) -> None:
+    ) -> str | None:
+        
         if not content.strip():
-            return
+          return None
 
         async with SessionLocal() as session:
             conversation = (
@@ -903,9 +987,9 @@ async def send_streaming_chat(
             )
 
             if conversation is None:
-                return
+                return None
 
-            await add_message(
+            message = await add_message(
                 session,
                 conversation=conversation,
                 role="assistant",
@@ -914,6 +998,8 @@ async def send_streaming_chat(
                 model=conversation_model,
                 metrics=metrics,
             )
+
+            return message.id
 
 
     async def generate() -> AsyncIterator[str]:
@@ -953,6 +1039,7 @@ async def send_streaming_chat(
         effective_system_prompt = (
             conversation_system_prompt
             + memory_context
+            + memory_action_context
         )
 
         first_token_at: (
@@ -1080,13 +1167,43 @@ async def send_streaming_chat(
                         )
                     )
 
-                    await persist_assistant(
-                        full_response,
-                        "complete",
-                        metrics,
+                    assistant_message_id = (
+                        await persist_assistant(
+                            full_response,
+                            "complete",
+                            metrics,
+                        )
                     )
 
                     saved = True
+
+
+                    # Explicit Remember/Forget commands
+                    # were already handled synchronously.
+                    #
+                    # Everything else can be examined
+                    # automatically after the response.
+                    if (
+                        not memory_command_handled
+                        and assistant_message_id
+                    ):
+                        schedule_memory_extraction(
+                            conversation_id=(
+                                conversation_id
+                            ),
+
+                            source_message_id=(
+                                user_message_id
+                            ),
+
+                            user_message=(
+                                request.message
+                            ),
+
+                            assistant_message=(
+                                full_response
+                            ),
+                        )
 
                     yield ndjson_event(
                         {

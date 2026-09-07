@@ -1,6 +1,11 @@
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, TypeVar
+
+from pydantic import (
+    BaseModel,
+    ValidationError,
+)
 
 import httpx
 
@@ -33,6 +38,10 @@ def _extract_error_text(
 
     return f"Ollama returned HTTP {status_code}"
 
+StructuredModel = TypeVar(
+    "StructuredModel",
+    bound=BaseModel,
+)
 
 async def get_models() -> list[ModelInfo]:
     url = f"{settings.ollama_base_url}/api/tags"
@@ -82,6 +91,128 @@ async def get_models() -> list[ModelInfo]:
 
     return models
 
+async def structured_chat(
+    *,
+    model: str,
+    messages: list[dict[str, str]],
+    system_prompt: str,
+    response_model: type[StructuredModel],
+) -> StructuredModel:
+    """
+    Ask Ollama for a non-streaming response that must conform
+    to the supplied Pydantic JSON schema.
+    """
+
+    ollama_messages: list[
+        dict[str, str]
+    ] = []
+
+    if system_prompt.strip():
+        ollama_messages.append(
+            {
+                "role": "system",
+                "content": system_prompt.strip(),
+            }
+        )
+
+    ollama_messages.extend(
+        {
+            "role": message["role"],
+            "content": message["content"],
+        }
+        for message in messages
+    )
+
+    schema = (
+        response_model.model_json_schema()
+    )
+
+    payload = {
+        "model": model,
+
+        "messages": ollama_messages,
+
+        "stream": False,
+
+        "keep_alive": (
+            settings.ollama_keep_alive
+        ),
+
+        "think": False,
+
+        "format": schema,
+
+        "options": {
+            "temperature": 0,
+        },
+    }
+
+    url = (
+        f"{settings.ollama_base_url}"
+        "/api/chat"
+    )
+
+    timeout = httpx.Timeout(
+        connect=10.0,
+        read=settings.request_timeout_seconds,
+        write=30.0,
+        pool=10.0,
+    )
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout
+        ) as client:
+
+            response = await client.post(
+                url,
+                json=payload,
+            )
+
+            response.raise_for_status()
+
+    except httpx.ConnectError as exc:
+        raise OllamaUnavailableError(
+            "Could not connect to Ollama."
+        ) from exc
+
+    except httpx.TimeoutException as exc:
+        raise OllamaUnavailableError(
+            "The structured Ollama request timed out."
+        ) from exc
+
+    except httpx.HTTPStatusError as exc:
+        raise OllamaRequestError(
+            _extract_error_text(
+                exc.response.status_code,
+                exc.response.text,
+            )
+        ) from exc
+
+    try:
+        data = response.json()
+
+        content = (
+            data.get("message", {})
+            .get("content", "")
+        )
+
+        if not content:
+            raise OllamaRequestError(
+                "Ollama returned an empty structured response."
+            )
+
+        return (
+            response_model.model_validate_json(
+                content
+            )
+        )
+
+    except ValidationError as exc:
+        raise OllamaRequestError(
+            "Ollama returned structured data "
+            "that failed validation."
+        ) from exc
 
 async def stream_chat(
     model: str,

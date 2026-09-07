@@ -297,3 +297,91 @@ class MemorySearchResponse(BaseModel):
     results: list[
         MemorySearchResult
     ]
+
+
+class ExtractedMemoryCandidate(BaseModel):
+    memory_type: Literal[
+        "fact",
+        "preference",
+        "project",
+        "decision",
+        "goal",
+        "temporary",
+        "other",
+    ]
+
+    subject: str = Field(
+        min_length=1,
+        max_length=200,
+    )
+
+    content: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
+
+    importance: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
+
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
+
+
+class MemoryExtractionResult(BaseModel):
+    memories: list[
+        ExtractedMemoryCandidate
+    ] = Field(
+        default_factory=list,
+        max_length=5,
+    )
+
+
+class MemoryReconciliationResult(BaseModel):
+    action: Literal[
+        "create",
+        "duplicate",
+        "merge",
+        "supersede",
+        "ignore",
+    ]
+
+    target_memory_id: str | None = None
+
+    memory_type: Literal[
+        "fact",
+        "preference",
+        "project",
+        "decision",
+        "goal",
+        "temporary",
+        "other",
+    ]
+
+    subject: str = Field(
+        min_length=1,
+        max_length=200,
+    )
+
+    content: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
+
+    importance: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
+
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
+
+    reason: str = Field(
+        min_length=1,
+        max_length=500,
+    )
