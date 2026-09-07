@@ -40,13 +40,14 @@ class Message(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="complete")
     model: Mapped[str | None] = mapped_column(String(200), nullable=True)
-
     time_to_first_token_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     load_duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -56,7 +57,6 @@ class Message(Base):
     eval_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     eval_duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     tokens_per_second: Mapped[float | None] = mapped_column(Float, nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
@@ -103,3 +103,31 @@ class AssistantSettings(Base):
     memory_min_similarity: Mapped[float] = mapped_column(Float, nullable=False, default=0.50)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class ToolPermission(Base):
+    """Persistent user policy for a registered tool."""
+
+    __tablename__ = "tool_permissions"
+
+    tool_name: Mapped[str] = mapped_column(String(120), primary_key=True)
+    permission: Mapped[str] = mapped_column(String(20), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class ToolAuditLog(Base):
+    """Append-only record of tool requests and outcomes."""
+
+    __tablename__ = "tool_audit_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    tool_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    permission_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    arguments_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    result_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approval_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

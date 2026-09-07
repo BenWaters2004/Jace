@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 MemoryType = Literal["fact", "preference", "project", "decision", "goal", "temporary", "other"]
 ReasoningMode = Literal["fast", "balanced", "deep"]
 ResponseStyle = Literal["concise", "balanced", "detailed"]
+ToolPermissionMode = Literal["allow", "ask", "deny"]
+ToolRisk = Literal["read", "write"]
 
 
 class ModelInfo(BaseModel):
@@ -205,3 +207,72 @@ class AssistantSettingsUpdate(BaseModel):
     memory_auto_extract: bool | None = None
     memory_top_k: int | None = Field(default=None, ge=1, le=20)
     memory_min_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+# -----------------------------
+# Phase 4 tools
+# -----------------------------
+
+
+class ToolResponse(BaseModel):
+    name: str
+    label: str
+    description: str
+    category: str
+    risk: ToolRisk
+    permission: ToolPermissionMode
+    default_permission: ToolPermissionMode
+    parameters: dict[str, Any]
+
+
+class ToolListResponse(BaseModel):
+    enabled: bool
+    tools: list[ToolResponse]
+
+
+class ToolPermissionUpdate(BaseModel):
+    permission: ToolPermissionMode
+
+
+class ToolAuditResponse(BaseModel):
+    id: str
+    conversation_id: str | None
+    tool_name: str
+    permission_mode: str
+    status: str
+    arguments: dict[str, Any]
+    result_preview: str | None
+    error: str | None
+    approval_id: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class ToolAuditListResponse(BaseModel):
+    entries: list[ToolAuditResponse]
+
+
+class ToolApprovalDecisionRequest(BaseModel):
+    decision: Literal["allow_once", "allow_always", "deny_once", "deny_always"]
+
+
+class ToolApprovalDecisionResponse(BaseModel):
+    approval_id: str
+    resolved: bool
+    decision: str
+    tool_name: str
+
+
+class PendingToolApprovalResponse(BaseModel):
+    approval_id: str
+    conversation_id: str | None
+    tool_name: str
+    label: str
+    description: str
+    risk: ToolRisk
+    arguments: dict[str, Any]
+    created_at: datetime
+
+
+class PendingToolApprovalsResponse(BaseModel):
+    approvals: list[PendingToolApprovalResponse]

@@ -5,15 +5,27 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from jace.ai.engine import OllamaRequestError, OllamaUnavailableError, stream_chat
+from jace.ai.engine import OllamaRequestError, OllamaUnavailableError
+from jace.ai.prompts import TOOL_AGENT_SYSTEM_PROMPT
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
 from jace.config import settings as env_settings
 from jace.database import SessionLocal
-from jace.db.conversations import add_message, get_conversation, model_history, store_user_message, update_conversation
+from jace.db.conversations import (
+    add_message,
+    get_conversation,
+    model_history,
+    store_user_message,
+    update_conversation,
+)
 from jace.db.settings import build_profile_prompt, get_or_create_assistant_settings
-from jace.memory.extractor import detect_memory_command, process_explicit_command, schedule_memory_extraction
+from jace.memory.extractor import (
+    detect_memory_command,
+    process_explicit_command,
+    schedule_memory_extraction,
+)
 from jace.memory.service import build_memory_context, search_memories
 from jace.schemas import PersistentChatRequest
+from jace.tools.agent import available_tool_count, stream_agent
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -29,8 +41,11 @@ async def send_streaming_chat(request: PersistentChatRequest):
         profile = await get_or_create_assistant_settings(session)
         conversation_model = request.model or conversation.model or profile.default_model
         conversation_prompt = (
-            request.system_prompt if request.system_prompt is not None else conversation.system_prompt or profile.system_prompt
+            request.system_prompt
+            if request.system_prompt is not None
+            else conversation.system_prompt or profile.system_prompt
         )
+
         await update_conversation(
             session,
             conversation,
@@ -44,6 +59,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
         memory_command = detect_memory_command(request.message)
         memory_command_handled = memory_command is not None
         memory_action_context = ""
+
         memory_allowed = bool(profile.memory_enabled and env_settings.memory_enabled)
 
         if memory_command is not None:
@@ -78,24 +94,32 @@ async def send_streaming_chat(request: PersistentChatRequest):
         conversation = await get_conversation(session, conversation.id)
         if conversation is None:
             raise HTTPException(status_code=500, detail="Conversation could not be reloaded.")
+
         history = model_history(conversation)
         conversation_id = conversation.id
         conversation_system_prompt = conversation.system_prompt
 
-        # Copy settings while the session is open; these primitive values remain safe after it closes.
+        # Copy primitive settings while the session is active.
         reasoning_mode = request.reasoning_mode or profile.reasoning_mode
         temperature = request.temperature if request.temperature is not None else profile.temperature
         memory_top_k = profile.memory_top_k
         memory_min_similarity = profile.memory_min_similarity
         auto_extract = bool(profile.memory_auto_extract and memory_allowed)
+        profile_prompt = build_profile_prompt(profile, conversation_system_prompt)
 
-    async def persist_assistant(content: str, status: str, metrics: dict | None = None) -> str | None:
+    async def persist_assistant(
+        content: str,
+        status: str,
+        metrics: dict | None = None,
+    ) -> str | None:
         if not content.strip():
             return None
+
         async with SessionLocal() as session:
             current = await get_conversation(session, conversation_id)
             if current is None:
                 return None
+
             message = await add_message(
                 session,
                 conversation=current,
@@ -125,52 +149,80 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         update_access=True,
                     )
 
-            yield ndjson_event({
-                "type": "context",
-                "memory_count": len(memory_hits),
-                "reasoning_mode": reasoning_mode,
-            })
+            tool_count = await available_tool_count()
 
-            memory_context = build_memory_context(memory_hits) if memory_allowed else ""
-            effective_system_prompt = (
-                build_profile_prompt(profile, conversation_system_prompt)
-                + memory_context
-                + memory_action_context
+            yield ndjson_event(
+                {
+                    "type": "context",
+                    "memory_count": len(memory_hits),
+                    "tool_count": tool_count,
+                    "reasoning_mode": reasoning_mode,
+                }
             )
 
-            async for chunk in stream_chat(
+            memory_context = build_memory_context(memory_hits) if memory_allowed else ""
+            tool_context = TOOL_AGENT_SYSTEM_PROMPT if env_settings.tools_enabled else ""
+
+            effective_system_prompt = (
+                profile_prompt
+                + memory_context
+                + memory_action_context
+                + tool_context
+            )
+
+            async for event in stream_agent(
                 model=conversation_model,
                 messages=history,
                 system_prompt=effective_system_prompt,
                 reasoning_mode=reasoning_mode,
                 temperature=temperature,
+                conversation_id=conversation_id,
+                user_message=request.message,
             ):
-                message = chunk.get("message") or {}
-                content = message.get("content") or ""
-                if content:
-                    if first_token_at is None:
-                        first_token_at = time.perf_counter()
-                    response_parts.append(content)
-                    yield ndjson_event({"type": "token", "content": content})
+                event_type = event.get("type")
 
-                if chunk.get("done"):
-                    eval_count = chunk.get("eval_count")
-                    eval_duration = chunk.get("eval_duration")
+                if event_type == "token":
+                    content = event.get("content") or ""
+                    if content:
+                        if first_token_at is None:
+                            first_token_at = time.perf_counter()
+                        response_parts.append(content)
+                        yield ndjson_event({"type": "token", "content": content})
+                    continue
+
+                if event_type in {"tool_call", "approval_required", "tool_result"}:
+                    yield ndjson_event(event)
+                    continue
+
+                if event_type == "agent_done":
+                    raw_metrics = event.get("metrics") or {}
+                    eval_count = raw_metrics.get("eval_count")
+                    eval_duration = raw_metrics.get("eval_duration")
+
                     metrics = {
                         "time_to_first_token_ms": (
-                            round((first_token_at - started_at) * 1000, 2) if first_token_at is not None else None
+                            round((first_token_at - started_at) * 1000, 2)
+                            if first_token_at is not None
+                            else None
                         ),
-                        "total_duration_ms": nanoseconds_to_ms(chunk.get("total_duration")),
-                        "load_duration_ms": nanoseconds_to_ms(chunk.get("load_duration")),
-                        "prompt_eval_count": chunk.get("prompt_eval_count"),
-                        "prompt_eval_cached_count": chunk.get("prompt_eval_cached_count"),
-                        "prompt_eval_duration_ms": nanoseconds_to_ms(chunk.get("prompt_eval_duration")),
+                        "total_duration_ms": nanoseconds_to_ms(raw_metrics.get("total_duration")),
+                        "load_duration_ms": nanoseconds_to_ms(raw_metrics.get("load_duration")),
+                        "prompt_eval_count": raw_metrics.get("prompt_eval_count"),
+                        "prompt_eval_cached_count": raw_metrics.get("prompt_eval_cached_count"),
+                        "prompt_eval_duration_ms": nanoseconds_to_ms(
+                            raw_metrics.get("prompt_eval_duration")
+                        ),
                         "eval_count": eval_count,
                         "eval_duration_ms": nanoseconds_to_ms(eval_duration),
                         "tokens_per_second": tokens_per_second(eval_count, eval_duration),
                     }
+
                     full_response = "".join(response_parts)
-                    assistant_message_id = await persist_assistant(full_response, "complete", metrics)
+                    assistant_message_id = await persist_assistant(
+                        full_response,
+                        "complete",
+                        metrics,
+                    )
                     saved = True
 
                     if not memory_command_handled and assistant_message_id:
@@ -182,29 +234,55 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             enabled=auto_extract,
                         )
 
-                    yield ndjson_event({
-                        "type": "done",
-                        "model": chunk.get("model", conversation_model),
-                        "done_reason": chunk.get("done_reason"),
-                        "metrics": metrics,
-                    })
+                    yield ndjson_event(
+                        {
+                            "type": "done",
+                            "model": event.get("model", conversation_model),
+                            "done_reason": event.get("done_reason"),
+                            "metrics": metrics,
+                            "model_turns": raw_metrics.get("model_turns", 1),
+                            "tool_calls": raw_metrics.get("tool_calls", 0),
+                        }
+                    )
+                    return
 
         except asyncio.CancelledError:
             if response_parts and not saved:
-                await asyncio.shield(persist_assistant("".join(response_parts), "stopped"))
+                await asyncio.shield(
+                    persist_assistant(
+                        "".join(response_parts),
+                        "stopped",
+                    )
+                )
             raise
+
         except (OllamaUnavailableError, OllamaRequestError) as exc:
             if response_parts and not saved:
-                await persist_assistant("".join(response_parts), "error")
+                await persist_assistant(
+                    "".join(response_parts),
+                    "error",
+                )
                 saved = True
             yield ndjson_event({"type": "error", "message": str(exc)})
+
         except Exception as exc:
             if response_parts and not saved:
-                await persist_assistant("".join(response_parts), "error")
-            yield ndjson_event({"type": "error", "message": f"Unexpected streaming error: {exc}"})
+                await persist_assistant(
+                    "".join(response_parts),
+                    "error",
+                )
+            yield ndjson_event(
+                {
+                    "type": "error",
+                    "message": f"Unexpected streaming error: {exc}",
+                }
+            )
 
     return StreamingResponse(
         generate(),
         media_type="application/x-ndjson",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )

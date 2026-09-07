@@ -1,6 +1,6 @@
 import json
 from collections.abc import AsyncIterator
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -37,6 +37,20 @@ def generation_options(reasoning_mode: str, temperature: float) -> tuple[bool, d
     if reasoning_mode == "balanced":
         return False, {"temperature": temperature, "num_predict": 1536}
     return False, {"temperature": min(temperature, 0.5), "num_predict": 768}
+
+
+def _copy_chat_message(message: dict[str, Any]) -> dict[str, Any]:
+    """
+    Preserve fields used by Ollama's tool-calling loop instead of reducing every
+    message to only role/content.
+    """
+    copied: dict[str, Any] = {"role": message["role"]}
+    for key in ("content", "thinking", "tool_calls", "tool_name"):
+        if key in message and message[key] is not None:
+            copied[key] = message[key]
+    if "content" not in copied:
+        copied["content"] = ""
+    return copied
 
 
 async def get_models() -> list[ModelInfo]:
@@ -87,6 +101,7 @@ async def structured_chat(
         "format": response_model.model_json_schema(),
         "options": {"temperature": 0},
     }
+
     url = f"{settings.ollama_base_url}/api/chat"
     timeout = httpx.Timeout(connect=10.0, read=settings.request_timeout_seconds, write=30.0, pool=10.0)
 
@@ -113,18 +128,23 @@ async def structured_chat(
 async def stream_chat(
     *,
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     system_prompt: str,
     reasoning_mode: str = "fast",
     temperature: float = 0.4,
-) -> AsyncIterator[dict]:
-    ollama_messages: list[dict[str, str]] = []
+    tools: list[dict[str, Any]] | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    Stream an Ollama chat request. If tools are supplied, tool_calls are left in
+    the raw chunks so the Phase 4 agent loop can accumulate and execute them.
+    """
+    ollama_messages: list[dict[str, Any]] = []
     if system_prompt.strip():
         ollama_messages.append({"role": "system", "content": system_prompt.strip()})
-    ollama_messages.extend({"role": m["role"], "content": m["content"]} for m in messages)
+    ollama_messages.extend(_copy_chat_message(message) for message in messages)
 
     think, options = generation_options(reasoning_mode, temperature)
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": ollama_messages,
         "stream": True,
@@ -132,6 +152,9 @@ async def stream_chat(
         "think": think,
         "options": options,
     }
+    if tools:
+        payload["tools"] = tools
+
     url = f"{settings.ollama_base_url}/api/chat"
     timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 
@@ -152,6 +175,7 @@ async def stream_chat(
                     if chunk.get("error"):
                         raise OllamaRequestError(str(chunk["error"]))
                     yield chunk
+
     except httpx.ConnectError as exc:
         raise OllamaUnavailableError("Could not connect to Ollama. Make sure Ollama is running.") from exc
     except httpx.TimeoutException as exc:

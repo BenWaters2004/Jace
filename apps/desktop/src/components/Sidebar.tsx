@@ -10,6 +10,7 @@ interface SidebarProps {
   isGenerating: boolean;
   search: string;
   memoryCount: number;
+  toolCount: number;
   onSearchChange: (value: string) => void;
   onScreenChange: (screen: Screen) => void;
   onNewChat: () => void;
@@ -28,8 +29,9 @@ function dateLabel(value: string) {
 }
 
 export function Sidebar(props: SidebarProps) {
+  const query = props.search.trim().toLowerCase();
   const filtered = props.conversations.filter((conversation) =>
-    conversation.title.toLowerCase().includes(props.search.trim().toLowerCase()),
+    conversation.title.toLowerCase().includes(query),
   );
 
   return (
@@ -38,7 +40,7 @@ export function Sidebar(props: SidebarProps) {
         <div className="brand-mark">J</div>
         <div className="brand-copy">
           <strong>{props.assistantName}</strong>
-          <span>v{props.appVersion || "0.3.0"}</span>
+          <span>v{props.appVersion || "0.5.0"}</span>
         </div>
       </div>
 
@@ -53,6 +55,10 @@ export function Sidebar(props: SidebarProps) {
         <button className={props.screen === "memory" ? "active" : ""} onClick={() => props.onScreenChange("memory")}>
           <span className="nav-icon">◇</span> Memory
           <span className="nav-count">{props.memoryCount}</span>
+        </button>
+        <button className={props.screen === "tools" ? "active" : ""} onClick={() => props.onScreenChange("tools")}>
+          <span className="nav-icon">⌁</span> Tools
+          <span className="nav-count">{props.toolCount}</span>
         </button>
         <button className={props.screen === "settings" ? "active" : ""} onClick={() => props.onScreenChange("settings")}>
           <span className="nav-icon">⚙</span> Settings
@@ -103,7 +109,13 @@ export function Sidebar(props: SidebarProps) {
       <div className="sidebar-status">
         <span className={`status-dot ${props.connectionState}`} />
         <div>
-          <strong>{props.connectionState === "online" ? "Local AI online" : props.connectionState === "checking" ? "Connecting" : "Jace unavailable"}</strong>
+          <strong>
+            {props.connectionState === "online"
+              ? "Local AI online"
+              : props.connectionState === "checking"
+                ? "Connecting"
+                : "Jace unavailable"}
+          </strong>
           <span>Private · local-first</span>
         </div>
       </div>

@@ -8,15 +8,25 @@ from jace.api.conversations import router as conversations_router
 from jace.api.memories import router as memories_router
 from jace.api.settings import router as settings_router
 from jace.api.system import router as system_router
+from jace.api.tools import router as tools_router
 from jace.config import settings
-from jace.database import close_database, init_database
+from jace.database import SessionLocal, close_database, init_database
+from jace.tools import ensure_tools_registered
+from jace.tools.permissions import ensure_tool_permissions
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     del app
+
+    ensure_tools_registered()
     await init_database()
+
+    async with SessionLocal() as session:
+        await ensure_tool_permissions(session)
+
     yield
+
     await close_database()
 
 
@@ -44,5 +54,6 @@ app.add_middleware(
 app.include_router(system_router)
 app.include_router(settings_router)
 app.include_router(memories_router)
+app.include_router(tools_router)
 app.include_router(conversations_router)
 app.include_router(chat_router)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
+  clearToolAudit,
   createConversation,
   createMemory,
   deleteConversation,
@@ -11,16 +12,22 @@ import {
   getMemories,
   getModels,
   getSettings,
+  getToolAudit,
+  getTools,
   resetSettings,
+  resolveToolApproval,
   sendChatStream,
   updateConversation,
   updateMemory,
   updateSettings,
+  updateToolPermission,
 } from "./api";
 import { ChatView } from "./components/ChatView";
 import { MemoryView } from "./components/MemoryView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
+import { ToolApprovalModal } from "./components/ToolApprovalModal";
+import { ToolsView } from "./components/ToolsView";
 import type {
   ApiGenerationStats,
   AssistantSettings,
@@ -33,9 +40,18 @@ import type {
   MemoryRecord,
   MemoryUpdateRequest,
   ModelInfo,
+  PendingToolApproval,
   ReasoningMode,
   Screen,
+  StreamApprovalRequiredEvent,
   StreamDoneEvent,
+  StreamToolCallEvent,
+  StreamToolResultEvent,
+  ToolActivity,
+  ToolApprovalDecision,
+  ToolAuditRecord,
+  ToolPermissionMode,
+  ToolRecord,
 } from "./types";
 import "./styles.css";
 
@@ -82,6 +98,12 @@ export default function App() {
   const [settings, setSettings] = useState<AssistantSettings | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [toolsEnabled, setToolsEnabled] = useState(true);
+  const [tools, setTools] = useState<ToolRecord[]>([]);
+  const [toolAudit, setToolAudit] = useState<ToolAuditRecord[]>([]);
+  const [pendingApproval, setPendingApproval] = useState<PendingToolApproval | null>(null);
+  const [toolActivity, setToolActivity] = useState<ToolActivity[]>([]);
+
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
@@ -92,6 +114,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [memoryContextCount, setMemoryContextCount] = useState(0);
+  const [toolContextCount, setToolContextCount] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
   const activeConversation = useMemo(
@@ -111,6 +134,14 @@ export default function App() {
     return response.memories;
   }, []);
 
+  const refreshTools = useCallback(async () => {
+    const [toolResponse, auditResponse] = await Promise.all([getTools(), getToolAudit(100)]);
+    setToolsEnabled(toolResponse.enabled);
+    setTools(toolResponse.tools);
+    setToolAudit(auditResponse.entries);
+    return toolResponse.tools;
+  }, []);
+
   const loadConversation = useCallback(async (id: string) => {
     if (isGenerating) return;
     try {
@@ -120,6 +151,8 @@ export default function App() {
       setSelectedModel(conversation.model);
       setConversationPrompt(conversation.system_prompt);
       setMemoryContextCount(0);
+      setToolContextCount(0);
+      setToolActivity([]);
       setError(null);
       setScreen("chat");
     } catch (loadError) {
@@ -130,20 +163,28 @@ export default function App() {
   const initialise = useCallback(async () => {
     setConnectionState("checking");
     setError(null);
+
     try {
       const currentHealth = await getHealth();
       setHealth(currentHealth);
-      const [profile, conversationResponse, memoryResponse] = await Promise.all([
+
+      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse] = await Promise.all([
         getSettings(),
         getConversations(),
         getMemories(false),
+        getTools(),
+        getToolAudit(100),
       ]);
+
       setSettings(profile);
       setReasoningMode(profile.reasoning_mode);
       setSelectedModel(profile.default_model);
       setConversationPrompt(profile.system_prompt);
       setConversations(conversationResponse.conversations);
       setMemories(memoryResponse.memories);
+      setToolsEnabled(toolResponse.enabled);
+      setTools(toolResponse.tools);
+      setToolAudit(auditResponse.entries);
 
       if (!currentHealth.ollama_connected) {
         setConnectionState("ollama-offline");
@@ -172,10 +213,12 @@ export default function App() {
   async function ensureConversation(): Promise<string> {
     if (activeConversationId) return activeConversationId;
     if (!settings) throw new Error("Jace settings are not available yet.");
+
     const conversation = await createConversation({
       model: selectedModel || settings.default_model,
       system_prompt: conversationPrompt || settings.system_prompt,
     });
+
     setActiveConversationId(conversation.id);
     await refreshConversations();
     return conversation.id;
@@ -183,6 +226,46 @@ export default function App() {
 
   function updateAssistant(id: string, updater: (message: ChatMessage) => ChatMessage) {
     setMessages((current) => current.map((message) => message.id === id ? updater(message) : message));
+  }
+
+  function registerToolCall(event: StreamToolCallEvent) {
+    setToolActivity((current) => {
+      const next: ToolActivity = {
+        callId: event.call_id,
+        toolName: event.tool_name,
+        label: event.label,
+        status: event.permission === "ask" ? "awaiting_approval" : "requested",
+        arguments: event.arguments,
+      };
+      return [...current.filter((item) => item.callId !== event.call_id), next];
+    });
+  }
+
+  function registerApproval(event: StreamApprovalRequiredEvent) {
+    setPendingApproval({
+      approval_id: event.approval_id,
+      call_id: event.call_id,
+      conversation_id: activeConversationId,
+      tool_name: event.tool_name,
+      label: event.label,
+      description: event.description,
+      risk: event.risk,
+      arguments: event.arguments,
+    });
+
+    setToolActivity((current) => current.map((item) =>
+      item.callId === event.call_id ? { ...item, status: "awaiting_approval" } : item,
+    ));
+  }
+
+  function registerToolResult(event: StreamToolResultEvent) {
+    setToolActivity((current) => current.map((item) =>
+      item.callId === event.call_id
+        ? { ...item, status: event.status, summary: event.summary }
+        : item,
+    ));
+    setPendingApproval((current) => current?.call_id === event.call_id ? null : current);
+    window.setTimeout(() => { void refreshTools(); }, 250);
   }
 
   async function submit(event?: FormEvent<HTMLFormElement>) {
@@ -204,6 +287,9 @@ export default function App() {
     setInput("");
     setError(null);
     setMemoryContextCount(0);
+    setToolContextCount(0);
+    setToolActivity([]);
+    setPendingApproval(null);
     setIsGenerating(true);
 
     const controller = new AbortController();
@@ -220,8 +306,14 @@ export default function App() {
           temperature: settings.temperature,
         },
         {
-          onContext: (context) => setMemoryContextCount(context.memory_count),
+          onContext: (context) => {
+            setMemoryContextCount(context.memory_count);
+            setToolContextCount(context.tool_count);
+          },
           onToken: (content) => updateAssistant(assistant.id, (message) => ({ ...message, content: message.content + content })),
+          onToolCall: registerToolCall,
+          onApprovalRequired: registerApproval,
+          onToolResult: registerToolResult,
           onDone: (done: StreamDoneEvent) => updateAssistant(assistant.id, (message) => ({
             ...message,
             isStreaming: false,
@@ -240,13 +332,13 @@ export default function App() {
         },
         controller.signal,
       );
+
       await refreshConversations();
       const saved = await getConversation(conversationId);
       setMessages(mapMessages(saved));
       setSelectedModel(saved.model);
       setConversationPrompt(saved.system_prompt);
-
-      // Extraction is intentionally asynchronous; refresh once shortly after the main response.
+      await refreshTools();
       window.setTimeout(() => { void refreshMemories(); }, 1200);
     } catch (chatError) {
       if (controller.signal.aborted) {
@@ -257,7 +349,22 @@ export default function App() {
       }
     } finally {
       abortRef.current = null;
+      setPendingApproval(null);
       setIsGenerating(false);
+    }
+  }
+
+  async function decideToolApproval(decision: ToolApprovalDecision) {
+    if (!pendingApproval) return;
+    try {
+      await resolveToolApproval(pendingApproval.approval_id, decision);
+      if (decision === "allow_always" || decision === "deny_always") {
+        await refreshTools();
+      }
+      setPendingApproval(null);
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "Could not resolve tool approval.");
+      throw approvalError;
     }
   }
 
@@ -271,6 +378,9 @@ export default function App() {
     setConversationPrompt(settings.system_prompt);
     setReasoningMode(settings.reasoning_mode);
     setMemoryContextCount(0);
+    setToolContextCount(0);
+    setToolActivity([]);
+    setPendingApproval(null);
     setError(null);
     setScreen("chat");
   }
@@ -390,6 +500,26 @@ export default function App() {
     void loadConversation(conversationId);
   }
 
+  async function changeToolPermission(tool: ToolRecord, permission: ToolPermissionMode) {
+    try {
+      const updated = await updateToolPermission(tool.name, permission);
+      setTools((current) => current.map((item) => item.name === updated.name ? updated : item));
+    } catch (toolError) {
+      setError(toolError instanceof Error ? toolError.message : "Could not update tool permission.");
+      throw toolError;
+    }
+  }
+
+  async function removeToolAudit() {
+    try {
+      await clearToolAudit();
+      setToolAudit([]);
+    } catch (toolError) {
+      setError(toolError instanceof Error ? toolError.message : "Could not clear the tool audit log.");
+      throw toolError;
+    }
+  }
+
   if (!settings) {
     return (
       <main className="boot-screen">
@@ -402,6 +532,7 @@ export default function App() {
   }
 
   const activeMemoryCount = memories.filter((memory) => memory.is_active).length;
+  const availableToolCount = tools.filter((tool) => tool.permission !== "deny").length;
   const title = activeConversation?.title ?? "New conversation";
 
   return (
@@ -409,13 +540,14 @@ export default function App() {
       <Sidebar
         screen={screen}
         assistantName={settings.assistant_name}
-        appVersion={health?.app_version ?? "0.3.0"}
+        appVersion={health?.app_version ?? "0.5.0"}
         connectionState={connectionState}
         conversations={conversations}
         activeConversationId={activeConversationId}
         isGenerating={isGenerating}
         search={conversationSearch}
         memoryCount={activeMemoryCount}
+        toolCount={availableToolCount}
         onSearchChange={setConversationSearch}
         onScreenChange={setScreen}
         onNewChat={newChat}
@@ -438,6 +570,8 @@ export default function App() {
           selectedModel={selectedModel}
           reasoningMode={reasoningMode}
           memoryContextCount={memoryContextCount}
+          toolContextCount={toolContextCount}
+          toolActivity={toolActivity}
           onInputChange={setInput}
           onSubmit={(event) => void submit(event)}
           onStop={() => abortRef.current?.abort()}
@@ -459,6 +593,17 @@ export default function App() {
         />
       )}
 
+      {screen === "tools" && (
+        <ToolsView
+          enabled={toolsEnabled}
+          tools={tools}
+          audit={toolAudit}
+          onRefresh={() => void refreshTools()}
+          onPermissionChange={changeToolPermission}
+          onClearAudit={removeToolAudit}
+        />
+      )}
+
       {screen === "settings" && (
         <SettingsView
           settings={settings}
@@ -469,6 +614,8 @@ export default function App() {
           onApplyToCurrentConversation={applySettingsToCurrent}
         />
       )}
+
+      <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />
     </main>
   );
 }

@@ -1,5 +1,5 @@
 import type { FormEvent, KeyboardEvent } from "react";
-import type { ChatMessage, ModelInfo, ReasoningMode } from "../types";
+import type { ChatMessage, ModelInfo, ReasoningMode, ToolActivity } from "../types";
 
 interface ChatViewProps {
   title: string;
@@ -14,6 +14,8 @@ interface ChatViewProps {
   selectedModel: string;
   reasoningMode: ReasoningMode;
   memoryContextCount: number;
+  toolContextCount: number;
+  toolActivity: ToolActivity[];
   onInputChange: (value: string) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
   onStop: () => void;
@@ -29,6 +31,16 @@ function formatDuration(ms: number | null) {
 
 function initial(value: string, fallback: string) {
   return value.trim().charAt(0).toUpperCase() || fallback;
+}
+
+function toolStatusText(status: ToolActivity["status"]) {
+  switch (status) {
+    case "requested": return "Requested";
+    case "awaiting_approval": return "Waiting for approval";
+    case "completed": return "Completed";
+    case "denied": return "Denied";
+    case "failed": return "Failed";
+  }
 }
 
 export function ChatView(props: ChatViewProps) {
@@ -48,6 +60,7 @@ export function ChatView(props: ChatViewProps) {
         </div>
         <div className="chat-controls">
           {props.memoryContextCount > 0 && <span className="memory-context-badge">◇ {props.memoryContextCount} memories</span>}
+          {props.toolContextCount > 0 && <span className="tool-context-badge">⌁ {props.toolContextCount} tools</span>}
           <select value={props.reasoningMode} onChange={(event) => props.onReasoningChange(event.target.value as ReasoningMode)} disabled={props.isGenerating}>
             <option value="fast">Fast</option>
             <option value="balanced">Balanced</option>
@@ -64,16 +77,16 @@ export function ChatView(props: ChatViewProps) {
           <div className="welcome-panel">
             <div className="welcome-mark">J</div>
             <h2>How can I help?</h2>
-            <p>{props.assistantName} is running locally with persistent conversations and long-term memory.</p>
+            <p>{props.assistantName} can use controlled local tools and read the public web while keeping you in charge of permissions.</p>
             <div className="prompt-cards">
-              <button onClick={() => props.onInputChange("What do you remember about my current projects?")}>
-                <strong>Memory</strong><span>Review relevant long-term context</span>
+              <button onClick={() => props.onInputChange("Search the web for the latest developments in local AI assistants and summarise the most relevant sources.")}>
+                <strong>Web research</strong><span>Search and read current public sources</span>
               </button>
-              <button onClick={() => props.onInputChange("Help me plan the next stage of Project Jace.")}>
-                <strong>Plan</strong><span>Work through a project decision</span>
+              <button onClick={() => props.onInputChange("Search my past conversations for Project Jace and summarise what you find.")}>
+                <strong>History</strong><span>Search stored conversation history</span>
               </button>
-              <button onClick={() => props.onInputChange("Explain your current capabilities and limitations.")}>
-                <strong>Capabilities</strong><span>See what Jace can currently do</span>
+              <button onClick={() => props.onInputChange("Read https://playwright.dev/python/ and tell me what Playwright is used for.")}>
+                <strong>Read a page</strong><span>Fetch a specific public webpage safely</span>
               </button>
             </div>
           </div>
@@ -103,18 +116,33 @@ export function ChatView(props: ChatViewProps) {
       </div>
 
       <div className="composer-wrap">
+        {props.toolActivity.length > 0 && (
+          <div className="tool-activity-strip">
+            {props.toolActivity.map((activity) => (
+              <div className={`tool-activity-item ${activity.status}`} key={activity.callId}>
+                <span className="tool-activity-icon">⌁</span>
+                <div>
+                  <strong>{activity.label}</strong>
+                  <span>{activity.summary || toolStatusText(activity.status)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {props.error && (
           <div className="error-banner">
             <div><strong>Jace encountered a problem</strong><span>{props.error}</span></div>
             <button onClick={props.onDismissError}>×</button>
           </div>
         )}
+
         <form className="composer" onSubmit={props.onSubmit}>
           <textarea
             value={props.input}
             onChange={(event) => props.onInputChange(event.target.value)}
             onKeyDown={keyDown}
-            placeholder={!props.online ? "Waiting for Jace..." : props.isGenerating ? `${props.assistantName} is responding...` : `Message ${props.assistantName}...`}
+            placeholder={!props.online ? "Waiting for Jace..." : props.isGenerating ? `${props.assistantName} is working...` : `Message ${props.assistantName}...`}
             disabled={!props.online || props.isGenerating}
             rows={1}
           />
@@ -124,7 +152,7 @@ export function ChatView(props: ChatViewProps) {
             <button className="send-button" type="submit" disabled={!props.online || !props.input.trim() || !props.selectedModel}>↑</button>
           )}
         </form>
-        <div className="composer-hint">Enter to send · Shift + Enter for a new line · Memory can be managed from the Memory screen</div>
+        <div className="composer-hint">Enter to send · Shift + Enter for a new line · Internet tools use the same Allow / Ask / Deny policy as local tools</div>
       </div>
     </section>
   );

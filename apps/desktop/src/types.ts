@@ -1,8 +1,12 @@
 export type ChatRole = "user" | "assistant";
-export type Screen = "chat" | "memory" | "settings";
+export type Screen = "chat" | "memory" | "tools" | "settings";
 export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal" | "temporary" | "other";
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";
+export type ToolPermissionMode = "allow" | "ask" | "deny";
+export type ToolRisk = "read" | "write";
+export type ToolActivityStatus = "requested" | "awaiting_approval" | "completed" | "denied" | "failed";
+export type ToolApprovalDecision = "allow_once" | "allow_always" | "deny_once" | "deny_always";
 
 export interface GenerationStats {
   timeToFirstTokenMs: number | null;
@@ -186,6 +190,7 @@ export interface StreamMetrics {
 export interface StreamContextEvent {
   type: "context";
   memory_count: number;
+  tool_count: number;
   reasoning_mode: ReasoningMode;
 }
 
@@ -194,11 +199,44 @@ export interface StreamTokenEvent {
   content: string;
 }
 
+export interface StreamToolCallEvent {
+  type: "tool_call";
+  call_id: string;
+  tool_name: string;
+  label: string;
+  description: string;
+  risk: ToolRisk;
+  permission: ToolPermissionMode;
+  arguments: Record<string, unknown>;
+}
+
+export interface StreamApprovalRequiredEvent {
+  type: "approval_required";
+  approval_id: string;
+  call_id: string;
+  tool_name: string;
+  label: string;
+  description: string;
+  risk: ToolRisk;
+  arguments: Record<string, unknown>;
+}
+
+export interface StreamToolResultEvent {
+  type: "tool_result";
+  call_id: string;
+  tool_name: string;
+  label: string;
+  status: "completed" | "denied" | "failed";
+  summary: string;
+}
+
 export interface StreamDoneEvent {
   type: "done";
   model: string;
   done_reason: string | null;
   metrics: StreamMetrics;
+  model_turns?: number;
+  tool_calls?: number;
 }
 
 export interface StreamErrorEvent {
@@ -206,4 +244,77 @@ export interface StreamErrorEvent {
   message: string;
 }
 
-export type ChatStreamEvent = StreamContextEvent | StreamTokenEvent | StreamDoneEvent | StreamErrorEvent;
+export type ChatStreamEvent =
+  | StreamContextEvent
+  | StreamTokenEvent
+  | StreamToolCallEvent
+  | StreamApprovalRequiredEvent
+  | StreamToolResultEvent
+  | StreamDoneEvent
+  | StreamErrorEvent;
+
+export interface ToolRecord {
+  name: string;
+  label: string;
+  description: string;
+  category: string;
+  risk: ToolRisk;
+  permission: ToolPermissionMode;
+  default_permission: ToolPermissionMode;
+  parameters: Record<string, unknown>;
+}
+
+export interface ToolListResponse {
+  enabled: boolean;
+  tools: ToolRecord[];
+}
+
+export interface ToolAuditRecord {
+  id: string;
+  conversation_id: string | null;
+  tool_name: string;
+  permission_mode: string;
+  status: string;
+  arguments: Record<string, unknown>;
+  result_preview: string | null;
+  error: string | null;
+  approval_id: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ToolAuditListResponse {
+  entries: ToolAuditRecord[];
+}
+
+export interface PendingToolApproval {
+  approval_id: string;
+  conversation_id: string | null;
+  tool_name: string;
+  label: string;
+  description: string;
+  risk: ToolRisk;
+  arguments: Record<string, unknown>;
+  created_at?: string;
+  call_id?: string;
+}
+
+export interface PendingToolApprovalsResponse {
+  approvals: PendingToolApproval[];
+}
+
+export interface ToolApprovalDecisionResponse {
+  approval_id: string;
+  resolved: boolean;
+  decision: ToolApprovalDecision;
+  tool_name: string;
+}
+
+export interface ToolActivity {
+  callId: string;
+  toolName: string;
+  label: string;
+  status: ToolActivityStatus;
+  arguments: Record<string, unknown>;
+  summary?: string;
+}

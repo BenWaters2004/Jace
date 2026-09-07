@@ -1,0 +1,15 @@
+_registered = False
+
+
+def ensure_tools_registered() -> None:
+    global _registered
+
+    if _registered:
+        return
+
+    from jace.tools.builtins import register_builtin_tools
+    from jace.tools.webtools import register_web_tools
+
+    register_builtin_tools()
+    register_web_tools()
+    _registered = True

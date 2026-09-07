@@ -12,8 +12,18 @@ import type {
   MemoryRecord,
   MemoryUpdateRequest,
   ModelsResponse,
+  PendingToolApprovalsResponse,
+  StreamApprovalRequiredEvent,
   StreamContextEvent,
   StreamDoneEvent,
+  StreamToolCallEvent,
+  StreamToolResultEvent,
+  ToolApprovalDecision,
+  ToolApprovalDecisionResponse,
+  ToolAuditListResponse,
+  ToolListResponse,
+  ToolPermissionMode,
+  ToolRecord,
 } from "./types";
 
 async function getErrorMessage(response: Response): Promise<string> {
@@ -22,7 +32,7 @@ async function getErrorMessage(response: Response): Promise<string> {
     if (typeof body?.detail === "string") return body.detail;
     if (typeof body?.message === "string") return body.message;
   } catch {
-    // Fall back to the HTTP status.
+    // Fall back to HTTP status.
   }
   return `${response.status} ${response.statusText}`;
 }
@@ -35,12 +45,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       ...(options?.headers ?? {}),
     },
   });
+
   if (!response.ok) throw new Error(await getErrorMessage(response));
   return response.json() as Promise<T>;
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
 export const getModels = () => request<ModelsResponse>("/models");
+
 export const getSettings = () => request<AssistantSettings>("/settings");
 export const resetSettings = () => request<AssistantSettings>("/settings/reset", { method: "POST" });
 export const updateSettings = (payload: AssistantSettingsUpdate) =>
@@ -67,9 +79,29 @@ export async function deleteMemory(id: string): Promise<void> {
   await request(`/memories/${id}`, { method: "DELETE" });
 }
 
+export const getTools = () => request<ToolListResponse>("/tools");
+export const updateToolPermission = (name: string, permission: ToolPermissionMode) =>
+  request<ToolRecord>(`/tools/${encodeURIComponent(name)}/permission`, {
+    method: "PATCH",
+    body: JSON.stringify({ permission }),
+  });
+export const getToolAudit = (limit = 100) => request<ToolAuditListResponse>(`/tools/audit?limit=${limit}`);
+export async function clearToolAudit(): Promise<void> {
+  await request("/tools/audit", { method: "DELETE" });
+}
+export const getPendingToolApprovals = () => request<PendingToolApprovalsResponse>("/tools/approvals");
+export const resolveToolApproval = (approvalId: string, decision: ToolApprovalDecision) =>
+  request<ToolApprovalDecisionResponse>(`/tools/approvals/${approvalId}`, {
+    method: "POST",
+    body: JSON.stringify({ decision }),
+  });
+
 interface StreamCallbacks {
   onContext?: (event: StreamContextEvent) => void;
   onToken: (content: string) => void;
+  onToolCall?: (event: StreamToolCallEvent) => void;
+  onApprovalRequired?: (event: StreamApprovalRequiredEvent) => void;
+  onToolResult?: (event: StreamToolResultEvent) => void;
   onDone: (event: StreamDoneEvent) => void;
 }
 
@@ -84,6 +116,7 @@ export async function sendChatStream(
     body: JSON.stringify(payload),
     signal,
   });
+
   if (!response.ok) throw new Error(await getErrorMessage(response));
   if (!response.body) throw new Error("The Jace backend did not provide a response stream.");
 
@@ -94,6 +127,7 @@ export async function sendChatStream(
   function processLine(line: string) {
     const trimmed = line.trim();
     if (!trimmed) return;
+
     let event: ChatStreamEvent;
     try {
       event = JSON.parse(trimmed) as ChatStreamEvent;
@@ -101,10 +135,28 @@ export async function sendChatStream(
       throw new Error("Jace received malformed streaming data.");
     }
 
-    if (event.type === "context") callbacks.onContext?.(event);
-    else if (event.type === "token") callbacks.onToken(event.content);
-    else if (event.type === "done") callbacks.onDone(event);
-    else if (event.type === "error") throw new Error(event.message);
+    switch (event.type) {
+      case "context":
+        callbacks.onContext?.(event);
+        break;
+      case "token":
+        callbacks.onToken(event.content);
+        break;
+      case "tool_call":
+        callbacks.onToolCall?.(event);
+        break;
+      case "approval_required":
+        callbacks.onApprovalRequired?.(event);
+        break;
+      case "tool_result":
+        callbacks.onToolResult?.(event);
+        break;
+      case "done":
+        callbacks.onDone(event);
+        break;
+      case "error":
+        throw new Error(event.message);
+    }
   }
 
   try {
@@ -116,6 +168,7 @@ export async function sendChatStream(
       buffer = lines.pop() ?? "";
       for (const line of lines) processLine(line);
     }
+
     buffer += decoder.decode();
     if (buffer.trim()) processLine(buffer);
   } finally {
