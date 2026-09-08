@@ -11,6 +11,7 @@ from jace.api.attachments import router as attachments_router
 from jace.api.automations import router as automations_router
 from jace.api.chat import router as chat_router
 from jace.api.computer import router as computer_router
+from jace.api.control import router as control_router
 from jace.api.conversations import router as conversations_router
 from jace.api.memories import router as memories_router
 from jace.api.settings import router as settings_router
@@ -85,6 +86,7 @@ app.include_router(automations_router)
 app.include_router(settings_router)
 app.include_router(memories_router)
 app.include_router(computer_router)
+app.include_router(control_router)
 app.include_router(tools_router)
 app.include_router(conversations_router)
 app.include_router(chat_router)

@@ -15,6 +15,15 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _audit_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Redact high-volume/private live input before persistent audit storage."""
+    safe = dict(arguments)
+    if tool_name == "type_control_text" and isinstance(safe.get("text"), str):
+        text = safe["text"]
+        safe["text"] = f"<redacted interactive text: {len(text)} characters>"
+    return safe
+
+
 async def ensure_tool_permissions(session: AsyncSession) -> None:
     ensure_tools_registered()
 
@@ -107,7 +116,7 @@ async def create_tool_audit(
         tool_name=tool_name,
         permission_mode=permission_mode,
         status=status,
-        arguments_json=json.dumps(arguments, ensure_ascii=False, separators=(",", ":")),
+        arguments_json=json.dumps(_audit_arguments(tool_name, arguments), ensure_ascii=False, separators=(",", ":")),
     )
 
     session.add(entry)

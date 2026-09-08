@@ -27,6 +27,19 @@ BACKGROUND_FORBIDDEN_TOOLS = {
     "create_automation",
     "set_automation_enabled",
     "run_automation_now",
+    # Phase 9 GUI control is deliberately interactive-only. Background jobs
+    # must never click/type into the desktop while nobody is present.
+    "start_control_session",
+    "control_status",
+    "list_control_windows",
+    "focus_control_window",
+    "capture_control_screen",
+    "move_control_pointer",
+    "click_control",
+    "scroll_control",
+    "type_control_text",
+    "press_control_keys",
+    "stop_control_session",
 }
 
 

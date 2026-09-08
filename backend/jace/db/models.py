@@ -332,3 +332,60 @@ class AutomationNotification(Base):
 
     automation: Mapped["Automation"] = relationship(back_populates="notifications")
     run: Mapped["AutomationRun | None"] = relationship(back_populates="notifications")
+
+
+class ControlAppPolicy(Base):
+    """Persistent per-application observation / interaction boundary for Phase 9."""
+
+    __tablename__ = "control_app_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    label: Mapped[str] = mapped_column(String(140), nullable=False)
+    process_pattern: Mapped[str] = mapped_column(String(260), nullable=False)
+    title_pattern: Mapped[str] = mapped_column(String(500), nullable=False, default="*")
+    observe_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    interact_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sensitive_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class ControlSession(Base):
+    """Short-lived, explicitly authorised GUI-control session."""
+
+    __tablename__ = "control_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active", index=True)
+    step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_steps: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    store_screenshots: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sensitive_authorized_once: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stop_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class ControlActionAudit(Base):
+    """Append-only Phase 9 action history separate from the generic tool audit."""
+
+    __tablename__ = "control_action_audit"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("control_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    action_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    window_handle: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    process_name: Mapped[str | None] = mapped_column(String(260), nullable=True)
+    window_title: Mapped[str | None] = mapped_column(String(700), nullable=True)
+    arguments_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="requested", index=True)
+    result_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    screenshot_attachment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

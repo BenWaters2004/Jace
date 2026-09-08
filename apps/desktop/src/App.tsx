@@ -17,15 +17,23 @@ import {
   deleteAttachment,
   createComputerCommand,
   createComputerWorkspace,
+  createControlPolicy,
+  createControlSession,
   createConversation,
   createMemory,
   deleteComputerCommand,
   deleteComputerWorkspace,
+  deleteControlPolicy,
   deleteConversation,
   deleteMemory,
   getAttachmentStatus,
   getComputerStatus,
   getComputerWorkspaces,
+  getControlActions,
+  getControlPolicies,
+  getControlSessions,
+  getControlStatus,
+  getControlWindows,
   getConversation,
   getConversations,
   getHealth,
@@ -36,9 +44,13 @@ import {
   getTools,
   resetSettings,
   resolveToolApproval,
+  authorizeSensitiveControl,
+  emergencyStopControl,
+  stopControlSession,
   sendChatStream,
   updateComputerCommand,
   updateComputerWorkspace,
+  updateControlPolicy,
   updateConversation,
   updateMemory,
   updateSettings,
@@ -48,6 +60,7 @@ import {
 import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
 import { ComputerView } from "./components/ComputerView";
+import { ControlView } from "./components/ControlView";
 import { MemoryView } from "./components/MemoryView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
@@ -72,6 +85,13 @@ import type {
   ComputerWorkspace,
   ComputerWorkspaceCreateRequest,
   ComputerWorkspaceUpdateRequest,
+  ControlActionRecord,
+  ControlAppPolicy,
+  ControlAppPolicyCreateRequest,
+  ControlAppPolicyUpdateRequest,
+  ControlSessionRecord,
+  ControlStatus,
+  ControlWindowRecord,
   ConversationDetail,
   ConversationSummary,
   GenerationStats,
@@ -147,6 +167,11 @@ export default function App() {
   const [toolAudit, setToolAudit] = useState<ToolAuditRecord[]>([]);
   const [computerStatus, setComputerStatus] = useState<ComputerStatus | null>(null);
   const [computerWorkspaces, setComputerWorkspaces] = useState<ComputerWorkspace[]>([]);
+  const [controlStatus, setControlStatus] = useState<ControlStatus | null>(null);
+  const [controlWindows, setControlWindows] = useState<ControlWindowRecord[]>([]);
+  const [controlPolicies, setControlPolicies] = useState<ControlAppPolicy[]>([]);
+  const [controlSessions, setControlSessions] = useState<ControlSessionRecord[]>([]);
+  const [controlActions, setControlActions] = useState<ControlActionRecord[]>([]);
   const [automationStatus, setAutomationStatus] = useState<AutomationStatus | null>(null);
   const [automations, setAutomations] = useState<AutomationRecord[]>([]);
   const [automationNotifications, setAutomationNotifications] = useState<AutomationNotificationRecord[]>([]);
@@ -202,6 +227,31 @@ export default function App() {
     setComputerStatus(statusResponse);
     setComputerWorkspaces(workspaceResponse.workspaces);
     return workspaceResponse.workspaces;
+  }, []);
+
+  const refreshControl = useCallback(async () => {
+    const [statusResponse, policyResponse, sessionResponse, actionResponse] = await Promise.all([
+      getControlStatus(),
+      getControlPolicies(),
+      getControlSessions(50),
+      getControlActions(null, 100),
+    ]);
+    setControlStatus(statusResponse);
+    setControlPolicies(policyResponse.policies);
+    setControlSessions(sessionResponse.sessions);
+    setControlActions(actionResponse.actions);
+
+    if (statusResponse.enabled && statusResponse.platform_supported) {
+      try {
+        const windowResponse = await getControlWindows();
+        setControlWindows(windowResponse.windows);
+      } catch {
+        setControlWindows([]);
+      }
+    } else {
+      setControlWindows([]);
+    }
+    return statusResponse;
   }, []);
 
   const refreshAutomations = useCallback(async () => {
@@ -275,6 +325,16 @@ export default function App() {
       setAutomationNotifications(notificationResponse.notifications);
       notificationSeenRef.current = new Set(notificationResponse.notifications.map((item) => item.id));
 
+      try {
+        await refreshControl();
+      } catch {
+        setControlStatus(null);
+        setControlWindows([]);
+        setControlPolicies([]);
+        setControlSessions([]);
+        setControlActions([]);
+      }
+
       if (!currentHealth.ollama_connected) {
         setConnectionState("ollama-offline");
         return;
@@ -295,7 +355,7 @@ export default function App() {
       setConnectionState("backend-offline");
       setError(initialiseError instanceof Error ? initialiseError.message : "Could not initialise Jace.");
     }
-  }, []);
+  }, [refreshControl]);
 
   useEffect(() => { void initialise(); }, [initialise]);
 
@@ -336,6 +396,16 @@ export default function App() {
     const timer = window.setInterval(() => { void pollNotifications(); }, 10_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [connectionState]);
+
+  useEffect(() => {
+    if (connectionState === "backend-offline") return;
+    if (screen !== "control" && !controlStatus?.active_session) return;
+
+    const timer = window.setInterval(() => {
+      void refreshControl();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [connectionState, screen, controlStatus?.active_session?.id, refreshControl]);
 
   async function ensureConversation(): Promise<string> {
     if (activeConversationId) return activeConversationId;
@@ -793,6 +863,89 @@ export default function App() {
     }
   }
 
+  async function addControlPolicy(payload: ControlAppPolicyCreateRequest) {
+    try {
+      await createControlPolicy(payload);
+      await refreshControl();
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Could not create app control policy.");
+      throw controlError;
+    }
+  }
+
+  async function patchControlPolicy(policy: ControlAppPolicy, payload: ControlAppPolicyUpdateRequest) {
+    try {
+      await updateControlPolicy(policy.id, payload);
+      await refreshControl();
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Could not update app control policy.");
+      throw controlError;
+    }
+  }
+
+  async function removeControlPolicy(policy: ControlAppPolicy) {
+    if (!window.confirm(`Delete the control policy "${policy.label}"?`)) return;
+    try {
+      await deleteControlPolicy(policy.id);
+      await refreshControl();
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Could not delete app control policy.");
+      throw controlError;
+    }
+  }
+
+  async function startDesktopControl(maxSteps: number, storeScreenshots: boolean) {
+    try {
+      await createControlSession({
+        conversation_id: activeConversationId,
+        max_steps: maxSteps,
+        store_screenshots: storeScreenshots,
+      });
+      await refreshControl();
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Could not start interactive control.");
+      throw controlError;
+    }
+  }
+
+  async function stopDesktopControl(session: ControlSessionRecord) {
+    try {
+      await stopControlSession(session.id);
+      await refreshControl();
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Could not stop interactive control.");
+      throw controlError;
+    }
+  }
+
+  async function authorizeSensitiveDesktopControl(session: ControlSessionRecord) {
+    if (!window.confirm(
+      "Authorize the NEXT sensitive GUI action only?\n\nThis authorization is consumed after one detected sensitive click/type/key action."
+    )) return;
+    try {
+      await authorizeSensitiveControl(session.id);
+      await refreshControl();
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Could not authorize the sensitive action.");
+      throw controlError;
+    }
+  }
+
+  async function emergencyStopDesktopControl() {
+    // Stop the live agent stream as well as the backend control session so the
+    // model cannot immediately queue another GUI action after the user hits
+    // the emergency control button.
+    abortRef.current?.abort();
+    setPendingApproval(null);
+    try {
+      await emergencyStopControl();
+      await refreshControl();
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Could not emergency-stop control.");
+      throw controlError;
+    }
+  }
+
   async function addAutomation(payload: AutomationCreateRequest) {
     try {
       await createAutomation(payload);
@@ -892,7 +1045,7 @@ export default function App() {
       <Sidebar
         screen={screen}
         assistantName={settings.assistant_name}
-        appVersion={health?.app_version ?? "0.8.0"}
+        appVersion={health?.app_version ?? "0.9.0"}
         connectionState={connectionState}
         conversations={conversations}
         activeConversationId={activeConversationId}
@@ -901,6 +1054,7 @@ export default function App() {
         memoryCount={activeMemoryCount}
         toolCount={availableToolCount}
         computerCount={computerWorkspaces.filter((workspace) => workspace.is_active).length}
+        controlCount={controlStatus?.active_session ? 1 : 0}
         automationCount={automations.filter((automation) => automation.enabled).length}
         onSearchChange={setConversationSearch}
         onScreenChange={setScreen}
@@ -977,6 +1131,25 @@ export default function App() {
         />
       )}
 
+      {screen === "control" && (
+        <ControlView
+          status={controlStatus}
+          windows={controlWindows}
+          policies={controlPolicies}
+          sessions={controlSessions}
+          actions={controlActions}
+          activeConversationId={activeConversationId}
+          onRefresh={async () => { await refreshControl(); }}
+          onCreatePolicy={addControlPolicy}
+          onUpdatePolicy={patchControlPolicy}
+          onDeletePolicy={removeControlPolicy}
+          onStartSession={startDesktopControl}
+          onStopSession={stopDesktopControl}
+          onAuthorizeSensitive={authorizeSensitiveDesktopControl}
+          onEmergencyStop={emergencyStopDesktopControl}
+        />
+      )}
+
       {screen === "automations" && (
         <AutomationsView
           status={automationStatus}
@@ -1005,6 +1178,16 @@ export default function App() {
           onReset={resetProfile}
           onApplyToCurrentConversation={applySettingsToCurrent}
         />
+      )}
+
+      {controlStatus?.active_session && (
+        <button
+          className="global-control-stop"
+          title="Immediately stop Jace interactive computer control"
+          onClick={() => void emergencyStopDesktopControl()}
+        >
+          ■ STOP CONTROL
+        </button>
       )}
 
       <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />

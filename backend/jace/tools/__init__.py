@@ -12,10 +12,12 @@ def ensure_tools_registered() -> None:
     from jace.tools.computer import register_computer_tools
     from jace.tools.multimodal import register_multimodal_tools
     from jace.tools.automation import register_automation_tools
+    from jace.tools.interactive import register_interactive_tools
 
     register_builtin_tools()
     register_web_tools()
     register_computer_tools()
     register_multimodal_tools()
     register_automation_tools()
+    register_interactive_tools()
     _registered = True

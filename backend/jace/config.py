@@ -11,7 +11,7 @@ ATTACHMENTS_DIRECTORY = DATA_DIRECTORY / "attachments"
 
 class Settings(BaseSettings):
     app_name: str = "Jace"
-    app_version: str = "0.8.0"
+    app_version: str = "0.9.0"
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:4b"
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     web_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36 Jace/0.8.0"
+        "Chrome/131.0 Safari/537.36 Jace/0.9.0"
     )
     browser_enabled: bool = True
     browser_timeout_seconds: float = 25.0
@@ -129,6 +129,19 @@ class Settings(BaseSettings):
     automation_notification_poll_seconds: int = 10
     automation_max_result_chars: int = 20_000
     automation_watcher_state_chars: int = 10_000
+
+    # Phase 9 interactive GUI control. This is intentionally Windows-first.
+    interactive_control_enabled: bool = True
+    interactive_default_max_steps: int = 30
+    interactive_max_steps: int = 80
+    interactive_session_timeout_seconds: int = 1800
+    interactive_action_pause_ms: int = 220
+    interactive_type_interval_ms: int = 18
+    interactive_auto_capture_after_action: bool = True
+    interactive_capture_max_edge: int = 1600
+    interactive_store_screenshots_default: bool = False
+    interactive_max_text_chars: int = 4_000
+    interactive_max_hotkey_keys: int = 5
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -31,6 +31,17 @@ ALL_TOOL_NAMES = {
     "create_automation",
     "set_automation_enabled",
     "run_automation_now",
+    "start_control_session",
+    "control_status",
+    "list_control_windows",
+    "focus_control_window",
+    "capture_control_screen",
+    "move_control_pointer",
+    "click_control",
+    "scroll_control",
+    "type_control_text",
+    "press_control_keys",
+    "stop_control_session",
 }
 
 
@@ -203,5 +214,31 @@ def route_tool_names(message: str) -> set[str]:
 
     if re.search(r"\b(?:run|execute|start)\b.{0,35}\b(?:automation|scheduled task|watcher)\b", lowered):
         selected.update({"list_automations", "run_automation_now"})
+
+    # Phase 9 interactive GUI control. Selecting the family lets the model
+    # observe first and then act within an approved short-lived session.
+    if re.search(
+        r"\b(?:click|type|press|scroll|move (?:the )?mouse|mouse|keyboard|focus (?:the )?window|"
+        r"open (?:it|the app|the window)|use (?:my |the )?(?:browser|desktop|computer)|"
+        r"control (?:my |the )?(?:screen|desktop|computer|browser|app)|interact with|fill (?:in|out)|"
+        r"operate (?:the |my )?(?:browser|app|application|computer)|do it on my screen)\b",
+        lowered,
+    ):
+        selected.update({
+            "start_control_session",
+            "control_status",
+            "list_control_windows",
+            "focus_control_window",
+            "capture_control_screen",
+            "move_control_pointer",
+            "click_control",
+            "scroll_control",
+            "type_control_text",
+            "press_control_keys",
+            "stop_control_session",
+        })
+
+    if re.search(r"\b(?:stop|cancel|abort|emergency stop)\b.{0,25}\b(?:control|mouse|computer|desktop|browser)\b", lowered):
+        selected.update({"control_status", "stop_control_session"})
 
     return selected

@@ -39,7 +39,7 @@ def expect_value_error(fn, message: str) -> None:
 
 def main() -> int:
     print(f"Jace version: {settings.app_version}")
-    require(settings.app_version == "0.8.0", "version is 0.8.0")
+    require(settings.app_version == "0.9.0", "version is 0.9.0")
     require(settings.ollama_keep_alive == "-1m", "Ollama keep_alive regression remains fixed")
     require(settings.automation_enabled, "automation scheduler is enabled by default")
     require(settings.automation_max_parallel_runs >= 1, "automation concurrency limit is configured")
@@ -54,7 +54,7 @@ def main() -> int:
         "run_automation_now",
     }
     require(required_tools <= names, "all Phase 8 automation tools are registered")
-    require(len(names) >= 28, "Phase 8 registers at least 28 tools")
+    require(len(names) >= 39, "Phase 9 retains Phase 8 tools and registers at least 39 tools total")
 
     routed = route_tool_names("Remind me tomorrow at 9am to call John")
     require("create_automation" in routed, "reminder requests expose automation creation")
@@ -106,6 +106,7 @@ def main() -> int:
     expect_value_error(lambda: validate_schedule(bad_cron), "invalid cron ranges are rejected before persistence")
 
     require("create_automation" in BACKGROUND_FORBIDDEN_TOOLS, "automation creation cannot be delegated to background jobs")
+    require("click_control" in BACKGROUND_FORBIDDEN_TOOLS, "background automations cannot receive Phase 9 GUI-control tools")
     expect_value_error(
         lambda: validate_tool_names(["create_automation"], background_scope=True),
         "background scopes cannot grant automation-management tools",

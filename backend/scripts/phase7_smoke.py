@@ -14,7 +14,7 @@ from PIL import Image
 from jace.attachments.processors import _image_to_base64
 from jace.attachments.service import AttachmentError, media_kind_for_name
 from jace.config import settings
-from jace.tools import ensure_tools_registered
+from jace.tools.multimodal import register_multimodal_tools
 from jace.tools.registry import registry
 from jace.tools.routing import route_tool_names
 
@@ -37,7 +37,7 @@ def routing_checks() -> None:
 
 def main() -> int:
     print(f"Jace version: {settings.app_version}")
-    require(settings.app_version == "0.8.0", "expected Jace v0.8.0")
+    require(settings.app_version == "0.9.0", "expected Jace v0.9.0")
     require(settings.ollama_keep_alive == "-1m", "keep_alive regression: expected -1m")
     require(settings.multimodal_enabled, "multimodal support should be enabled")
 
@@ -59,7 +59,7 @@ def main() -> int:
         require(bool(encoded), "image encoding returned no data")
         require(metadata["width"] == 320 and metadata["height"] == 180, "image metadata mismatch")
 
-    ensure_tools_registered()
+    register_multimodal_tools()
     names = {tool.name for tool in registry.all()}
     for required in {"inspect_attachment", "inspect_workspace_media", "capture_screen"}:
         require(required in names, f"missing registered multimodal tool: {required}")

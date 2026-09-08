@@ -530,3 +530,120 @@ class AutomationWatcherEvaluation(BaseModel):
     condition_met: bool
     summary: str = Field(min_length=1, max_length=3_000)
     state: str = Field(default="", max_length=8_000)
+
+
+# Phase 9 interactive desktop control
+class ControlWindowResponse(BaseModel):
+    handle: int
+    title: str
+    process_name: str
+    process_id: int
+    left: int
+    top: int
+    right: int
+    bottom: int
+    width: int
+    height: int
+    is_active: bool
+    blocked: bool
+    sensitive: bool
+    policy_id: str | None = None
+    policy_label: str | None = None
+    observe_allowed: bool
+    interact_allowed: bool
+    sensitive_allowed: bool
+
+
+class ControlWindowListResponse(BaseModel):
+    windows: list[ControlWindowResponse]
+
+
+class ControlAppPolicyCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=140)
+    process_pattern: str = Field(min_length=1, max_length=260)
+    title_pattern: str = Field(default="*", min_length=1, max_length=500)
+    observe_enabled: bool = True
+    interact_enabled: bool = False
+    sensitive_enabled: bool = False
+
+
+class ControlAppPolicyUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=140)
+    process_pattern: str | None = Field(default=None, min_length=1, max_length=260)
+    title_pattern: str | None = Field(default=None, min_length=1, max_length=500)
+    observe_enabled: bool | None = None
+    interact_enabled: bool | None = None
+    sensitive_enabled: bool | None = None
+    is_active: bool | None = None
+
+
+class ControlAppPolicyResponse(BaseModel):
+    id: str
+    label: str
+    process_pattern: str
+    title_pattern: str
+    observe_enabled: bool
+    interact_enabled: bool
+    sensitive_enabled: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ControlAppPolicyListResponse(BaseModel):
+    policies: list[ControlAppPolicyResponse]
+
+
+class ControlSessionCreate(BaseModel):
+    conversation_id: str | None = Field(default=None, min_length=36, max_length=36)
+    max_steps: int = Field(default=30, ge=1, le=80)
+    store_screenshots: bool = False
+
+
+class ControlSessionResponse(BaseModel):
+    id: str
+    conversation_id: str | None
+    status: str
+    step_count: int
+    max_steps: int
+    remaining_steps: int
+    store_screenshots: bool
+    sensitive_authorized_once: bool
+    started_at: datetime
+    updated_at: datetime
+    ended_at: datetime | None
+    stop_reason: str | None
+
+
+class ControlSessionListResponse(BaseModel):
+    sessions: list[ControlSessionResponse]
+
+
+class ControlActionResponse(BaseModel):
+    id: str
+    session_id: str
+    conversation_id: str | None
+    action_type: str
+    window_handle: str | None
+    process_name: str | None
+    window_title: str | None
+    arguments: dict[str, Any]
+    status: str
+    result_preview: str | None
+    screenshot_attachment_id: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class ControlActionListResponse(BaseModel):
+    actions: list[ControlActionResponse]
+
+
+class ControlStatusResponse(BaseModel):
+    enabled: bool
+    platform_supported: bool
+    active_session: ControlSessionResponse | None
+    policy_count: int
+    active_policy_count: int
+    visible_window_count: int
+    physical_failsafe: str

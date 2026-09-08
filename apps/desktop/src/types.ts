@@ -1,5 +1,5 @@
 export type ChatRole = "user" | "assistant";
-export type Screen = "chat" | "memory" | "tools" | "computer" | "automations" | "settings";
+export type Screen = "chat" | "memory" | "tools" | "computer" | "control" | "automations" | "settings";
 export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal" | "temporary" | "other";
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";
@@ -566,4 +566,115 @@ export interface AutomationDraftResponse {
   notify_on_failure: boolean;
   notify_on_condition: boolean;
   reasoning: string;
+}
+
+// Phase 9 interactive desktop control
+export interface ControlWindowRecord {
+  handle: number;
+  title: string;
+  process_name: string;
+  process_id: number;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+  is_active: boolean;
+  blocked: boolean;
+  sensitive: boolean;
+  policy_id: string | null;
+  policy_label: string | null;
+  observe_allowed: boolean;
+  interact_allowed: boolean;
+  sensitive_allowed: boolean;
+}
+
+export interface ControlWindowListResponse {
+  windows: ControlWindowRecord[];
+}
+
+export interface ControlAppPolicy {
+  id: string;
+  label: string;
+  process_pattern: string;
+  title_pattern: string;
+  observe_enabled: boolean;
+  interact_enabled: boolean;
+  sensitive_enabled: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ControlAppPolicyListResponse {
+  policies: ControlAppPolicy[];
+}
+
+export interface ControlAppPolicyCreateRequest {
+  label: string;
+  process_pattern: string;
+  title_pattern: string;
+  observe_enabled: boolean;
+  interact_enabled: boolean;
+  sensitive_enabled: boolean;
+}
+
+export interface ControlAppPolicyUpdateRequest extends Partial<ControlAppPolicyCreateRequest> {
+  is_active?: boolean;
+}
+
+export interface ControlSessionRecord {
+  id: string;
+  conversation_id: string | null;
+  status: string;
+  step_count: number;
+  max_steps: number;
+  remaining_steps: number;
+  store_screenshots: boolean;
+  sensitive_authorized_once: boolean;
+  started_at: string;
+  updated_at: string;
+  ended_at: string | null;
+  stop_reason: string | null;
+}
+
+export interface ControlSessionListResponse {
+  sessions: ControlSessionRecord[];
+}
+
+export interface ControlSessionCreateRequest {
+  conversation_id?: string | null;
+  max_steps: number;
+  store_screenshots: boolean;
+}
+
+export interface ControlActionRecord {
+  id: string;
+  session_id: string;
+  conversation_id: string | null;
+  action_type: string;
+  window_handle: string | null;
+  process_name: string | null;
+  window_title: string | null;
+  arguments: Record<string, unknown>;
+  status: string;
+  result_preview: string | null;
+  screenshot_attachment_id: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ControlActionListResponse {
+  actions: ControlActionRecord[];
+}
+
+export interface ControlStatus {
+  enabled: boolean;
+  platform_supported: boolean;
+  active_session: ControlSessionRecord | null;
+  policy_count: number;
+  active_policy_count: number;
+  visible_window_count: number;
+  physical_failsafe: string;
 }

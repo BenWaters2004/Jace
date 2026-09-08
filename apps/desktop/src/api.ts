@@ -22,6 +22,16 @@ import type {
   ComputerWorkspaceCreateRequest,
   ComputerWorkspaceListResponse,
   ComputerWorkspaceUpdateRequest,
+  ControlActionListResponse,
+  ControlAppPolicy,
+  ControlAppPolicyCreateRequest,
+  ControlAppPolicyListResponse,
+  ControlAppPolicyUpdateRequest,
+  ControlSessionCreateRequest,
+  ControlSessionListResponse,
+  ControlSessionRecord,
+  ControlStatus,
+  ControlWindowListResponse,
   ChatStreamEvent,
   ConversationDetail,
   ConversationListResponse,
@@ -138,6 +148,34 @@ export async function deleteComputerCommand(id: string): Promise<void> {
   await request(`/computer/commands/${id}`, { method: "DELETE" });
 }
 
+// Phase 9 interactive control
+export const getControlStatus = () => request<ControlStatus>("/control/status");
+export const getControlWindows = () => request<ControlWindowListResponse>("/control/windows");
+export const getControlPolicies = () => request<ControlAppPolicyListResponse>("/control/policies");
+export const createControlPolicy = (payload: ControlAppPolicyCreateRequest) =>
+  request<ControlAppPolicy>("/control/policies", { method: "POST", body: JSON.stringify(payload) });
+export const updateControlPolicy = (id: string, payload: ControlAppPolicyUpdateRequest) =>
+  request<ControlAppPolicy>(`/control/policies/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export async function deleteControlPolicy(id: string): Promise<void> {
+  await request(`/control/policies/${id}`, { method: "DELETE" });
+}
+export const getControlSessions = (limit = 50) =>
+  request<ControlSessionListResponse>(`/control/sessions?limit=${limit}`);
+export const createControlSession = (payload: ControlSessionCreateRequest) =>
+  request<ControlSessionRecord>("/control/sessions", { method: "POST", body: JSON.stringify(payload) });
+export const stopControlSession = (id: string) =>
+  request<ControlSessionRecord>(`/control/sessions/${id}/stop`, { method: "POST" });
+export const authorizeSensitiveControl = (id: string) =>
+  request<ControlSessionRecord>(`/control/sessions/${id}/authorize-sensitive`, { method: "POST" });
+export async function emergencyStopControl(): Promise<number> {
+  const result = await request<{ success: boolean; stopped_sessions: number }>("/control/emergency-stop", { method: "POST" });
+  return result.stopped_sessions;
+}
+export const getControlActions = (sessionId?: string | null, limit = 100) => {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (sessionId) query.set("session_id", sessionId);
+  return request<ControlActionListResponse>(`/control/actions?${query.toString()}`);
+};
 
 
 // Phase 8 automation
