@@ -44,6 +44,31 @@ class GenerationStatsResponse(BaseModel):
     tokens_per_second: float | None = None
 
 
+class AttachmentResponse(BaseModel):
+    id: str
+    conversation_id: str
+    message_id: str | None
+    original_name: str
+    mime_type: str
+    media_kind: str
+    size_bytes: int
+    sha256: str
+    source_type: str
+    source_path: str | None
+    created_at: datetime
+
+
+class AttachmentStatusResponse(BaseModel):
+    enabled: bool
+    image_max_bytes: int
+    document_max_bytes: int
+    audio_max_bytes: int
+    max_count: int
+    audio_enabled: bool
+    audio_model: str
+    screen_capture_enabled: bool
+
+
 class MessageResponse(BaseModel):
     id: str
     conversation_id: str
@@ -53,6 +78,7 @@ class MessageResponse(BaseModel):
     model: str | None = None
     created_at: datetime
     stats: GenerationStatsResponse | None = None
+    attachments: list[AttachmentResponse] = Field(default_factory=list)
 
 
 class ConversationCreate(BaseModel):
@@ -91,7 +117,8 @@ class ConversationListResponse(BaseModel):
 
 class PersistentChatRequest(BaseModel):
     conversation_id: str
-    message: str = Field(min_length=1, max_length=100_000)
+    message: str = Field(default="", max_length=100_000)
+    attachment_ids: list[str] = Field(default_factory=list, max_length=6)
     model: str | None = None
     system_prompt: str | None = None
     reasoning_mode: ReasoningMode | None = None

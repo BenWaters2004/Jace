@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   clearToolAudit,
+  deleteAttachment,
   createComputerCommand,
   createComputerWorkspace,
   createConversation,
@@ -10,6 +11,7 @@ import {
   deleteComputerWorkspace,
   deleteConversation,
   deleteMemory,
+  getAttachmentStatus,
   getComputerStatus,
   getComputerWorkspaces,
   getConversation,
@@ -29,6 +31,7 @@ import {
   updateMemory,
   updateSettings,
   updateToolPermission,
+  uploadAttachment,
 } from "./api";
 import { ChatView } from "./components/ChatView";
 import { ComputerView } from "./components/ComputerView";
@@ -39,6 +42,7 @@ import { ToolApprovalModal } from "./components/ToolApprovalModal";
 import { ToolsView } from "./components/ToolsView";
 import type {
   ApiGenerationStats,
+  AttachmentStatus,
   AssistantSettings,
   ChatMessage,
   ComputerCommandCreateRequest,
@@ -56,6 +60,7 @@ import type {
   MemoryRecord,
   MemoryUpdateRequest,
   ModelInfo,
+  PendingAttachment,
   PendingToolApproval,
   PerformanceDiagnostics,
   ReasoningMode,
@@ -104,6 +109,7 @@ function mapMessages(conversation: ConversationDetail): ChatMessage[] {
     created_at: message.created_at,
     stopped: message.status === "stopped",
     stats: mapStats(message.stats),
+    attachments: message.attachments,
   }));
 }
 
@@ -111,6 +117,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("chat");
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [settings, setSettings] = useState<AssistantSettings | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -129,6 +136,7 @@ export default function App() {
   const [conversationPrompt, setConversationPrompt] = useState("");
   const [reasoningMode, setReasoningMode] = useState<ReasoningMode>("fast");
   const [input, setInput] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [conversationSearch, setConversationSearch] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -183,6 +191,7 @@ export default function App() {
       setMemoryContextCount(0);
       setToolContextCount(0);
       setPerformanceDiagnostics(null);
+      clearPendingAttachments();
       setToolActivity([]);
       setError(null);
       setScreen("chat");
@@ -199,7 +208,7 @@ export default function App() {
       const currentHealth = await getHealth();
       setHealth(currentHealth);
 
-      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse, computerStatusResponse, computerWorkspaceResponse] = await Promise.all([
+      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse, computerStatusResponse, computerWorkspaceResponse, attachmentStatusResponse] = await Promise.all([
         getSettings(),
         getConversations(),
         getMemories(false),
@@ -207,6 +216,7 @@ export default function App() {
         getToolAudit(100),
         getComputerStatus(),
         getComputerWorkspaces(),
+        getAttachmentStatus(),
       ]);
 
       setSettings(profile);
@@ -220,6 +230,7 @@ export default function App() {
       setToolAudit(auditResponse.entries);
       setComputerStatus(computerStatusResponse);
       setComputerWorkspaces(computerWorkspaceResponse.workspaces);
+      setAttachmentStatus(attachmentStatusResponse);
 
       if (!currentHealth.ollama_connected) {
         setConnectionState("ollama-offline");
@@ -303,10 +314,59 @@ export default function App() {
     window.setTimeout(() => { void refreshTools(); }, 250);
   }
 
+  function clearPendingAttachments() {
+    setPendingAttachments((current) => {
+      for (const item of current) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      }
+      return [];
+    });
+  }
+
+  function addPendingFiles(files: File[]) {
+    if (!attachmentStatus?.enabled || isGenerating) return;
+    setPendingAttachments((current) => {
+      const room = Math.max(0, attachmentStatus.max_count - current.length);
+      const accepted = files.slice(0, room);
+      if (accepted.length < files.length) {
+        setError(`Jace accepts up to ${attachmentStatus.max_count} attachments per message.`);
+      }
+      const additions: PendingAttachment[] = [];
+      for (const file of accepted) {
+        const lower = file.name.toLowerCase();
+        const isImage = file.type.startsWith("image/");
+        const isAudio = file.type.startsWith("audio/") || /\.(mp3|m4a|wav|flac|ogg|oga|webm|aac|wma)$/.test(lower);
+        const maxBytes = isImage
+          ? attachmentStatus.image_max_bytes
+          : isAudio
+            ? attachmentStatus.audio_max_bytes
+            : attachmentStatus.document_max_bytes;
+        if (file.size > maxBytes) {
+          setError(`${file.name} is too large (${(file.size / 1024 / 1024).toFixed(1)} MB).`);
+          continue;
+        }
+        additions.push({
+          id: crypto.randomUUID(),
+          file,
+          previewUrl: isImage ? URL.createObjectURL(file) : null,
+        });
+      }
+      return [...current, ...additions];
+    });
+  }
+
+  function removePendingAttachment(id: string) {
+    setPendingAttachments((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return current.filter((item) => item.id !== id);
+    });
+  }
+
   async function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const text = input.trim();
-    if (!text || isGenerating || connectionState !== "online" || !settings || !selectedModel) return;
+    if ((!text && pendingAttachments.length === 0) || isGenerating || connectionState !== "online" || !settings || !selectedModel) return;
 
     let conversationId: string;
     try {
@@ -316,10 +376,27 @@ export default function App() {
       return;
     }
 
-    const user = localMessage("user", text);
+    let uploadedAttachments = [] as Awaited<ReturnType<typeof uploadAttachment>>[];
+    try {
+      for (const pending of pendingAttachments) {
+        uploadedAttachments.push(await uploadAttachment(conversationId, pending.file));
+      }
+    } catch (uploadError) {
+      for (const attachment of uploadedAttachments) {
+        try { await deleteAttachment(attachment.id); } catch { /* best-effort orphan cleanup */ }
+      }
+      setError(uploadError instanceof Error ? uploadError.message : "Could not upload attachment.");
+      return;
+    }
+
+    const displayText = text || (uploadedAttachments.length === 1
+      ? `Attached ${uploadedAttachments[0].original_name}`
+      : `Attached ${uploadedAttachments.length} files`);
+    const user = { ...localMessage("user", displayText), attachments: uploadedAttachments };
     const assistant: ChatMessage = { ...localMessage("assistant", ""), isStreaming: true };
     setMessages((current) => [...current, user, assistant]);
     setInput("");
+    clearPendingAttachments();
     setError(null);
     setMemoryContextCount(0);
     setToolContextCount(0);
@@ -340,6 +417,7 @@ export default function App() {
           system_prompt: conversationPrompt,
           reasoning_mode: reasoningMode,
           temperature: settings.temperature,
+          attachment_ids: uploadedAttachments.map((attachment) => attachment.id),
         },
         {
           onContext: (context) => {
@@ -354,6 +432,9 @@ export default function App() {
               tool_names: context.tool_names,
               history_messages: context.history_messages,
               history_chars: context.history_chars,
+              attachment_count: context.attachment_count,
+              attachment_image_count: context.attachment_image_count,
+              attachment_processing_ms: context.attachment_processing_ms,
             });
           },
           onToken: (content) => updateAssistant(assistant.id, (message) => ({ ...message, content: message.content + content })),
@@ -422,6 +503,7 @@ export default function App() {
     setActiveConversationId(null);
     setMessages([]);
     setInput("");
+    clearPendingAttachments();
     setConversationSearch("");
     setSelectedModel(settings.default_model);
     setConversationPrompt(settings.system_prompt);
@@ -650,7 +732,7 @@ export default function App() {
       <Sidebar
         screen={screen}
         assistantName={settings.assistant_name}
-        appVersion={health?.app_version ?? "0.6.0"}
+        appVersion={health?.app_version ?? "0.7.0"}
         connectionState={connectionState}
         conversations={conversations}
         activeConversationId={activeConversationId}
@@ -684,6 +766,10 @@ export default function App() {
           toolContextCount={toolContextCount}
           performanceDiagnostics={performanceDiagnostics}
           toolActivity={toolActivity}
+          pendingAttachments={pendingAttachments}
+          attachmentLimit={attachmentStatus?.max_count ?? 6}
+          onFilesAdded={addPendingFiles}
+          onRemovePendingAttachment={removePendingAttachment}
           onInputChange={setInput}
           onSubmit={(event) => void submit(event)}
           onStop={() => abortRef.current?.abort()}

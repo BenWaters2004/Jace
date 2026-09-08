@@ -9,3 +9,10 @@ tzdata
 beautifulsoup4>=4.14,<5
 ddgs==9.16.0
 playwright==1.62.0
+python-multipart>=0.0.20,<1
+Pillow>=11,<13
+pypdf>=6,<7
+PyMuPDF>=1.26,<2
+python-docx>=1.2,<2
+mss>=10,<11
+faster-whisper==1.2.1

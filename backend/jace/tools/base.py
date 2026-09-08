@@ -30,6 +30,7 @@ class ToolExecutionResult:
     content: str
     display: str | None = None
     metadata: dict[str, Any] | None = None
+    images: list[str] | None = None
 
 
 ToolHandler = Callable[[BaseModel, ToolContext], Awaitable[ToolExecutionResult]]

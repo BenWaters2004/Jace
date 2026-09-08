@@ -32,6 +32,37 @@ export interface ApiGenerationStats {
   tokens_per_second: number | null;
 }
 
+export interface AttachmentRecord {
+  id: string;
+  conversation_id: string;
+  message_id: string | null;
+  original_name: string;
+  mime_type: string;
+  media_kind: "image" | "pdf" | "document" | "audio" | string;
+  size_bytes: number;
+  sha256: string;
+  source_type: string;
+  source_path: string | null;
+  created_at: string;
+}
+
+export interface AttachmentStatus {
+  enabled: boolean;
+  image_max_bytes: number;
+  document_max_bytes: number;
+  audio_max_bytes: number;
+  max_count: number;
+  audio_enabled: boolean;
+  audio_model: string;
+  screen_capture_enabled: boolean;
+}
+
+export interface PendingAttachment {
+  id: string;
+  file: File;
+  previewUrl: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   conversation_id?: string;
@@ -43,6 +74,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   stopped?: boolean;
   stats?: GenerationStats;
+  attachments?: AttachmentRecord[];
 }
 
 export interface ApiMessage {
@@ -54,6 +86,7 @@ export interface ApiMessage {
   model: string | null;
   created_at: string;
   stats: ApiGenerationStats | null;
+  attachments: AttachmentRecord[];
 }
 
 export interface HealthResponse {
@@ -173,6 +206,7 @@ export interface ChatRequest {
   system_prompt?: string;
   reasoning_mode?: ReasoningMode;
   temperature?: number;
+  attachment_ids?: string[];
 }
 
 export interface StreamMetrics {
@@ -197,6 +231,9 @@ export interface PerformanceDiagnostics {
   tool_names: string[];
   history_messages: number;
   history_chars: number;
+  attachment_count: number;
+  attachment_image_count: number;
+  attachment_processing_ms: number;
 }
 
 export interface StreamContextEvent {
@@ -211,6 +248,10 @@ export interface StreamContextEvent {
   history_chars: number;
   preprocess_ms: number;
   reasoning_mode: ReasoningMode;
+  attachment_count: number;
+  attachment_image_count: number;
+  attachment_processing_ms: number;
+  attachments?: Array<{ id: string; name: string; kind: string; metadata?: Record<string, unknown>; error?: string }>;
 }
 
 export interface StreamTokenEvent {

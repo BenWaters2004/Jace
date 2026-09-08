@@ -1,5 +1,15 @@
-import type { FormEvent, KeyboardEvent } from "react";
-import type { ChatMessage, ModelInfo, PerformanceDiagnostics, ReasoningMode, ToolActivity } from "../types";
+import { useRef } from "react";
+import type { ChangeEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
+import { attachmentContentUrl } from "../api";
+import type {
+  AttachmentRecord,
+  ChatMessage,
+  ModelInfo,
+  PendingAttachment,
+  PerformanceDiagnostics,
+  ReasoningMode,
+  ToolActivity,
+} from "../types";
 
 interface ChatViewProps {
   title: string;
@@ -17,6 +27,10 @@ interface ChatViewProps {
   toolContextCount: number;
   performanceDiagnostics: PerformanceDiagnostics | null;
   toolActivity: ToolActivity[];
+  pendingAttachments: PendingAttachment[];
+  attachmentLimit: number;
+  onFilesAdded: (files: File[]) => void;
+  onRemovePendingAttachment: (id: string) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
   onStop: () => void;
@@ -28,6 +42,12 @@ interface ChatViewProps {
 function formatDuration(ms: number | null) {
   if (ms == null) return "—";
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function initial(value: string, fallback: string) {
@@ -44,13 +64,62 @@ function toolStatusText(status: ToolActivity["status"]) {
   }
 }
 
+function attachmentGlyph(kind: string) {
+  if (kind === "image") return "▧";
+  if (kind === "pdf") return "PDF";
+  if (kind === "audio") return "♪";
+  return "≡";
+}
+
+function MessageAttachment({ attachment }: { attachment: AttachmentRecord }) {
+  const url = attachmentContentUrl(attachment.id);
+  if (attachment.media_kind === "image") {
+    return (
+      <a className="message-image-link" href={url} target="_blank" rel="noreferrer" title={attachment.original_name}>
+        <img className="message-image" src={url} alt={attachment.original_name} loading="lazy" />
+        <span>{attachment.original_name}</span>
+      </a>
+    );
+  }
+
+  return (
+    <a className="message-file-card" href={url} target="_blank" rel="noreferrer">
+      <span className={`file-glyph kind-${attachment.media_kind}`}>{attachmentGlyph(attachment.media_kind)}</span>
+      <span className="file-card-copy">
+        <strong>{attachment.original_name}</strong>
+        <small>{attachment.media_kind} · {formatBytes(attachment.size_bytes)}</small>
+      </span>
+    </a>
+  );
+}
+
 export function ChatView(props: ChatViewProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       props.onSubmit();
     }
   }
+
+  function selectedFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length) props.onFilesAdded(files);
+    event.target.value = "";
+  }
+
+  function dropFiles(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (props.isGenerating || !props.online) return;
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length) props.onFilesAdded(files);
+  }
+
+  const canSend = props.online
+    && !props.isGenerating
+    && Boolean(props.selectedModel)
+    && (Boolean(props.input.trim()) || props.pendingAttachments.length > 0);
 
   return (
     <section className="content-shell chat-shell">
@@ -82,6 +151,11 @@ export function ChatView(props: ChatViewProps) {
               : "skipped"}
           </span>
           <span><strong>History</strong> {props.performanceDiagnostics.history_messages} msgs</span>
+          {props.performanceDiagnostics.attachment_count > 0 && (
+            <span>
+              <strong>Media</strong> {props.performanceDiagnostics.attachment_count} · {formatDuration(props.performanceDiagnostics.attachment_processing_ms)}
+            </span>
+          )}
           <span>
             <strong>Tools</strong> {props.performanceDiagnostics.tool_names.length
               ? props.performanceDiagnostics.tool_names.join(", ")
@@ -95,16 +169,16 @@ export function ChatView(props: ChatViewProps) {
           <div className="welcome-panel">
             <div className="welcome-mark">J</div>
             <h2>How can I help?</h2>
-            <p>{props.assistantName} can use controlled local tools and read the public web while keeping you in charge of permissions.</p>
+            <p>{props.assistantName} can now understand images, PDFs, documents and local audio alongside controlled web and computer tools.</p>
             <div className="prompt-cards">
-              <button onClick={() => props.onInputChange("Search the web for the latest developments in local AI assistants and summarise the most relevant sources.")}>
-                <strong>Web research</strong><span>Search and read current public sources</span>
+              <button onClick={() => fileInputRef.current?.click()}>
+                <strong>Inspect a file</strong><span>Attach an image, PDF, document or audio file</span>
               </button>
-              <button onClick={() => props.onInputChange("Search my past conversations for Project Jace and summarise what you find.")}>
-                <strong>History</strong><span>Search stored conversation history</span>
+              <button onClick={() => props.onInputChange("Look at my current screen and help me understand what is happening.")}>
+                <strong>Screen help</strong><span>Request a permissioned local screenshot</span>
               </button>
-              <button onClick={() => props.onInputChange("Read https://playwright.dev/python/ and tell me what Playwright is used for.")}>
-                <strong>Read a page</strong><span>Fetch a specific public webpage safely</span>
+              <button onClick={() => props.onInputChange("Search the web for the latest developments in local multimodal AI assistants and summarise the best sources.")}>
+                <strong>Web research</strong><span>Combine current public sources with local reasoning</span>
               </button>
             </div>
           </div>
@@ -115,6 +189,11 @@ export function ChatView(props: ChatViewProps) {
                 <div className="message-avatar">{message.role === "user" ? initial(props.userName, "U") : initial(props.assistantName, "J")}</div>
                 <div className="message-body">
                   <div className="message-author">{message.role === "user" ? props.userName : props.assistantName}</div>
+                  {message.attachments && message.attachments.length > 0 && (
+                    <div className="message-attachments">
+                      {message.attachments.map((attachment) => <MessageAttachment key={attachment.id} attachment={attachment} />)}
+                    </div>
+                  )}
                   <div className="message-content">{message.content || (message.stopped ? "Generation stopped." : "")}</div>
                   {message.stopped && <div className="generation-stats"><span className="stopped">■ Stopped</span></div>}
                   {message.stats && (
@@ -155,22 +234,57 @@ export function ChatView(props: ChatViewProps) {
           </div>
         )}
 
-        <form className="composer" onSubmit={props.onSubmit}>
+        {props.pendingAttachments.length > 0 && (
+          <div className="pending-attachments">
+            {props.pendingAttachments.map((attachment) => (
+              <div className="pending-attachment" key={attachment.id}>
+                {attachment.previewUrl ? (
+                  <img src={attachment.previewUrl} alt="" />
+                ) : (
+                  <span className="pending-file-glyph">{attachmentGlyph(attachment.file.type.startsWith("audio/") ? "audio" : attachment.file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "document")}</span>
+                )}
+                <div>
+                  <strong>{attachment.file.name}</strong>
+                  <small>{formatBytes(attachment.file.size)}</small>
+                </div>
+                <button type="button" onClick={() => props.onRemovePendingAttachment(attachment.id)} title="Remove attachment">×</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form className="composer multimodal-composer" onSubmit={props.onSubmit} onDragOver={(event) => event.preventDefault()} onDrop={dropFiles}>
+          <input
+            ref={fileInputRef}
+            className="attachment-input"
+            type="file"
+            multiple
+            accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.html,.log,.ini,.cfg,.yaml,.yml,.toml,.py,.php,.js,.jsx,.ts,.tsx,.css,.sql,.docx,audio/*,.mp3,.m4a,.wav,.flac,.ogg,.webm"
+            onChange={selectedFiles}
+            disabled={!props.online || props.isGenerating || props.pendingAttachments.length >= props.attachmentLimit}
+          />
+          <button
+            type="button"
+            className="attach-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!props.online || props.isGenerating || props.pendingAttachments.length >= props.attachmentLimit}
+            title="Attach image, PDF, document or audio"
+          >+</button>
           <textarea
             value={props.input}
             onChange={(event) => props.onInputChange(event.target.value)}
             onKeyDown={keyDown}
-            placeholder={!props.online ? "Waiting for Jace..." : props.isGenerating ? `${props.assistantName} is working...` : `Message ${props.assistantName}...`}
+            placeholder={!props.online ? "Waiting for Jace..." : props.isGenerating ? `${props.assistantName} is working...` : `Message ${props.assistantName} or attach a file...`}
             disabled={!props.online || props.isGenerating}
             rows={1}
           />
           {props.isGenerating ? (
             <button type="button" className="stop-button" onClick={props.onStop} title="Stop generation"><span /></button>
           ) : (
-            <button className="send-button" type="submit" disabled={!props.online || !props.input.trim() || !props.selectedModel}>↑</button>
+            <button className="send-button" type="submit" disabled={!canSend}>↑</button>
           )}
         </form>
-        <div className="composer-hint">Enter to send · Shift + Enter for a new line · Internet tools use the same Allow / Ask / Deny policy as local tools</div>
+        <div className="composer-hint">Enter to send · Shift + Enter for a new line · Drag files here · Up to {props.attachmentLimit} attachments</div>
       </div>
     </section>
   );

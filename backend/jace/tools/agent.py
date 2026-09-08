@@ -378,13 +378,17 @@ async def _execute_tool_call(
             "status": "completed",
             "summary": display,
         }
+        tool_message = {
+            "role": "tool",
+            "tool_name": tool_name,
+            "content": model_content,
+        }
+        if result.images:
+            tool_message["images"] = result.images
+
         yield {
             "type": "_tool_message",
-            "message": {
-                "role": "tool",
-                "tool_name": tool_name,
-                "content": model_content,
-            },
+            "message": tool_message,
         }
         return
 
@@ -458,6 +462,8 @@ async def stream_agent(
     conversation_id: str | None,
     user_message: str,
     tool_names: list[str] | None = None,
+    current_images: list[str] | None = None,
+    attachment_context: str = "",
 ):
     """
     Streaming multi-turn agent loop.
@@ -469,6 +475,12 @@ async def stream_agent(
     ensure_tools_registered()
 
     agent_messages = [dict(message) for message in messages]
+    if agent_messages and agent_messages[-1].get("role") == "user":
+        if attachment_context.strip():
+            existing = str(agent_messages[-1].get("content") or "")
+            agent_messages[-1]["content"] = (existing + "\n\n" + attachment_context.strip()).strip()
+        if current_images:
+            agent_messages[-1]["images"] = current_images
     selected_tool_names = tool_names if tool_names is not None else await routed_tool_names(user_message)
     tools = _tool_schemas_for_names(selected_tool_names)
     usage = AgentUsage()

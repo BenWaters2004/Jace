@@ -33,6 +33,12 @@ class Conversation(Base):
         passive_deletes=True,
         order_by="Message.created_at",
     )
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="Attachment.created_at",
+    )
 
 
 class Message(Base):
@@ -60,6 +66,39 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="message",
+        passive_deletes=True,
+        order_by="Attachment.created_at",
+    )
+
+
+class Attachment(Base):
+    """User-provided or tool-created multimodal material stored locally."""
+
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    original_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    media_kind: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False, default="upload")
+    source_path: Mapped[str | None] = mapped_column(String(1400), nullable=True)
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="attachments")
+    message: Mapped["Message | None"] = relationship(back_populates="attachments")
 
 
 class Memory(Base):

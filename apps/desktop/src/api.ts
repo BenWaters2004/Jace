@@ -1,6 +1,8 @@
 import { API_BASE_URL } from "./constants";
 import type {
   AssistantSettings,
+  AttachmentRecord,
+  AttachmentStatus,
   AssistantSettingsUpdate,
   ChatRequest,
   ComputerCommandCreateRequest,
@@ -59,6 +61,25 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
+
+export const getAttachmentStatus = () => request<AttachmentStatus>("/attachments/status");
+export const getAttachment = (id: string) => request<AttachmentRecord>(`/attachments/${id}`);
+export const attachmentContentUrl = (id: string) => `${API_BASE_URL}/attachments/${id}/content`;
+
+export async function uploadAttachment(conversationId: string, file: File): Promise<AttachmentRecord> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const response = await fetch(`${API_BASE_URL}/attachments?conversation_id=${encodeURIComponent(conversationId)}`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response));
+  return response.json() as Promise<AttachmentRecord>;
+}
+
+export async function deleteAttachment(id: string): Promise<void> {
+  await request(`/attachments/${id}`, { method: "DELETE" });
+}
 export const getModels = () => request<ModelsResponse>("/models");
 
 export const getSettings = () => request<AssistantSettings>("/settings");

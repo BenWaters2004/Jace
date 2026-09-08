@@ -24,6 +24,9 @@ ALL_TOOL_NAMES = {
     "move_workspace_path",
     "delete_workspace_file",
     "run_workspace_command",
+    "inspect_attachment",
+    "inspect_workspace_media",
+    "capture_screen",
 }
 
 
@@ -57,7 +60,6 @@ def route_tool_names(message: str) -> set[str]:
     if not text:
         return selected
 
-    # Explicit escape hatch for development/debugging.
     if re.search(r"\b(?:use|show|list) all tools\b", lowered):
         return set(ALL_TOOL_NAMES)
 
@@ -85,8 +87,6 @@ def route_tool_names(message: str) -> set[str]:
     if re.search(r"\b(?:rename|retitle)\b.{0,30}\b(?:chat|conversation|this)\b", lowered):
         selected.add("rename_current_conversation")
 
-    # Explicit memory management via tools. The dedicated remember/forget
-    # command path still handles the common natural-language forms first.
     if re.search(r"\b(?:create|add|save|store)\b.{0,25}\bmemory\b", lowered):
         selected.add("create_memory")
     if re.search(r"\b(?:deactivate|disable|remove)\b.{0,25}\bmemory\b", lowered):
@@ -94,8 +94,6 @@ def route_tool_names(message: str) -> set[str]:
 
     has_url = _contains_url(text)
     if has_url:
-        # Static reading is preferred; browser_read_page is supplied as a
-        # fallback for client-rendered pages, but the model need not use it.
         selected.update({"read_web_page", "browser_read_page"})
 
     if re.search(
@@ -110,20 +108,22 @@ def route_tool_names(message: str) -> set[str]:
     ):
         selected.update({"web_search", "read_web_page", "browser_read_page"})
 
-    # Research phrasing often needs search even without the literal word web.
-    if re.search(r"\b(?:research|find sources|find articles|find documentation|latest documentation|find information about)\b", lowered):
+    if re.search(
+        r"\b(?:research|find sources|find articles|find documentation|latest documentation|find information about)\b",
+        lowered,
+    ):
         selected.update({"web_search", "read_web_page", "browser_read_page"})
 
-    # Phase 6 controlled local-computer/workspace requests. Always expose the
-    # workspace discovery tool alongside a relevant action so the model can
-    # obtain exact workspace IDs rather than guessing paths or identifiers.
     computer_hint = re.search(
         r"\b(?:my (?:file|files|folder|folders|directory|directories|project|repo|repository|codebase)|"
         r"local (?:file|files|folder|folders|project|repo|repository)|workspace|working tree|source file|code file)\b",
         lowered,
     )
 
-    if computer_hint or re.search(r"\b(?:list|show|find|search|read|open|inspect)\b.{0,30}\b(?:files?|folders?|directories|repo|repository|codebase)\b", lowered):
+    if computer_hint or re.search(
+        r"\b(?:list|show|find|search|read|open|inspect)\b.{0,30}\b(?:files?|folders?|directories|repo|repository|codebase)\b",
+        lowered,
+    ):
         selected.add("list_computer_workspaces")
 
     if re.search(r"\b(?:list|show|browse|what(?:'s| is) in)\b.{0,35}\b(?:files?|folders?|directories|workspace|repo|repository)\b", lowered):
@@ -154,7 +154,32 @@ def route_tool_names(message: str) -> set[str]:
     if re.search(r"\b(?:delete|remove)\b.{0,30}\b(?:file)\b", lowered):
         selected.update({"list_computer_workspaces", "workspace_file_info", "delete_workspace_file"})
 
-    if re.search(r"\b(?:run|execute|build|test|tests|lint|format|git status|check the project)\b", lowered) and (computer_hint or re.search(r"\b(?:project|repo|repository|workspace|code|build|tests?|lint|git)\b", lowered)):
+    if re.search(r"\b(?:run|execute|build|test|tests|lint|format|git status|check the project)\b", lowered) and (
+        computer_hint or re.search(r"\b(?:project|repo|repository|workspace|code|build|tests?|lint|git)\b", lowered)
+    ):
         selected.update({"list_computer_workspaces", "run_workspace_command"})
+
+    # Phase 7 multimodal. User-attached media is injected directly in the
+    # current turn. These schemas are for later references, workspace media,
+    # and permissioned live screen capture.
+    if re.search(
+        r"\b(?:attachment|attached|image|photo|picture|screenshot|pdf|document|audio|voice note|recording)\b",
+        lowered,
+    ):
+        selected.add("inspect_attachment")
+
+    if re.search(
+        r"\b(?:look at|inspect|analyse|analyze|read|open|view|transcribe)\b.{0,45}"
+        r"\b(?:image|photo|picture|pdf|document|audio|recording|voice note)\b",
+        lowered,
+    ) and computer_hint:
+        selected.update({"list_computer_workspaces", "inspect_workspace_media"})
+
+    if re.search(
+        r"\b(?:look at|inspect|see|capture|take (?:a )?screenshot of|what(?:'s| is) on)\b.{0,35}"
+        r"\b(?:my |the |current )?(?:screen|display|monitor|desktop)\b",
+        lowered,
+    ):
+        selected.add("capture_screen")
 
     return selected

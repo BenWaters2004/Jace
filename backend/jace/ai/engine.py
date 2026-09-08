@@ -46,7 +46,7 @@ def _copy_chat_message(message: dict[str, Any]) -> dict[str, Any]:
     message to only role/content.
     """
     copied: dict[str, Any] = {"role": message["role"]}
-    for key in ("content", "thinking", "tool_calls", "tool_name"):
+    for key in ("content", "thinking", "tool_calls", "tool_name", "images"):
         if key in message and message[key] is not None:
             copied[key] = message[key]
     if "content" not in copied:

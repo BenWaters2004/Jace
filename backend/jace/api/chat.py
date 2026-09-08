@@ -7,6 +7,8 @@ from fastapi.responses import StreamingResponse
 
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError
 from jace.ai.prompts import TOOL_AGENT_SYSTEM_PROMPT
+from jace.attachments.processors import prepare_attachments
+from jace.attachments.service import assign_attachments_to_message, get_attachments
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
 from jace.config import settings as env_settings
 from jace.database import SessionLocal
@@ -35,6 +37,11 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 @router.post("/stream")
 async def send_streaming_chat(request: PersistentChatRequest):
+    if not request.message.strip() and not request.attachment_ids:
+        raise HTTPException(status_code=400, detail="Enter a message or attach a file.")
+    if len(request.attachment_ids) > env_settings.attachment_max_count:
+        raise HTTPException(status_code=400, detail="Too many attachments for one message.")
+
     async with SessionLocal() as session:
         conversation = await get_conversation(session, request.conversation_id)
         if conversation is None:
@@ -55,10 +62,25 @@ async def send_streaming_chat(request: PersistentChatRequest):
             system_prompt=conversation_prompt,
         )
 
-        user_message = await store_user_message(session, conversation, request.message)
-        user_message_id = user_message.id
+        attachments = await get_attachments(
+            session,
+            request.attachment_ids,
+            conversation_id=conversation.id,
+        )
+        if len(attachments) != len(list(dict.fromkeys(request.attachment_ids))):
+            raise HTTPException(status_code=400, detail="One or more attachments are unavailable for this conversation.")
 
-        memory_command = detect_memory_command(request.message)
+        attachment_names = ", ".join(item.original_name for item in attachments)
+        stored_user_text = request.message.strip()
+        if not stored_user_text:
+            stored_user_text = f"Attached {len(attachments)} file(s): {attachment_names}"
+
+        user_message = await store_user_message(session, conversation, stored_user_text)
+        user_message_id = user_message.id
+        if attachments:
+            await assign_attachments_to_message(session, attachments, user_message_id)
+
+        memory_command = detect_memory_command(request.message) if request.message.strip() else None
         memory_command_handled = memory_command is not None
         memory_action_context = ""
 
@@ -113,11 +135,14 @@ async def send_streaming_chat(request: PersistentChatRequest):
         memory_min_similarity = profile.memory_min_similarity
         auto_extract = bool(profile.memory_auto_extract and memory_allowed)
         profile_prompt = build_profile_prompt(profile, conversation_system_prompt)
+        current_attachment_ids = [item.id for item in attachments]
 
     async def persist_assistant(
         content: str,
         status: str,
         metrics: dict | None = None,
+        *,
+        model_name: str | None = None,
     ) -> str | None:
         if not content.strip():
             return None
@@ -133,7 +158,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 role="assistant",
                 content=content,
                 status=status,
-                model=conversation_model,
+                model=model_name or conversation_model,
                 metrics=metrics,
             )
             return message.id
@@ -144,9 +169,26 @@ async def send_streaming_chat(request: PersistentChatRequest):
         first_token_at: float | None = None
         saved = False
         memory_hits = []
+        response_model = conversation_model
 
         await chat_activity.begin()
         try:
+            attachment_started = time.perf_counter()
+            attachment_context = ""
+            attachment_images: list[str] = []
+            attachment_summaries: list[dict] = []
+            if current_attachment_ids:
+                async with SessionLocal() as session:
+                    current_attachments = await get_attachments(
+                        session,
+                        current_attachment_ids,
+                        conversation_id=conversation_id,
+                    )
+                    attachment_context, attachment_images, attachment_summaries = await prepare_attachments(
+                        session, current_attachments
+                    )
+            attachment_processing_ms = round((time.perf_counter() - attachment_started) * 1000, 2)
+
             memory_started = time.perf_counter()
             memory_retrieval_used = bool(
                 memory_allowed
@@ -177,7 +219,28 @@ async def send_streaming_chat(request: PersistentChatRequest):
 
             tool_started = time.perf_counter()
             routed_tools = await routed_tool_names(request.message)
+            if current_attachment_ids:
+                routed_tools = [name for name in routed_tools if name != "inspect_attachment"]
             tool_routing_ms = round((time.perf_counter() - tool_started) * 1000, 2)
+
+            multimodal_tool_names = {
+                "inspect_attachment",
+                "inspect_workspace_media",
+                "capture_screen",
+            }
+            use_specialist_vision = bool(
+                env_settings.vision_model.strip()
+                and (
+                    attachment_images
+                    or multimodal_tool_names.intersection(routed_tools)
+                )
+            )
+            response_model = (
+                env_settings.vision_model.strip()
+                if use_specialist_vision
+                else conversation_model
+            )
+
             preprocess_ms = round((time.perf_counter() - started_at) * 1000, 2)
 
             yield ndjson_event(
@@ -193,11 +256,16 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     "history_chars": history_chars,
                     "preprocess_ms": preprocess_ms,
                     "reasoning_mode": reasoning_mode,
+                    "response_model": response_model,
+                    "attachment_count": len(current_attachment_ids),
+                    "attachment_image_count": len(attachment_images),
+                    "attachment_processing_ms": attachment_processing_ms,
+                    "attachments": attachment_summaries,
                 }
             )
 
             memory_context = build_memory_context(memory_hits) if memory_allowed else ""
-            tool_context = TOOL_AGENT_SYSTEM_PROMPT if routed_tools else ""
+            tool_context = TOOL_AGENT_SYSTEM_PROMPT if (routed_tools or current_attachment_ids) else ""
 
             effective_system_prompt = (
                 profile_prompt
@@ -207,14 +275,16 @@ async def send_streaming_chat(request: PersistentChatRequest):
             )
 
             async for event in stream_agent(
-                model=conversation_model,
+                model=response_model,
                 messages=history,
                 system_prompt=effective_system_prompt,
                 reasoning_mode=reasoning_mode,
                 temperature=temperature,
                 conversation_id=conversation_id,
-                user_message=request.message,
+                user_message=request.message or stored_user_text,
                 tool_names=routed_tools,
+                current_images=attachment_images,
+                attachment_context=attachment_context,
             ):
                 event_type = event.get("type")
 
@@ -257,13 +327,14 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         full_response,
                         "complete",
                         metrics,
+                        model_name=response_model,
                     )
                     saved = True
                     if not memory_command_handled and assistant_message_id:
                         schedule_memory_extraction(
                             conversation_id=conversation_id,
                             source_message_id=user_message_id,
-                            user_message=request.message,
+                            user_message=request.message or stored_user_text,
                             assistant_message=full_response,
                             enabled=auto_extract,
                         )
@@ -271,7 +342,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     yield ndjson_event(
                         {
                             "type": "done",
-                            "model": event.get("model", conversation_model),
+                            "model": event.get("model", response_model),
                             "done_reason": event.get("done_reason"),
                             "metrics": metrics,
                             "model_turns": raw_metrics.get("model_turns", 1),
@@ -285,6 +356,10 @@ async def send_streaming_chat(request: PersistentChatRequest):
                                 "tool_names": routed_tools,
                                 "history_messages": len(history),
                                 "history_chars": history_chars,
+                                "response_model": response_model,
+                                "attachment_count": len(current_attachment_ids),
+                                "attachment_image_count": len(attachment_images),
+                                "attachment_processing_ms": attachment_processing_ms,
                             },
                         }
                     )
@@ -296,6 +371,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     persist_assistant(
                         "".join(response_parts),
                         "stopped",
+                        model_name=response_model,
                     )
                 )
             raise
@@ -304,6 +380,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 await persist_assistant(
                     "".join(response_parts),
                     "error",
+                    model_name=response_model,
                 )
                 saved = True
             yield ndjson_event({"type": "error", "message": str(exc)})
@@ -312,6 +389,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 await persist_assistant(
                     "".join(response_parts),
                     "error",
+                    model_name=response_model,
                 )
             yield ndjson_event(
                 {

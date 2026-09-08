@@ -3,6 +3,7 @@ from typing import Any
 
 from jace.schemas import (
     AssistantSettingsResponse,
+    AttachmentResponse,
     ConversationDetail,
     GenerationStatsResponse,
     MemoryResponse,
@@ -24,6 +25,22 @@ def tokens_per_second(count: int | None, duration_ns: int | None) -> float | Non
     seconds = duration_ns / 1_000_000_000
     return None if seconds <= 0 else round(count / seconds, 2)
 
+
+
+def attachment_response(attachment) -> AttachmentResponse:
+    return AttachmentResponse(
+        id=attachment.id,
+        conversation_id=attachment.conversation_id,
+        message_id=attachment.message_id,
+        original_name=attachment.original_name,
+        mime_type=attachment.mime_type,
+        media_kind=attachment.media_kind,
+        size_bytes=attachment.size_bytes,
+        sha256=attachment.sha256,
+        source_type=attachment.source_type,
+        source_path=attachment.source_path,
+        created_at=attachment.created_at,
+    )
 
 def message_response(message) -> MessageResponse:
     values = [
@@ -59,6 +76,7 @@ def message_response(message) -> MessageResponse:
         model=message.model,
         created_at=message.created_at,
         stats=stats,
+        attachments=[attachment_response(item) for item in getattr(message, "attachments", [])],
     )
 
 

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from jace.api.helpers import conversation_detail_response
+from jace.attachments.service import cleanup_conversation_files
 from jace.database import SessionLocal
 from jace.db.conversations import (
     create_conversation,
@@ -89,4 +90,5 @@ async def remove_conversation(conversation_id: str):
     async with SessionLocal() as session:
         if not await delete_conversation(session, conversation_id):
             raise HTTPException(status_code=404, detail="Conversation not found.")
+        cleanup_conversation_files(conversation_id)
         return {"success": True}

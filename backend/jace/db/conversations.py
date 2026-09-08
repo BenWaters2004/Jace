@@ -46,7 +46,7 @@ async def list_conversations(session: AsyncSession) -> list[tuple[Conversation, 
 async def get_conversation(session: AsyncSession, conversation_id: str) -> Conversation | None:
     statement = (
         select(Conversation)
-        .options(selectinload(Conversation.messages))
+        .options(selectinload(Conversation.messages).selectinload(Message.attachments))
         .where(Conversation.id == conversation_id)
     )
     result = await session.execute(statement)
@@ -157,7 +157,18 @@ def model_history(
             continue
         if message.role == "assistant" and message.status not in {"complete", "stopped"}:
             continue
-        valid.append({"role": message.role, "content": message.content})
+        content = message.content
+        attachments = getattr(message, "attachments", [])
+        if attachments:
+            refs = ", ".join(
+                f'id={item.id} name="{item.original_name}" kind={item.media_kind}'
+                for item in attachments
+            )
+            content += (
+                "\n\n[Conversation attachment references: " + refs + ". "
+                "Use inspect_attachment if a later turn requires the file contents again.]"
+            )
+        valid.append({"role": message.role, "content": content})
 
     if max_messages is not None and max_messages > 0:
         valid = valid[-max_messages:]
