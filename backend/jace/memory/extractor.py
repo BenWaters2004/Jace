@@ -9,6 +9,7 @@ from jace.ai.engine import structured_chat
 from jace.ai.prompts import MEMORY_EXTRACTION_SYSTEM_PROMPT, MEMORY_RECONCILIATION_SYSTEM_PROMPT
 from jace.config import settings
 from jace.database import SessionLocal
+from jace.performance import chat_activity
 from jace.memory.service import (
     create_memory,
     normalize_project_subject,
@@ -367,7 +368,15 @@ async def _automatic_extraction_job(
     user_message: str,
     assistant_message: str,
 ) -> None:
+    # Automatic curation is useful, but it must never compete with an
+    # interactive response for the same local model/GPU. Wait until chat has
+    # been quiet for a short period before doing extraction/reconciliation.
+    await chat_activity.wait_for_idle(settings.memory_extraction_idle_seconds)
+
     async with _extraction_lock:
+        # A chat may have started while this task was waiting on another memory
+        # extraction. Yield again before touching Ollama.
+        await chat_activity.wait_for_idle(0)
         async with SessionLocal() as session:
             results = await process_exchange_memories(
                 session,

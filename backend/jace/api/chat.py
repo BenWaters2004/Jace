@@ -23,9 +23,11 @@ from jace.memory.extractor import (
     process_explicit_command,
     schedule_memory_extraction,
 )
+from jace.memory.gating import has_memory_subject_match, should_retrieve_memory
 from jace.memory.service import build_memory_context, search_memories
+from jace.performance import chat_activity
 from jace.schemas import PersistentChatRequest
-from jace.tools.agent import available_tool_count, stream_agent
+from jace.tools.agent import routed_tool_names, stream_agent
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -95,7 +97,12 @@ async def send_streaming_chat(request: PersistentChatRequest):
         if conversation is None:
             raise HTTPException(status_code=500, detail="Conversation could not be reloaded.")
 
-        history = model_history(conversation)
+        history = model_history(
+            conversation,
+            max_messages=env_settings.history_max_messages,
+            max_chars=env_settings.history_max_chars,
+        )
+        history_chars = sum(len(message.get("content", "")) for message in history)
         conversation_id = conversation.id
         conversation_system_prompt = conversation.system_prompt
 
@@ -138,30 +145,59 @@ async def send_streaming_chat(request: PersistentChatRequest):
         saved = False
         memory_hits = []
 
+        await chat_activity.begin()
         try:
-            if memory_allowed:
-                async with SessionLocal() as session:
-                    memory_hits = await search_memories(
-                        session,
-                        request.message,
-                        limit=memory_top_k,
-                        min_similarity=memory_min_similarity,
-                        update_access=True,
-                    )
+            memory_started = time.perf_counter()
+            memory_retrieval_used = bool(
+                memory_allowed
+                and not memory_command_handled
+                and (
+                    not env_settings.memory_smart_retrieval
+                    or should_retrieve_memory(request.message)
+                )
+            )
 
-            tool_count = await available_tool_count()
+            if memory_allowed and not memory_command_handled:
+                async with SessionLocal() as session:
+                    if env_settings.memory_smart_retrieval and not memory_retrieval_used:
+                        memory_retrieval_used = await has_memory_subject_match(
+                            session,
+                            request.message,
+                        )
+
+                    if memory_retrieval_used:
+                        memory_hits = await search_memories(
+                            session,
+                            request.message,
+                            limit=memory_top_k,
+                            min_similarity=memory_min_similarity,
+                            update_access=True,
+                        )
+            memory_retrieval_ms = round((time.perf_counter() - memory_started) * 1000, 2)
+
+            tool_started = time.perf_counter()
+            routed_tools = await routed_tool_names(request.message)
+            tool_routing_ms = round((time.perf_counter() - tool_started) * 1000, 2)
+            preprocess_ms = round((time.perf_counter() - started_at) * 1000, 2)
 
             yield ndjson_event(
                 {
                     "type": "context",
                     "memory_count": len(memory_hits),
-                    "tool_count": tool_count,
+                    "memory_retrieval_used": memory_retrieval_used,
+                    "memory_retrieval_ms": memory_retrieval_ms,
+                    "tool_count": len(routed_tools),
+                    "tool_names": routed_tools,
+                    "tool_routing_ms": tool_routing_ms,
+                    "history_messages": len(history),
+                    "history_chars": history_chars,
+                    "preprocess_ms": preprocess_ms,
                     "reasoning_mode": reasoning_mode,
                 }
             )
 
             memory_context = build_memory_context(memory_hits) if memory_allowed else ""
-            tool_context = TOOL_AGENT_SYSTEM_PROMPT if env_settings.tools_enabled else ""
+            tool_context = TOOL_AGENT_SYSTEM_PROMPT if routed_tools else ""
 
             effective_system_prompt = (
                 profile_prompt
@@ -178,6 +214,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 temperature=temperature,
                 conversation_id=conversation_id,
                 user_message=request.message,
+                tool_names=routed_tools,
             ):
                 event_type = event.get("type")
 
@@ -198,7 +235,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     raw_metrics = event.get("metrics") or {}
                     eval_count = raw_metrics.get("eval_count")
                     eval_duration = raw_metrics.get("eval_duration")
-
                     metrics = {
                         "time_to_first_token_ms": (
                             round((first_token_at - started_at) * 1000, 2)
@@ -216,7 +252,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         "eval_duration_ms": nanoseconds_to_ms(eval_duration),
                         "tokens_per_second": tokens_per_second(eval_count, eval_duration),
                     }
-
                     full_response = "".join(response_parts)
                     assistant_message_id = await persist_assistant(
                         full_response,
@@ -224,7 +259,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         metrics,
                     )
                     saved = True
-
                     if not memory_command_handled and assistant_message_id:
                         schedule_memory_extraction(
                             conversation_id=conversation_id,
@@ -242,6 +276,16 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             "metrics": metrics,
                             "model_turns": raw_metrics.get("model_turns", 1),
                             "tool_calls": raw_metrics.get("tool_calls", 0),
+                            "diagnostics": {
+                                "preprocess_ms": preprocess_ms,
+                                "memory_retrieval_used": memory_retrieval_used,
+                                "memory_retrieval_ms": memory_retrieval_ms,
+                                "memory_count": len(memory_hits),
+                                "tool_routing_ms": tool_routing_ms,
+                                "tool_names": routed_tools,
+                                "history_messages": len(history),
+                                "history_chars": history_chars,
+                            },
                         }
                     )
                     return
@@ -255,7 +299,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     )
                 )
             raise
-
         except (OllamaUnavailableError, OllamaRequestError) as exc:
             if response_parts and not saved:
                 await persist_assistant(
@@ -264,7 +307,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 )
                 saved = True
             yield ndjson_event({"type": "error", "message": str(exc)})
-
         except Exception as exc:
             if response_parts and not saved:
                 await persist_assistant(
@@ -277,6 +319,8 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     "message": f"Unexpected streaming error: {exc}",
                 }
             )
+        finally:
+            await chat_activity.end()
 
     return StreamingResponse(
         generate(),

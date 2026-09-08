@@ -138,12 +138,49 @@ async def store_user_message(
     return message
 
 
-def model_history(conversation: Conversation) -> list[dict[str, str]]:
-    history: list[dict[str, str]] = []
+def model_history(
+    conversation: Conversation,
+    *,
+    max_messages: int | None = None,
+    max_chars: int | None = None,
+) -> list[dict[str, str]]:
+    """Return recent model-visible history with optional bounded context.
+
+    Long conversations otherwise grow without limit and make every subsequent
+    prompt slower. Trimming from the oldest end preserves the most recent turn
+    (including the user message that was just stored) while keeping local-model
+    prompt evaluation predictable.
+    """
+    valid: list[dict[str, str]] = []
     for message in conversation.messages:
         if not message.content.strip() or message.role not in {"user", "assistant"}:
             continue
         if message.role == "assistant" and message.status not in {"complete", "stopped"}:
             continue
-        history.append({"role": message.role, "content": message.content})
-    return history
+        valid.append({"role": message.role, "content": message.content})
+
+    if max_messages is not None and max_messages > 0:
+        valid = valid[-max_messages:]
+
+    if max_chars is None or max_chars <= 0:
+        return valid
+
+    selected: list[dict[str, str]] = []
+    used = 0
+    for message in reversed(valid):
+        content = message["content"]
+        cost = len(content)
+        if selected and used + cost > max_chars:
+            break
+
+        # Always keep at least the newest message. If it alone is unusually
+        # large, trim it rather than dropping the current user request.
+        if not selected and cost > max_chars:
+            content = content[-max_chars:]
+            cost = len(content)
+
+        selected.append({"role": message["role"], "content": content})
+        used += cost
+
+    selected.reverse()
+    return selected

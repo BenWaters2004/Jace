@@ -5,6 +5,7 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from jace.ai.client import get_ollama_client
 from jace.config import settings
 from jace.schemas import ModelInfo
 
@@ -33,10 +34,10 @@ def _extract_error_text(status_code: int, response_text: str) -> str:
 def generation_options(reasoning_mode: str, temperature: float) -> tuple[bool, dict]:
     """Map the UI's simple reasoning modes to predictable Ollama behaviour."""
     if reasoning_mode == "deep":
-        return True, {"temperature": min(temperature, 0.5), "num_predict": 3072}
+        return True, {"temperature": min(temperature, 0.5), "num_predict": 3072, "num_ctx": settings.ollama_num_ctx}
     if reasoning_mode == "balanced":
-        return False, {"temperature": temperature, "num_predict": 1536}
-    return False, {"temperature": min(temperature, 0.5), "num_predict": 768}
+        return False, {"temperature": temperature, "num_predict": 1536, "num_ctx": settings.ollama_num_ctx}
+    return False, {"temperature": min(temperature, 0.5), "num_predict": 768, "num_ctx": settings.ollama_num_ctx}
 
 
 def _copy_chat_message(message: dict[str, Any]) -> dict[str, Any]:
@@ -56,9 +57,9 @@ def _copy_chat_message(message: dict[str, Any]) -> dict[str, Any]:
 async def get_models() -> list[ModelInfo]:
     url = f"{settings.ollama_base_url}/api/tags"
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.get(url)
-            response.raise_for_status()
+        client = await get_ollama_client()
+        response = await client.get(url, timeout=settings.request_timeout_seconds)
+        response.raise_for_status()
     except httpx.ConnectError as exc:
         raise OllamaUnavailableError("Could not connect to Ollama.") from exc
     except httpx.TimeoutException as exc:
@@ -80,6 +81,34 @@ async def get_models() -> list[ModelInfo]:
     return models
 
 
+async def warm_model(model: str) -> None:
+    """Preload a model into Ollama without generating user-visible text."""
+    url = f"{settings.ollama_base_url}/api/chat"
+    timeout = httpx.Timeout(
+        connect=10.0,
+        read=settings.preload_timeout_seconds,
+        write=30.0,
+        pool=10.0,
+    )
+    payload = {
+        "model": model,
+        "keep_alive": settings.ollama_keep_alive,
+    }
+
+    try:
+        client = await get_ollama_client()
+        response = await client.post(url, json=payload, timeout=timeout)
+        response.raise_for_status()
+    except httpx.ConnectError as exc:
+        raise OllamaUnavailableError("Could not connect to Ollama while preloading the model.") from exc
+    except httpx.TimeoutException as exc:
+        raise OllamaUnavailableError("Ollama model preload timed out.") from exc
+    except httpx.HTTPStatusError as exc:
+        raise OllamaRequestError(
+            _extract_error_text(exc.response.status_code, exc.response.text)
+        ) from exc
+
+
 async def structured_chat(
     *,
     model: str,
@@ -99,16 +128,16 @@ async def structured_chat(
         "keep_alive": settings.ollama_keep_alive,
         "think": False,
         "format": response_model.model_json_schema(),
-        "options": {"temperature": 0},
+        "options": {"temperature": 0, "num_ctx": settings.ollama_num_ctx},
     }
 
     url = f"{settings.ollama_base_url}/api/chat"
     timeout = httpx.Timeout(connect=10.0, read=settings.request_timeout_seconds, write=30.0, pool=10.0)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
+        client = await get_ollama_client()
+        response = await client.post(url, json=payload, timeout=timeout)
+        response.raise_for_status()
     except httpx.ConnectError as exc:
         raise OllamaUnavailableError("Could not connect to Ollama.") from exc
     except httpx.TimeoutException as exc:
@@ -159,22 +188,22 @@ async def stream_chat(
     timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream("POST", url, json=payload) as response:
-                if response.status_code >= 400:
-                    raw = (await response.aread()).decode("utf-8", errors="replace")
-                    raise OllamaRequestError(_extract_error_text(response.status_code, raw))
+        client = await get_ollama_client()
+        async with client.stream("POST", url, json=payload, timeout=timeout) as response:
+            if response.status_code >= 400:
+                raw = (await response.aread()).decode("utf-8", errors="replace")
+                raise OllamaRequestError(_extract_error_text(response.status_code, raw))
 
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError as exc:
-                        raise OllamaRequestError("Ollama returned malformed streaming data.") from exc
-                    if chunk.get("error"):
-                        raise OllamaRequestError(str(chunk["error"]))
-                    yield chunk
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise OllamaRequestError("Ollama returned malformed streaming data.") from exc
+                if chunk.get("error"):
+                    raise OllamaRequestError(str(chunk["error"]))
+                yield chunk
 
     except httpx.ConnectError as exc:
         raise OllamaUnavailableError("Could not connect to Ollama. Make sure Ollama is running.") from exc

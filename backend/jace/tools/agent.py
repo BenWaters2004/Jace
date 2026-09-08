@@ -16,6 +16,7 @@ from jace.tools.permissions import (
     update_tool_audit,
 )
 from jace.tools.registry import registry
+from jace.tools.routing import route_tool_names
 
 
 @dataclass
@@ -117,23 +118,8 @@ def _dedupe_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return unique
 
 
-async def available_tool_count() -> int:
-    if not settings.tools_enabled:
-        return 0
-
-    ensure_tools_registered()
-
-    async with SessionLocal() as session:
-        permissions = await permission_map(session)
-
-    return sum(
-        1
-        for definition in registry.all()
-        if permissions.get(definition.name, definition.default_permission) != "deny"
-    )
-
-
-async def _allowed_tool_schemas() -> list[dict[str, Any]]:
+async def routed_tool_names(user_message: str) -> list[str]:
+    """Return permitted tool names that are relevant to this user message."""
     if not settings.tools_enabled:
         return []
 
@@ -148,7 +134,37 @@ async def _allowed_tool_schemas() -> list[dict[str, Any]]:
         if permissions.get(definition.name, definition.default_permission) != "deny"
     }
 
-    return registry.schemas(allowed_names)
+    if settings.smart_tool_routing:
+        selected = route_tool_names(user_message) & allowed_names
+    else:
+        selected = allowed_names
+
+    return sorted(selected)
+
+
+async def available_tool_count(user_message: str | None = None) -> int:
+    if user_message is not None and settings.smart_tool_routing:
+        return len(await routed_tool_names(user_message))
+
+    if not settings.tools_enabled:
+        return 0
+
+    ensure_tools_registered()
+    async with SessionLocal() as session:
+        permissions = await permission_map(session)
+
+    return sum(
+        1
+        for definition in registry.all()
+        if permissions.get(definition.name, definition.default_permission) != "deny"
+    )
+
+
+def _tool_schemas_for_names(names: list[str]) -> list[dict[str, Any]]:
+    if not settings.tools_enabled or not names:
+        return []
+    ensure_tools_registered()
+    return registry.schemas(set(names))
 
 
 async def _execute_tool_call(
@@ -441,6 +457,7 @@ async def stream_agent(
     temperature: float,
     conversation_id: str | None,
     user_message: str,
+    tool_names: list[str] | None = None,
 ):
     """
     Streaming multi-turn agent loop.
@@ -452,7 +469,8 @@ async def stream_agent(
     ensure_tools_registered()
 
     agent_messages = [dict(message) for message in messages]
-    tools = await _allowed_tool_schemas()
+    selected_tool_names = tool_names if tool_names is not None else await routed_tool_names(user_message)
+    tools = _tool_schemas_for_names(selected_tool_names)
     usage = AgentUsage()
 
     for _step in range(settings.max_tool_steps):

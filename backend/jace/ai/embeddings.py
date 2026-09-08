@@ -1,5 +1,6 @@
 import httpx
 
+from jace.ai.client import get_ollama_client
 from jace.config import settings
 
 
@@ -26,9 +27,9 @@ async def embed_text(text: str) -> list[float]:
     timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
+        client = await get_ollama_client()
+        response = await client.post(url, json=payload, timeout=timeout)
+        response.raise_for_status()
     except httpx.ConnectError as exc:
         raise EmbeddingUnavailableError("Could not connect to Ollama while generating an embedding.") from exc
     except httpx.TimeoutException as exc:

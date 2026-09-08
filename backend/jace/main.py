@@ -1,8 +1,11 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from jace.ai.client import close_ollama_client
+from jace.ai.engine import OllamaRequestError, OllamaUnavailableError, warm_model
 from jace.api.chat import router as chat_router
 from jace.api.conversations import router as conversations_router
 from jace.api.memories import router as memories_router
@@ -11,8 +14,12 @@ from jace.api.system import router as system_router
 from jace.api.tools import router as tools_router
 from jace.config import settings
 from jace.database import SessionLocal, close_database, init_database
+from jace.db.settings import get_or_create_assistant_settings
 from jace.tools import ensure_tools_registered
 from jace.tools.permissions import ensure_tool_permissions
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
@@ -22,11 +29,25 @@ async def lifespan(app: FastAPI):
     ensure_tools_registered()
     await init_database()
 
+    preload_model_name = settings.default_model
     async with SessionLocal() as session:
         await ensure_tool_permissions(session)
+        profile = await get_or_create_assistant_settings(session)
+        if profile.default_model:
+            preload_model_name = profile.default_model
+
+    if settings.preload_default_model:
+        try:
+            logger.info("Preloading Jace model %s...", preload_model_name)
+            await warm_model(preload_model_name)
+            logger.info("Jace model preload complete: %s", preload_model_name)
+        except (OllamaUnavailableError, OllamaRequestError) as exc:
+            # The app should still start if Ollama is temporarily unavailable.
+            logger.warning("Jace model preload skipped: %s", exc)
 
     yield
 
+    await close_ollama_client()
     await close_database()
 
 
