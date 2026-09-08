@@ -11,7 +11,7 @@ ATTACHMENTS_DIRECTORY = DATA_DIRECTORY / "attachments"
 
 class Settings(BaseSettings):
     app_name: str = "Jace"
-    app_version: str = "0.7.0"
+    app_version: str = "0.8.0"
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:4b"
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     web_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36 Jace/0.7.0"
+        "Chrome/131.0 Safari/537.36 Jace/0.8.0"
     )
     browser_enabled: bool = True
     browser_timeout_seconds: float = 25.0
@@ -116,6 +116,19 @@ class Settings(BaseSettings):
     # Permissioned screen capture.
     screen_capture_enabled: bool = True
     screen_capture_max_edge: int = 1920
+
+    # Phase 8 automation and scheduled tasks.
+    automation_enabled: bool = True
+    automation_scheduler_timezone: str = "Europe/London"
+    automation_misfire_grace_seconds: int = 3600
+    automation_max_parallel_runs: int = 2
+    automation_default_timeout_seconds: int = 300
+    automation_max_timeout_seconds: int = 1800
+    automation_max_tool_steps: int = 6
+    automation_run_history_limit: int = 200
+    automation_notification_poll_seconds: int = 10
+    automation_max_result_chars: int = 20_000
+    automation_watcher_state_chars: int = 10_000
 
     model_config = SettingsConfigDict(
         env_file=".env",

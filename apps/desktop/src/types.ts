@@ -1,5 +1,5 @@
 export type ChatRole = "user" | "assistant";
-export type Screen = "chat" | "memory" | "tools" | "computer" | "settings";
+export type Screen = "chat" | "memory" | "tools" | "computer" | "automations" | "settings";
 export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal" | "temporary" | "other";
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";
@@ -444,4 +444,126 @@ export interface ComputerCommandCreateRequest {
 
 export interface ComputerCommandUpdateRequest extends Partial<ComputerCommandCreateRequest> {
   is_active?: boolean;
+}
+
+
+// Phase 8 automation
+export type AutomationType = "task" | "watcher";
+export type AutomationScheduleType = "once" | "interval" | "daily" | "weekly" | "cron";
+
+export interface AutomationSchedule {
+  schedule_type: AutomationScheduleType;
+  timezone: string;
+  run_at: string | null;
+  interval_minutes: number | null;
+  time_of_day: string | null;
+  days_of_week: number[];
+  cron_expression: string | null;
+}
+
+export interface AutomationRecord {
+  id: string;
+  name: string;
+  instruction: string;
+  automation_type: AutomationType;
+  schedule: AutomationSchedule;
+  watcher_condition: string | null;
+  allowed_tools: string[];
+  enabled: boolean;
+  notify_on_success: boolean;
+  notify_on_failure: boolean;
+  notify_on_condition: boolean;
+  timeout_seconds: number;
+  model: string | null;
+  reasoning_mode: ReasoningMode;
+  created_at: string;
+  updated_at: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_status: string | null;
+  last_result: string | null;
+}
+
+export interface AutomationListResponse {
+  enabled: boolean;
+  automations: AutomationRecord[];
+}
+
+export interface AutomationCreateRequest {
+  name: string;
+  instruction: string;
+  automation_type: AutomationType;
+  schedule: AutomationSchedule;
+  watcher_condition?: string | null;
+  allowed_tools: string[];
+  enabled: boolean;
+  notify_on_success: boolean;
+  notify_on_failure: boolean;
+  notify_on_condition: boolean;
+  timeout_seconds: number;
+  model?: string | null;
+  reasoning_mode: ReasoningMode;
+}
+
+export type AutomationUpdateRequest = Partial<AutomationCreateRequest>;
+
+export interface AutomationRunRecord {
+  id: string;
+  automation_id: string;
+  trigger_type: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  result: string | null;
+  error: string | null;
+  condition_met: boolean | null;
+  tool_names: string[];
+  model: string | null;
+}
+
+export interface AutomationRunListResponse {
+  runs: AutomationRunRecord[];
+}
+
+export interface AutomationNotificationRecord {
+  id: string;
+  automation_id: string;
+  run_id: string | null;
+  title: string;
+  body: string;
+  level: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface AutomationNotificationListResponse {
+  notifications: AutomationNotificationRecord[];
+}
+
+export interface AutomationStatus {
+  enabled: boolean;
+  scheduler_running: boolean;
+  automation_count: number;
+  enabled_count: number;
+  watcher_count: number;
+  unread_notifications: number;
+  timezone: string;
+}
+
+export interface AutomationDraftRequest {
+  instruction: string;
+  timezone: string;
+}
+
+export interface AutomationDraftResponse {
+  name: string;
+  instruction: string;
+  automation_type: AutomationType;
+  schedule: AutomationSchedule;
+  watcher_condition: string | null;
+  suggested_tools: string[];
+  notify_on_success: boolean;
+  notify_on_failure: boolean;
+  notify_on_condition: boolean;
+  reasoning: string;
 }

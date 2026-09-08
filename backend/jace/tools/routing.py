@@ -27,6 +27,10 @@ ALL_TOOL_NAMES = {
     "inspect_attachment",
     "inspect_workspace_media",
     "capture_screen",
+    "list_automations",
+    "create_automation",
+    "set_automation_enabled",
+    "run_automation_now",
 }
 
 
@@ -181,5 +185,23 @@ def route_tool_names(message: str) -> set[str]:
         lowered,
     ):
         selected.add("capture_screen")
+
+    # Phase 8 automation. Include current_datetime when creating a schedule so
+    # the model can resolve relative wording such as tomorrow or in two hours.
+    if re.search(
+        r"\b(?:remind me|schedule|automation|automations|recurring task|watcher|every (?:day|weekday|week|hour|morning|evening)|"
+        r"tomorrow at|in \d+ (?:minutes?|hours?|days?)|notify me when|tell me when|monitor|check every)\b",
+        lowered,
+    ):
+        selected.update({"list_automations", "create_automation", "current_datetime"})
+
+    if re.search(r"\b(?:list|show|what are|which)\b.{0,25}\bautomations?\b", lowered):
+        selected.add("list_automations")
+
+    if re.search(r"\b(?:enable|disable|pause|resume)\b.{0,35}\b(?:automation|task|watcher)\b", lowered):
+        selected.update({"list_automations", "set_automation_enabled"})
+
+    if re.search(r"\b(?:run|execute|start)\b.{0,35}\b(?:automation|scheduled task|watcher)\b", lowered):
+        selected.update({"list_automations", "run_automation_now"})
 
     return selected

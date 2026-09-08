@@ -16,3 +16,5 @@ PyMuPDF>=1.26,<2
 python-docx>=1.2,<2
 mss>=10,<11
 faster-whisper==1.2.1
+
+APScheduler==3.11.3

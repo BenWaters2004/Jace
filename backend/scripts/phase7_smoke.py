@@ -37,7 +37,7 @@ def routing_checks() -> None:
 
 def main() -> int:
     print(f"Jace version: {settings.app_version}")
-    require(settings.app_version == "0.7.0", "expected Jace v0.7.0")
+    require(settings.app_version == "0.8.0", "expected Jace v0.8.0")
     require(settings.ollama_keep_alive == "-1m", "keep_alive regression: expected -1m")
     require(settings.multimodal_enabled, "multimodal support should be enabled")
 

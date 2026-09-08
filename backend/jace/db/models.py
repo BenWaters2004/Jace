@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -215,3 +215,120 @@ class ComputerCommandPreset(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     workspace: Mapped["ComputerWorkspace"] = relationship(back_populates="commands")
+
+
+class Automation(Base):
+    """Persistent scheduled task or condition watcher."""
+
+    __tablename__ = "automations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    automation_type: Mapped[str] = mapped_column(String(20), nullable=False, default="task", index=True)
+    schedule_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    schedule_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    timezone: Mapped[str] = mapped_column(String(100), nullable=False, default="Europe/London")
+    watcher_condition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    watcher_state_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    notify_on_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_on_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_on_condition: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    reasoning_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="fast")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    last_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tool_permissions: Mapped[list["AutomationToolPermission"]] = relationship(
+        back_populates="automation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AutomationToolPermission.tool_name",
+    )
+    runs: Mapped[list["AutomationRun"]] = relationship(
+        back_populates="automation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AutomationRun.started_at.desc()",
+    )
+    notifications: Mapped[list["AutomationNotification"]] = relationship(
+        back_populates="automation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AutomationNotification.created_at.desc()",
+    )
+
+
+class AutomationToolPermission(Base):
+    """Per-automation capability allow-list."""
+
+    __tablename__ = "automation_tool_permissions"
+    __table_args__ = (
+        UniqueConstraint("automation_id", "tool_name", name="uq_automation_tool_permission"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    automation_id: Mapped[str] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tool_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    automation: Mapped["Automation"] = relationship(back_populates="tool_permissions")
+
+
+class AutomationRun(Base):
+    """Execution history for scheduled/manual automation runs."""
+
+    __tablename__ = "automation_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    automation_id: Mapped[str] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    trigger_type: Mapped[str] = mapped_column(String(30), nullable=False, default="scheduled")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    condition_met: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    tool_names_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    automation: Mapped["Automation"] = relationship(back_populates="runs")
+    notifications: Mapped[list["AutomationNotification"]] = relationship(
+        back_populates="run",
+        passive_deletes=True,
+        order_by="AutomationNotification.created_at.desc()",
+    )
+
+
+class AutomationNotification(Base):
+    """Queued notification surfaced to the desktop application."""
+
+    __tablename__ = "automation_notifications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    automation_id: Mapped[str] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("automation_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="info")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    automation: Mapped["Automation"] = relationship(back_populates="notifications")
+    run: Mapped["AutomationRun | None"] = relationship(back_populates="notifications")

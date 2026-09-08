@@ -378,3 +378,155 @@ class ComputerStatusResponse(BaseModel):
     active_workspace_count: int
     command_preset_count: int
     sensitive_files_allowed: bool
+
+# -----------------------------
+# Phase 8 automation
+# -----------------------------
+
+AutomationType = Literal["task", "watcher"]
+AutomationScheduleType = Literal["once", "interval", "daily", "weekly", "cron"]
+AutomationRunStatus = Literal[
+    "running", "success", "failed", "condition_not_met", "missed", "disabled"
+]
+
+
+class AutomationSchedule(BaseModel):
+    schedule_type: AutomationScheduleType
+    timezone: str = Field(default="Europe/London", min_length=1, max_length=100)
+    run_at: datetime | None = None
+    interval_minutes: int | None = Field(default=None, ge=1, le=525_600)
+    time_of_day: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    days_of_week: list[int] = Field(default_factory=list, max_length=7)
+    cron_expression: str | None = Field(default=None, min_length=5, max_length=200)
+
+
+class AutomationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    instruction: str = Field(min_length=1, max_length=20_000)
+    automation_type: AutomationType = "task"
+    schedule: AutomationSchedule
+    watcher_condition: str | None = Field(default=None, max_length=5_000)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=40)
+    enabled: bool = True
+    notify_on_success: bool = True
+    notify_on_failure: bool = True
+    notify_on_condition: bool = True
+    timeout_seconds: int = Field(default=300, ge=30, le=1800)
+    model: str | None = Field(default=None, max_length=200)
+    reasoning_mode: ReasoningMode = "fast"
+
+
+class AutomationUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    instruction: str | None = Field(default=None, min_length=1, max_length=20_000)
+    automation_type: AutomationType | None = None
+    schedule: AutomationSchedule | None = None
+    watcher_condition: str | None = Field(default=None, max_length=5_000)
+    allowed_tools: list[str] | None = Field(default=None, max_length=40)
+    enabled: bool | None = None
+    notify_on_success: bool | None = None
+    notify_on_failure: bool | None = None
+    notify_on_condition: bool | None = None
+    timeout_seconds: int | None = Field(default=None, ge=30, le=1800)
+    model: str | None = Field(default=None, max_length=200)
+    reasoning_mode: ReasoningMode | None = None
+
+
+class AutomationToolScopeResponse(BaseModel):
+    tool_name: str
+    allowed: bool
+
+
+class AutomationResponse(BaseModel):
+    id: str
+    name: str
+    instruction: str
+    automation_type: str
+    schedule: AutomationSchedule
+    watcher_condition: str | None
+    allowed_tools: list[str]
+    enabled: bool
+    notify_on_success: bool
+    notify_on_failure: bool
+    notify_on_condition: bool
+    timeout_seconds: int
+    model: str | None
+    reasoning_mode: str
+    created_at: datetime
+    updated_at: datetime
+    next_run_at: datetime | None
+    last_run_at: datetime | None
+    last_status: str | None
+    last_result: str | None
+
+
+class AutomationListResponse(BaseModel):
+    enabled: bool
+    automations: list[AutomationResponse]
+
+
+class AutomationRunResponse(BaseModel):
+    id: str
+    automation_id: str
+    trigger_type: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None
+    result: str | None
+    error: str | None
+    condition_met: bool | None
+    tool_names: list[str]
+    model: str | None
+
+
+class AutomationRunListResponse(BaseModel):
+    runs: list[AutomationRunResponse]
+
+
+class AutomationNotificationResponse(BaseModel):
+    id: str
+    automation_id: str
+    run_id: str | None
+    title: str
+    body: str
+    level: str
+    created_at: datetime
+    read_at: datetime | None
+
+
+class AutomationNotificationListResponse(BaseModel):
+    notifications: list[AutomationNotificationResponse]
+
+
+class AutomationStatusResponse(BaseModel):
+    enabled: bool
+    scheduler_running: bool
+    automation_count: int
+    enabled_count: int
+    watcher_count: int
+    unread_notifications: int
+    timezone: str
+
+
+class AutomationDraftRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=10_000)
+    timezone: str = Field(default="Europe/London", min_length=1, max_length=100)
+
+
+class AutomationDraftResponse(BaseModel):
+    name: str
+    instruction: str
+    automation_type: AutomationType
+    schedule: AutomationSchedule
+    watcher_condition: str | None = None
+    suggested_tools: list[str] = Field(default_factory=list)
+    notify_on_success: bool = True
+    notify_on_failure: bool = True
+    notify_on_condition: bool = True
+    reasoning: str = ""
+
+
+class AutomationWatcherEvaluation(BaseModel):
+    condition_met: bool
+    summary: str = Field(min_length=1, max_length=3_000)
+    state: str = Field(default="", max_length=8_000)

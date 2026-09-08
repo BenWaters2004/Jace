@@ -22,7 +22,7 @@ def check(condition: bool, message: str) -> None:
 
 def main() -> None:
     print(f"Jace version: {settings.app_version}")
-    check(settings.app_version == "0.7.0", "version is 0.7.0")
+    check(settings.app_version == "0.8.0", "version is 0.8.0")
     check(settings.ollama_keep_alive == "-1m", "Ollama keep_alive uses a valid duration string")
     check(settings.computer_enabled, "computer capability is enabled")
     check(not settings.computer_allow_sensitive_files, "sensitive local files are blocked by default")

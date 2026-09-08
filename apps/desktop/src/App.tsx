@@ -1,7 +1,19 @@
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   clearToolAudit,
+  createAutomation,
+  deleteAutomation,
+  draftAutomation,
+  getAutomationNotifications,
+  getAutomations,
+  getAutomationRuns,
+  getAutomationStatus,
+  markAllAutomationNotificationsRead,
+  markAutomationNotificationRead,
+  runAutomationNow,
+  updateAutomation,
   deleteAttachment,
   createComputerCommand,
   createComputerWorkspace,
@@ -33,6 +45,7 @@ import {
   updateToolPermission,
   uploadAttachment,
 } from "./api";
+import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
 import { ComputerView } from "./components/ComputerView";
 import { MemoryView } from "./components/MemoryView";
@@ -42,6 +55,13 @@ import { ToolApprovalModal } from "./components/ToolApprovalModal";
 import { ToolsView } from "./components/ToolsView";
 import type {
   ApiGenerationStats,
+  AutomationCreateRequest,
+  AutomationDraftResponse,
+  AutomationNotificationRecord,
+  AutomationRecord,
+  AutomationRunRecord,
+  AutomationStatus,
+  AutomationUpdateRequest,
   AttachmentStatus,
   AssistantSettings,
   ChatMessage,
@@ -127,6 +147,10 @@ export default function App() {
   const [toolAudit, setToolAudit] = useState<ToolAuditRecord[]>([]);
   const [computerStatus, setComputerStatus] = useState<ComputerStatus | null>(null);
   const [computerWorkspaces, setComputerWorkspaces] = useState<ComputerWorkspace[]>([]);
+  const [automationStatus, setAutomationStatus] = useState<AutomationStatus | null>(null);
+  const [automations, setAutomations] = useState<AutomationRecord[]>([]);
+  const [automationNotifications, setAutomationNotifications] = useState<AutomationNotificationRecord[]>([]);
+  const notificationSeenRef = useRef<Set<string>>(new Set());
   const [pendingApproval, setPendingApproval] = useState<PendingToolApproval | null>(null);
   const [toolActivity, setToolActivity] = useState<ToolActivity[]>([]);
 
@@ -180,6 +204,18 @@ export default function App() {
     return workspaceResponse.workspaces;
   }, []);
 
+  const refreshAutomations = useCallback(async () => {
+    const [statusResponse, automationResponse, notificationResponse] = await Promise.all([
+      getAutomationStatus(),
+      getAutomations(),
+      getAutomationNotifications(true, 100),
+    ]);
+    setAutomationStatus(statusResponse);
+    setAutomations(automationResponse.automations);
+    setAutomationNotifications(notificationResponse.notifications);
+    return automationResponse.automations;
+  }, []);
+
   const loadConversation = useCallback(async (id: string) => {
     if (isGenerating) return;
     try {
@@ -208,7 +244,7 @@ export default function App() {
       const currentHealth = await getHealth();
       setHealth(currentHealth);
 
-      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse, computerStatusResponse, computerWorkspaceResponse, attachmentStatusResponse] = await Promise.all([
+      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse, computerStatusResponse, computerWorkspaceResponse, attachmentStatusResponse, automationStatusResponse, automationResponse, notificationResponse] = await Promise.all([
         getSettings(),
         getConversations(),
         getMemories(false),
@@ -217,6 +253,9 @@ export default function App() {
         getComputerStatus(),
         getComputerWorkspaces(),
         getAttachmentStatus(),
+        getAutomationStatus(),
+        getAutomations(),
+        getAutomationNotifications(true, 100),
       ]);
 
       setSettings(profile);
@@ -231,6 +270,10 @@ export default function App() {
       setComputerStatus(computerStatusResponse);
       setComputerWorkspaces(computerWorkspaceResponse.workspaces);
       setAttachmentStatus(attachmentStatusResponse);
+      setAutomationStatus(automationStatusResponse);
+      setAutomations(automationResponse.automations);
+      setAutomationNotifications(notificationResponse.notifications);
+      notificationSeenRef.current = new Set(notificationResponse.notifications.map((item) => item.id));
 
       if (!currentHealth.ollama_connected) {
         setConnectionState("ollama-offline");
@@ -255,6 +298,44 @@ export default function App() {
   }, []);
 
   useEffect(() => { void initialise(); }, [initialise]);
+
+  useEffect(() => {
+    if (connectionState === "backend-offline") return;
+
+    let cancelled = false;
+
+    async function pollNotifications() {
+      try {
+        const response = await getAutomationNotifications(true, 100);
+        if (cancelled) return;
+
+        const newItems = response.notifications.filter((item) => !notificationSeenRef.current.has(item.id));
+        setAutomationNotifications(response.notifications);
+        setAutomationStatus((current) => current ? { ...current, unread_notifications: response.notifications.length } : current);
+
+        for (const item of response.notifications) notificationSeenRef.current.add(item.id);
+
+        if (newItems.length > 0) {
+          try {
+            let granted = await isPermissionGranted();
+            if (!granted) granted = (await requestPermission()) === "granted";
+            if (granted) {
+              for (const item of newItems) {
+                sendNotification({ title: item.title, body: item.body });
+              }
+            }
+          } catch {
+            // Native notifications are best-effort; the in-app inbox remains authoritative.
+          }
+        }
+      } catch {
+        // Polling must not interfere with chat if the automation API is temporarily unavailable.
+      }
+    }
+
+    const timer = window.setInterval(() => { void pollNotifications(); }, 10_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [connectionState]);
 
   async function ensureConversation(): Promise<string> {
     if (activeConversationId) return activeConversationId;
@@ -712,6 +793,85 @@ export default function App() {
     }
   }
 
+  async function addAutomation(payload: AutomationCreateRequest) {
+    try {
+      await createAutomation(payload);
+      await refreshAutomations();
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not create automation.");
+      throw automationError;
+    }
+  }
+
+  async function patchAutomation(automation: AutomationRecord, payload: AutomationUpdateRequest) {
+    try {
+      await updateAutomation(automation.id, payload);
+      await refreshAutomations();
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not update automation.");
+      throw automationError;
+    }
+  }
+
+  async function removeAutomation(automation: AutomationRecord) {
+    try {
+      await deleteAutomation(automation.id);
+      await refreshAutomations();
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not delete automation.");
+      throw automationError;
+    }
+  }
+
+  async function executeAutomationNow(automation: AutomationRecord) {
+    try {
+      await runAutomationNow(automation.id);
+      window.setTimeout(() => { void refreshAutomations(); }, 750);
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not start automation.");
+      throw automationError;
+    }
+  }
+
+  async function buildAutomationDraft(text: string, timezone: string): Promise<AutomationDraftResponse> {
+    try {
+      return await draftAutomation({ instruction: text, timezone });
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not build automation draft.");
+      throw automationError;
+    }
+  }
+
+  async function loadAutomationRuns(automation: AutomationRecord): Promise<AutomationRunRecord[]> {
+    try {
+      const response = await getAutomationRuns(automation.id, 100);
+      return response.runs;
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not load automation history.");
+      throw automationError;
+    }
+  }
+
+  async function readAutomationNotification(notification: AutomationNotificationRecord) {
+    try {
+      await markAutomationNotificationRead(notification.id);
+      notificationSeenRef.current.delete(notification.id);
+      await refreshAutomations();
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not update notification.");
+    }
+  }
+
+  async function readAllAutomationNotifications() {
+    try {
+      await markAllAutomationNotificationsRead();
+      setAutomationNotifications([]);
+      setAutomationStatus((current) => current ? { ...current, unread_notifications: 0 } : current);
+    } catch (automationError) {
+      setError(automationError instanceof Error ? automationError.message : "Could not clear notifications.");
+    }
+  }
+
   if (!settings) {
     return (
       <main className="boot-screen">
@@ -732,7 +892,7 @@ export default function App() {
       <Sidebar
         screen={screen}
         assistantName={settings.assistant_name}
-        appVersion={health?.app_version ?? "0.7.0"}
+        appVersion={health?.app_version ?? "0.8.0"}
         connectionState={connectionState}
         conversations={conversations}
         activeConversationId={activeConversationId}
@@ -741,6 +901,7 @@ export default function App() {
         memoryCount={activeMemoryCount}
         toolCount={availableToolCount}
         computerCount={computerWorkspaces.filter((workspace) => workspace.is_active).length}
+        automationCount={automations.filter((automation) => automation.enabled).length}
         onSearchChange={setConversationSearch}
         onScreenChange={setScreen}
         onNewChat={newChat}
@@ -813,6 +974,25 @@ export default function App() {
           onCreateCommand={addComputerCommand}
           onUpdateCommand={patchComputerCommand}
           onDeleteCommand={removeComputerCommand}
+        />
+      )}
+
+      {screen === "automations" && (
+        <AutomationsView
+          status={automationStatus}
+          automations={automations}
+          notifications={automationNotifications}
+          tools={tools}
+          timezone={automationStatus?.timezone ?? "Europe/London"}
+          onRefresh={() => void refreshAutomations()}
+          onDraft={buildAutomationDraft}
+          onCreate={addAutomation}
+          onUpdate={patchAutomation}
+          onDelete={removeAutomation}
+          onRunNow={executeAutomationNow}
+          onLoadRuns={loadAutomationRuns}
+          onReadNotification={readAutomationNotification}
+          onReadAllNotifications={readAllAutomationNotifications}
         />
       )}
 

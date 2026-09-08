@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from jace.ai.client import close_ollama_client
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError, warm_model
+from jace.automations.scheduler import start_automation_scheduler, stop_automation_scheduler
 from jace.api.attachments import router as attachments_router
+from jace.api.automations import router as automations_router
 from jace.api.chat import router as chat_router
 from jace.api.computer import router as computer_router
 from jace.api.conversations import router as conversations_router
@@ -47,8 +49,11 @@ async def lifespan(app: FastAPI):
             # The app should still start if Ollama is temporarily unavailable.
             logger.warning("Jace model preload skipped: %s", exc)
 
+    await start_automation_scheduler()
+
     yield
 
+    await stop_automation_scheduler()
     await close_ollama_client()
     await close_database()
 
@@ -76,6 +81,7 @@ app.add_middleware(
 
 app.include_router(system_router)
 app.include_router(attachments_router)
+app.include_router(automations_router)
 app.include_router(settings_router)
 app.include_router(memories_router)
 app.include_router(computer_router)

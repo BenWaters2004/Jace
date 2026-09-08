@@ -1,5 +1,14 @@
 import { API_BASE_URL } from "./constants";
 import type {
+  AutomationCreateRequest,
+  AutomationDraftRequest,
+  AutomationDraftResponse,
+  AutomationListResponse,
+  AutomationNotificationListResponse,
+  AutomationRecord,
+  AutomationRunListResponse,
+  AutomationStatus,
+  AutomationUpdateRequest,
   AssistantSettings,
   AttachmentRecord,
   AttachmentStatus,
@@ -127,6 +136,35 @@ export const updateComputerCommand = (id: string, payload: ComputerCommandUpdate
   request<ComputerCommandPreset>(`/computer/commands/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
 export async function deleteComputerCommand(id: string): Promise<void> {
   await request(`/computer/commands/${id}`, { method: "DELETE" });
+}
+
+
+
+// Phase 8 automation
+export const getAutomationStatus = () => request<AutomationStatus>("/automations/status");
+export const getAutomations = () => request<AutomationListResponse>("/automations");
+export const getAutomation = (id: string) => request<AutomationRecord>(`/automations/${id}`);
+export const createAutomation = (payload: AutomationCreateRequest) =>
+  request<AutomationRecord>("/automations", { method: "POST", body: JSON.stringify(payload) });
+export const updateAutomation = (id: string, payload: AutomationUpdateRequest) =>
+  request<AutomationRecord>(`/automations/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export async function deleteAutomation(id: string): Promise<void> {
+  await request(`/automations/${id}`, { method: "DELETE" });
+}
+export async function runAutomationNow(id: string): Promise<void> {
+  await request(`/automations/${id}/run`, { method: "POST" });
+}
+export const getAutomationRuns = (id: string, limit = 50) =>
+  request<AutomationRunListResponse>(`/automations/${id}/runs?limit=${limit}`);
+export const draftAutomation = (payload: AutomationDraftRequest) =>
+  request<AutomationDraftResponse>("/automations/draft", { method: "POST", body: JSON.stringify(payload) });
+export const getAutomationNotifications = (unreadOnly = true, limit = 100) =>
+  request<AutomationNotificationListResponse>(`/automations/notifications/list?unread_only=${unreadOnly ? "true" : "false"}&limit=${limit}`);
+export async function markAutomationNotificationRead(id: string): Promise<void> {
+  await request(`/automations/notifications/${id}/read`, { method: "POST" });
+}
+export async function markAllAutomationNotificationsRead(): Promise<void> {
+  await request("/automations/notifications/read-all", { method: "POST" });
 }
 
 export const getTools = () => request<ToolListResponse>("/tools");
