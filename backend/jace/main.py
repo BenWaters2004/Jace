@@ -14,6 +14,7 @@ from jace.api.computer import router as computer_router
 from jace.api.control import router as control_router
 from jace.api.conversations import router as conversations_router
 from jace.api.memories import router as memories_router
+from jace.api.runtime import router as runtime_router
 from jace.api.settings import router as settings_router
 from jace.api.system import router as system_router
 from jace.api.tools import router as tools_router
@@ -22,6 +23,7 @@ from jace.database import SessionLocal, close_database, init_database
 from jace.db.settings import get_or_create_assistant_settings
 from jace.tools import ensure_tools_registered
 from jace.tools.permissions import ensure_tool_permissions
+from jace.runtime import runtime_events
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -51,9 +53,11 @@ async def lifespan(app: FastAPI):
             logger.warning("Jace model preload skipped: %s", exc)
 
     await start_automation_scheduler()
+    await runtime_events.publish("jace.state.changed", state="idle", reason="backend_ready")
 
     yield
 
+    await runtime_events.publish("jace.state.changed", state="offline", reason="backend_stopping")
     await stop_automation_scheduler()
     await close_ollama_client()
     await close_database()
@@ -85,6 +89,7 @@ app.include_router(attachments_router)
 app.include_router(automations_router)
 app.include_router(settings_router)
 app.include_router(memories_router)
+app.include_router(runtime_router)
 app.include_router(computer_router)
 app.include_router(control_router)
 app.include_router(tools_router)

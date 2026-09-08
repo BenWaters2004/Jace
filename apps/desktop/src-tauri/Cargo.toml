@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.9.0"
+version = "0.10.0-alpha.2"
 description = "Jace local AI desktop assistant"
 authors = ["Ben Waters"]
 edition = "2021"

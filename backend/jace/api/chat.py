@@ -29,6 +29,7 @@ from jace.memory.gating import has_memory_subject_match, should_retrieve_memory
 from jace.memory.service import build_memory_context, search_memories
 from jace.performance import chat_activity
 from jace.schemas import PersistentChatRequest
+from jace.runtime import runtime_events
 from jace.tools.agent import routed_tool_names, stream_agent
 
 
@@ -172,6 +173,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
         response_model = conversation_model
 
         await chat_activity.begin()
+        await runtime_events.publish("jace.state.changed", state="thinking", conversation_id=conversation_id)
         try:
             attachment_started = time.perf_counter()
             attachment_context = ""
@@ -293,11 +295,38 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     if content:
                         if first_token_at is None:
                             first_token_at = time.perf_counter()
+                            await runtime_events.publish("jace.state.changed", state="working", conversation_id=conversation_id, reason="responding")
                         response_parts.append(content)
                         yield ndjson_event({"type": "token", "content": content})
                     continue
 
                 if event_type in {"tool_call", "approval_required", "tool_result"}:
+                    if event_type == "tool_call":
+                        await runtime_events.publish(
+                            "tool.started",
+                            conversation_id=conversation_id,
+                            tool_name=event.get("tool_name"),
+                            label=event.get("label"),
+                        )
+                        await runtime_events.publish("jace.state.changed", state="working", reason="tool", conversation_id=conversation_id)
+                    elif event_type == "approval_required":
+                        await runtime_events.publish(
+                            "permission.requested",
+                            conversation_id=conversation_id,
+                            tool_name=event.get("tool_name"),
+                            label=event.get("label"),
+                            risk=event.get("risk"),
+                        )
+                        await runtime_events.publish("jace.state.changed", state="waiting_permission", conversation_id=conversation_id)
+                    else:
+                        await runtime_events.publish(
+                            "tool.completed",
+                            conversation_id=conversation_id,
+                            tool_name=event.get("tool_name"),
+                            status=event.get("status"),
+                            summary=event.get("summary"),
+                        )
+                        await runtime_events.publish("jace.state.changed", state="thinking", conversation_id=conversation_id)
                     yield ndjson_event(event)
                     continue
 
@@ -338,6 +367,8 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             assistant_message=full_response,
                             enabled=auto_extract,
                         )
+
+                    await runtime_events.publish("jace.state.changed", state="idle", conversation_id=conversation_id, reason="response_complete")
 
                     yield ndjson_event(
                         {
@@ -399,6 +430,8 @@ async def send_streaming_chat(request: PersistentChatRequest):
             )
         finally:
             await chat_activity.end()
+            if runtime_events.state != "offline":
+                await runtime_events.publish("jace.state.changed", state="idle", conversation_id=conversation_id, reason="stream_finished")
 
     return StreamingResponse(
         generate(),

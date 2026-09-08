@@ -1,5 +1,5 @@
 export type ChatRole = "user" | "assistant";
-export type Screen = "chat" | "memory" | "tools" | "computer" | "control" | "automations" | "settings";
+export type Screen = "chat" | "output" | "web" | "memory" | "tools" | "computer" | "control" | "automations" | "settings";
 export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal" | "temporary" | "other";
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";

@@ -62,8 +62,11 @@ import { ChatView } from "./components/ChatView";
 import { ComputerView } from "./components/ComputerView";
 import { ControlView } from "./components/ControlView";
 import { MemoryView } from "./components/MemoryView";
+import { OutputView } from "./components/OutputView";
+import { WebWorkspaceView } from "./components/WebWorkspaceView";
 import { SettingsView } from "./components/SettingsView";
-import { Sidebar } from "./components/Sidebar";
+import { CommandCenter } from "./shell/CommandCenter";
+import { useRuntimeEvents, type JaceRuntimeState } from "./shell/runtime";
 import { ToolApprovalModal } from "./components/ToolApprovalModal";
 import { ToolsView } from "./components/ToolsView";
 import type {
@@ -193,6 +196,14 @@ export default function App() {
   const [toolContextCount, setToolContextCount] = useState(0);
   const [performanceDiagnostics, setPerformanceDiagnostics] = useState<PerformanceDiagnostics | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fallbackRuntimeState: JaceRuntimeState = pendingApproval
+    ? "waiting_permission"
+    : isGenerating
+      ? (toolActivity.some((item) => item.status === "requested") ? "working" : "thinking")
+      : connectionState === "online"
+        ? "idle"
+        : "offline";
+  const runtime = useRuntimeEvents(fallbackRuntimeState);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
@@ -1040,30 +1051,8 @@ export default function App() {
   const availableToolCount = tools.filter((tool) => tool.permission !== "deny").length;
   const title = activeConversation?.title ?? "New conversation";
 
-  return (
-    <main className="app-shell">
-      <Sidebar
-        screen={screen}
-        assistantName={settings.assistant_name}
-        appVersion={health?.app_version ?? "0.9.0"}
-        connectionState={connectionState}
-        conversations={conversations}
-        activeConversationId={activeConversationId}
-        isGenerating={isGenerating}
-        search={conversationSearch}
-        memoryCount={activeMemoryCount}
-        toolCount={availableToolCount}
-        computerCount={computerWorkspaces.filter((workspace) => workspace.is_active).length}
-        controlCount={controlStatus?.active_session ? 1 : 0}
-        automationCount={automations.filter((automation) => automation.enabled).length}
-        onSearchChange={setConversationSearch}
-        onScreenChange={setScreen}
-        onNewChat={newChat}
-        onLoadConversation={(id) => void loadConversation(id)}
-        onRenameConversation={(conversation) => void renameConversation(conversation)}
-        onDeleteConversation={(conversation) => void removeConversation(conversation)}
-      />
-
+  const workspace = (
+    <>
       {screen === "chat" && (
         <ChatView
           title={title}
@@ -1094,27 +1083,20 @@ export default function App() {
         />
       )}
 
+      {screen === "output" && (
+        <OutputView diagnostics={performanceDiagnostics} activities={toolActivity} />
+      )}
+
+      {screen === "web" && (
+        <WebWorkspaceView audit={toolAudit} />
+      )}
+
       {screen === "memory" && (
-        <MemoryView
-          memories={memories}
-          enabled={settings.memory_enabled}
-          onRefresh={() => void refreshMemories()}
-          onCreate={addMemory}
-          onUpdate={patchMemory}
-          onDelete={removeMemory}
-          onOpenSource={openMemorySource}
-        />
+        <MemoryView memories={memories} enabled={settings.memory_enabled} onRefresh={() => void refreshMemories()} onCreate={addMemory} onUpdate={patchMemory} onDelete={removeMemory} onOpenSource={openMemorySource} />
       )}
 
       {screen === "tools" && (
-        <ToolsView
-          enabled={toolsEnabled}
-          tools={tools}
-          audit={toolAudit}
-          onRefresh={() => void refreshTools()}
-          onPermissionChange={changeToolPermission}
-          onClearAudit={removeToolAudit}
-        />
+        <ToolsView enabled={toolsEnabled} tools={tools} audit={toolAudit} onRefresh={() => void refreshTools()} onPermissionChange={changeToolPermission} onClearAudit={removeToolAudit} />
       )}
 
       {screen === "computer" && (
@@ -1179,18 +1161,36 @@ export default function App() {
           onApplyToCurrentConversation={applySettingsToCurrent}
         />
       )}
-
-      {controlStatus?.active_session && (
-        <button
-          className="global-control-stop"
-          title="Immediately stop Jace interactive computer control"
-          onClick={() => void emergencyStopDesktopControl()}
-        >
-          ■ STOP CONTROL
-        </button>
-      )}
-
-      <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />
-    </main>
+    </>
   );
+
+  return (
+    <>
+      <CommandCenter
+        assistantName={settings.assistant_name}
+        appVersion={health?.app_version ?? "0.10.0-alpha.2"}
+        model={selectedModel}
+        state={runtime.state}
+        runtimeConnected={runtime.connected}
+        screen={screen}
+        workspace={workspace}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        toolActivity={toolActivity}
+        pendingApproval={pendingApproval}
+        memoryCount={activeMemoryCount}
+        automations={automations}
+        notifications={automationNotifications}
+        online={connectionState === "online"}
+        controlActive={Boolean(controlStatus?.active_session)}
+        onScreenChange={setScreen}
+        onNewChat={newChat}
+        onLoadConversation={(id) => void loadConversation(id)}
+        onOpenApproval={() => setScreen("tools")}
+        onEmergencyStop={() => void emergencyStopDesktopControl()}
+      />
+      <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />
+    </>
+  );
+
 }

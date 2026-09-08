@@ -11,7 +11,7 @@ ATTACHMENTS_DIRECTORY = DATA_DIRECTORY / "attachments"
 
 class Settings(BaseSettings):
     app_name: str = "Jace"
-    app_version: str = "0.9.0"
+    app_version: str = "0.10.0-alpha.2"
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:4b"

@@ -27,7 +27,7 @@ def fake_message(role: str, content: str, status: str = "complete"):
 def main() -> None:
     print(f"Jace version: {settings.app_version}")
 
-    check(settings.app_version == "0.9.0", "version is 0.9.0")
+    check(settings.app_version == "0.10.0-alpha.2", "version is 0.10.0-alpha.2")
     check(not should_retrieve_memory("Hello"), "greeting skips pre-chat memory embedding")
     check(not should_retrieve_memory("Explain recursion in Python"), "generic knowledge skips memory embedding")
     check(

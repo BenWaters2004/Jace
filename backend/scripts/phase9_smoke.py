@@ -46,7 +46,7 @@ def expect_value_error(fn, message: str) -> None:
 
 def main() -> int:
     print(f"Jace version: {settings.app_version}")
-    require(settings.app_version == "0.9.0", "version is 0.9.0")
+    require(settings.app_version == "0.10.0-alpha.2", "version is 0.10.0-alpha.2")
     require(settings.ollama_keep_alive == "-1m", "Ollama keep_alive regression remains fixed")
     require(settings.interactive_control_enabled, "interactive control is enabled by default")
     require(settings.interactive_default_max_steps > 0, "default control step limit is configured")
