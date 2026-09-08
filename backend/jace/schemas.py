@@ -123,6 +123,58 @@ class PersistentChatRequest(BaseModel):
     system_prompt: str | None = None
     reasoning_mode: ReasoningMode | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    voice_mode: bool = False
+
+
+class VoiceSettingsResponse(BaseModel):
+    enabled: bool
+    auto_speak: bool
+    verbal_approvals: bool
+    microphone_mode: Literal["push_to_talk"]
+    tts_voice: str
+    tts_speed: float
+    tts_language: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class VoiceSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    auto_speak: bool | None = None
+    verbal_approvals: bool | None = None
+    microphone_mode: Literal["push_to_talk"] | None = None
+    tts_voice: str | None = Field(default=None, min_length=1, max_length=120)
+    tts_speed: float | None = Field(default=None, ge=0.70, le=1.45)
+    tts_language: str | None = Field(default=None, min_length=2, max_length=30)
+
+
+class VoiceStatusResponse(BaseModel):
+    enabled: bool
+    stt_dependency_available: bool
+    tts_dependency_available: bool
+    tts_model_files_available: bool
+    stt_model: str
+    tts_model_path: str
+    tts_voices_path: str
+    voices: list[dict[str, str]]
+
+
+class VoiceTranscriptionResponse(BaseModel):
+    text: str
+    language: str | None = None
+    language_probability: float | None = None
+    duration: float | None = None
+
+
+class VoiceSynthesisRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=900)
+    voice: str | None = Field(default=None, min_length=1, max_length=120)
+    speed: float | None = Field(default=None, ge=0.70, le=1.45)
+    language: str | None = Field(default=None, min_length=2, max_length=30)
+
+
+class VoiceStateRequest(BaseModel):
+    active: bool
 
 
 class MemoryCreate(BaseModel):

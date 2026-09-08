@@ -36,6 +36,7 @@ def main() -> int:
             settings.audio_model,
             device=settings.audio_device,
             compute_type=settings.audio_compute_type,
+            download_root=str(settings.audio_download_root),
             local_files_only=False,
         )
     except Exception as exc:

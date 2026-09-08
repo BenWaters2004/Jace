@@ -144,6 +144,23 @@ class AssistantSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
+class VoiceSettings(Base):
+    """Single-row local voice configuration for Phase 10B."""
+
+    __tablename__ = "voice_settings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    auto_speak: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    verbal_approvals: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    microphone_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="push_to_talk")
+    tts_voice: Mapped[str] = mapped_column(String(120), nullable=False, default="bm_lewis")
+    tts_speed: Mapped[float] = mapped_column(Float, nullable=False, default=1.06)
+    tts_language: Mapped[str] = mapped_column(String(30), nullable=False, default="en-gb")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
 class ToolPermission(Base):
     """Persistent user policy for a registered tool."""
 

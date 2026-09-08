@@ -48,6 +48,11 @@ async def get_conversation(session: AsyncSession, conversation_id: str) -> Conve
         select(Conversation)
         .options(selectinload(Conversation.messages).selectinload(Message.attachments))
         .where(Conversation.id == conversation_id)
+        # SessionLocal uses expire_on_commit=False. A Conversation may already be
+        # present in the identity map with its messages collection loaded. Force
+        # a refresh so a message inserted earlier in the same session is visible
+        # to model_history() immediately.
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(statement)
     return result.scalar_one_or_none()
@@ -91,7 +96,10 @@ async def add_message(
 ) -> Message:
     metrics = metrics or {}
     message = Message(
-        conversation_id=conversation.id,
+        # Set the relationship, not only the FK. Because expire_on_commit=False,
+        # this keeps an already-loaded conversation.messages collection in sync
+        # before the next database refresh.
+        conversation=conversation,
         role=role,
         content=content,
         status=status,
@@ -155,7 +163,7 @@ def model_history(
     for message in conversation.messages:
         if not message.content.strip() or message.role not in {"user", "assistant"}:
             continue
-        if message.role == "assistant" and message.status not in {"complete", "stopped"}:
+        if message.role == "assistant" and message.status != "complete":
             continue
         content = message.content
         attachments = getattr(message, "attachments", [])

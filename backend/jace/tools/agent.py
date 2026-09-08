@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -111,6 +112,7 @@ def _dedupe_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         if fingerprint in fingerprints:
             continue
+
         fingerprints.add(fingerprint)
         unique.append(normalised)
 
@@ -211,6 +213,7 @@ async def _execute_tool_call(
         )
 
     call_id = audit.id
+
     yield {
         "type": "tool_call",
         "call_id": call_id,
@@ -231,6 +234,7 @@ async def _execute_tool_call(
                 error="Tool is disabled by permission policy.",
                 completed=True,
             )
+
         yield {
             "type": "tool_result",
             "call_id": call_id,
@@ -289,6 +293,7 @@ async def _execute_tool_call(
                     error="User approval timed out.",
                     completed=True,
                 )
+
             yield {
                 "type": "tool_result",
                 "call_id": call_id,
@@ -319,6 +324,7 @@ async def _execute_tool_call(
                     error="User denied tool execution.",
                     completed=True,
                 )
+
             yield {
                 "type": "tool_result",
                 "call_id": call_id,
@@ -373,8 +379,7 @@ async def _execute_tool_call(
             "status": "completed",
             "summary": display,
         }
-
-        tool_message: dict[str, Any] = {
+        tool_message = {
             "role": "tool",
             "tool_name": tool_name,
             "content": model_content,
@@ -448,6 +453,101 @@ async def _execute_tool_call(
         }
 
 
+_ELABORATE_REQUEST_RE = re.compile(
+    r"\b(?:summari[sz]e|summary|explain|analyse|analyze|review|research|compare|overview|"
+    r"tell me about|walk me through|describe|what changed|what does .* (?:say|contain|show))\b",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_SHORT_RE = re.compile(
+    r"\b(?:briefly|brief answer|short answer|one sentence|single sentence|in one sentence|concise)\b",
+    flags=re.IGNORECASE,
+)
+_INCOMPLETE_TAIL_RE = re.compile(
+    r"(?:\b(?:and|or|but|because|so|if|when|while|which|that|to|for|with|from|of|the|a|an|"
+    r"no|not|is|are|was|were|has|have|had|will|would|can|could|should|may|might|this|these|"
+    r"there|into|about|such as)\s*)$",
+    flags=re.IGNORECASE,
+)
+
+
+def _looks_incomplete_response(
+    content: str,
+    *,
+    done_reason: str | None,
+    user_message: str,
+    tool_calls_used: int,
+) -> bool:
+    """Conservatively detect a model turn that ended before answering fully.
+
+    Small local models occasionally terminate a tool-finalisation turn after a
+    clause fragment (for example, ``There is no``). Accept genuinely short
+    answers, but retry clear truncations and suspiciously tiny research answers.
+    """
+    text = " ".join(content.strip().split())
+    if not text:
+        return True
+
+    reason = (done_reason or "").lower()
+    if reason in {"length", "max_tokens", "max_token", "limit"}:
+        return True
+
+    if text.endswith((",", ":", ";", "-", "—", "(", "[", "{")):
+        return True
+    if _INCOMPLETE_TAIL_RE.search(text):
+        return True
+
+    words = re.findall(r"\b[\w'’-]+\b", text)
+    elaborate = bool(_ELABORATE_REQUEST_RE.search(user_message))
+    explicit_short = bool(_EXPLICIT_SHORT_RE.search(user_message))
+
+    if not explicit_short and elaborate:
+        if tool_calls_used > 0 and len(words) < 24:
+            return True
+        if len(words) < 9:
+            return True
+
+    return False
+
+
+async def _repair_final_response(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    system_prompt: str,
+    reasoning_mode: str,
+    temperature: float,
+    usage: AgentUsage,
+) -> tuple[list[str], dict[str, Any] | None]:
+    """Regenerate one complete final answer from already-collected tool context."""
+    repair_prompt = (
+        system_prompt
+        + "\n\nFINAL RESPONSE RECOVERY\n"
+        + "The previous final-answer attempt ended incomplete. Do not call another tool. "
+        + "Using the user request and tool results already present in the conversation, "
+        + "write the complete user-facing answer now. Start the answer from the beginning, "
+        + "do not mention the failed attempt, and make sure every requested part is answered.\n"
+        + "END FINAL RESPONSE RECOVERY"
+    )
+    parts: list[str] = []
+    final_chunk: dict[str, Any] | None = None
+    async for chunk in stream_chat(
+        model=model,
+        messages=messages,
+        system_prompt=repair_prompt,
+        reasoning_mode=reasoning_mode,
+        temperature=temperature,
+        tools=None,
+    ):
+        message = chunk.get("message") or {}
+        content = message.get("content") or ""
+        if content:
+            parts.append(content)
+        if chunk.get("done"):
+            final_chunk = chunk
+            usage.add_chunk(chunk)
+    return parts, final_chunk
+
+
 async def stream_agent(
     *,
     model: str,
@@ -461,18 +561,15 @@ async def stream_agent(
     current_images: list[str] | None = None,
     attachment_context: str = "",
 ):
-    """
-    Streaming multi-turn agent loop.
+    """Streaming multi-turn agent loop with guarded final-answer recovery.
 
-    Plain chat still streams immediately. Tool-enabled turns are buffered for a
-    single model turn so preliminary narration is never leaked before we know
-    whether that turn contains a tool call. This keeps internal phrases such as
-    "Let me start a control session" out of the user's answer and lets the agent
-    continue through the tool sequence in the same request.
+    Plain chat streams immediately. Tool-enabled model turns are buffered until
+    we know whether the model requested a tool, preventing internal planning text
+    from leaking into the user-visible answer. A clearly incomplete final turn
+    is automatically retried once before it is persisted as complete.
     """
     ensure_tools_registered()
     agent_messages = [dict(message) for message in messages]
-
     if agent_messages and agent_messages[-1].get("role") == "user":
         if attachment_context.strip():
             existing = str(agent_messages[-1].get("content") or "")
@@ -483,14 +580,13 @@ async def stream_agent(
             agent_messages[-1]["images"] = current_images
 
     selected_tool_names = (
-        tool_names
-        if tool_names is not None
-        else await routed_tool_names(user_message)
+        tool_names if tool_names is not None else await routed_tool_names(user_message)
     )
     tools = _tool_schemas_for_names(selected_tool_names)
 
     usage = AgentUsage()
     empty_response_retries = 0
+    incomplete_response_retries = 0
     active_system_prompt = system_prompt
     buffer_until_tool_decision = bool(tools)
 
@@ -532,7 +628,6 @@ async def stream_agent(
 
         tool_calls = _dedupe_tool_calls(raw_tool_calls)
         content_text = "".join(content_parts)
-
         assistant_message: dict[str, Any] = {
             "role": "assistant",
             "content": content_text,
@@ -555,17 +650,96 @@ async def stream_agent(
                         + "Do not return an empty response.\n"
                         + "END EMPTY RESPONSE RECOVERY"
                     )
-                    # Never append an empty assistant turn to history.
                     continue
-
                 raise OllamaRequestError(
                     "Ollama returned an empty assistant response twice."
                 )
 
-            agent_messages.append(assistant_message)
+            done_reason = (final_chunk or {}).get("done_reason")
+            incomplete = _looks_incomplete_response(
+                content_text,
+                done_reason=done_reason,
+                user_message=user_message,
+                tool_calls_used=usage.tool_calls,
+            )
 
-            # Tool-enabled requests were buffered only until the tool decision
-            # was known. With no tool call, this is the genuine final response.
+            if incomplete and incomplete_response_retries < 1:
+                incomplete_response_retries += 1
+
+                if buffer_until_tool_decision and usage.tool_calls == 0:
+                    # The model answered prematurely instead of using the tools
+                    # routed for this request. Discard the fragment and retry the
+                    # decision turn with stronger instructions.
+                    active_system_prompt = (
+                        system_prompt
+                        + "\n\nINCOMPLETE TOOL-TURN RECOVERY\n"
+                        + "Your previous attempt ended with an incomplete answer before the user's request was fulfilled. "
+                        + "Use the supplied tool that is appropriate for the request before answering when external/tool data is needed. "
+                        + "If the user supplied a URL or bare domain and asked to read or summarise it, call read_web_page directly "
+                        + "using https:// for a bare domain. Do not merely say that information is unavailable without attempting the supplied tool.\n"
+                        + "END INCOMPLETE TOOL-TURN RECOVERY"
+                    )
+                    continue
+
+                if buffer_until_tool_decision and usage.tool_calls > 0:
+                    # Tool results already exist. Regenerate the final answer once
+                    # with tools removed so another planning cycle cannot replace
+                    # the answer with another fragment/tool call.
+                    repaired_parts, repaired_final = await _repair_final_response(
+                        model=model,
+                        messages=agent_messages,
+                        system_prompt=system_prompt,
+                        reasoning_mode=reasoning_mode,
+                        temperature=temperature,
+                        usage=usage,
+                    )
+                    repaired_text = "".join(repaired_parts).strip()
+                    if repaired_text:
+                        content_parts = repaired_parts
+                        content_text = "".join(repaired_parts)
+                        final_chunk = repaired_final or final_chunk
+                        assistant_message = {
+                            "role": "assistant",
+                            "content": content_text,
+                        }
+
+                elif not buffer_until_tool_decision:
+                    # Plain-chat tokens are already visible. Ask for a natural
+                    # continuation and stream only the continuation.
+                    agent_messages.append(assistant_message)
+                    continuation_prompt = (
+                        system_prompt
+                        + "\n\nCONTINUATION RECOVERY\n"
+                        + "The immediately preceding assistant message was cut off. Continue exactly where it stopped, "
+                        + "without repeating its existing text, and finish the answer completely.\n"
+                        + "END CONTINUATION RECOVERY"
+                    )
+                    continuation_parts: list[str] = []
+                    continuation_final: dict[str, Any] | None = None
+                    async for chunk in stream_chat(
+                        model=model,
+                        messages=agent_messages,
+                        system_prompt=continuation_prompt,
+                        reasoning_mode=reasoning_mode,
+                        temperature=temperature,
+                        tools=None,
+                    ):
+                        message = chunk.get("message") or {}
+                        continuation = message.get("content") or ""
+                        if continuation:
+                            continuation_parts.append(continuation)
+                            yield {"type": "token", "content": continuation}
+                        if chunk.get("done"):
+                            continuation_final = chunk
+                            usage.add_chunk(chunk)
+                    if continuation_parts:
+                        content_text += "".join(continuation_parts)
+                        final_chunk = continuation_final or final_chunk
+
+            agent_messages.append({"role": "assistant", "content": content_text})
+
+            # Tool-enabled turns were buffered until the tool decision was known.
+            # Release only the final/repaired answer, never the discarded fragment.
             if buffer_until_tool_decision:
                 for content in content_parts:
                     yield {"type": "token", "content": content}
@@ -578,16 +752,16 @@ async def stream_agent(
             }
             return
 
-        # This is an internal tool-planning turn. Keep it in model context but
-        # do not expose its narration to the user.
+        # Internal tool-planning turn. Keep it in model context but do not expose
+        # its narration to the user.
         agent_messages.append(assistant_message)
         active_system_prompt = system_prompt
         empty_response_retries = 0
+        incomplete_response_retries = 0
 
         for call in tool_calls:
             usage.tool_calls += 1
             tool_message: dict[str, Any] | None = None
-
             async for event in _execute_tool_call(
                 call=call,
                 conversation_id=conversation_id,
@@ -597,7 +771,6 @@ async def stream_agent(
                     tool_message = event["message"]
                 else:
                     yield event
-
             if tool_message is None:
                 tool_name = call["function"]["name"]
                 tool_message = {
@@ -605,12 +778,10 @@ async def stream_agent(
                     "tool_name": tool_name,
                     "content": "Tool execution did not produce a result.",
                 }
-
             agent_messages.append(tool_message)
 
-    # The model kept asking for tools beyond the configured safety limit.
-    # Generate one final response without tools so the user still gets a useful
-    # answer and the loop cannot run forever.
+    # Safety-limit finalisation: tools are removed and one complete answer is
+    # generated from the information already gathered.
     limit_prompt = (
         system_prompt
         + "\n\nTOOL LIMIT\n"
@@ -618,10 +789,8 @@ async def stream_agent(
         + "Do not request another tool. Answer using the information already available.\n"
         + "END TOOL LIMIT"
     )
-
     final_chunk: dict[str, Any] | None = None
     final_content_parts: list[str] = []
-
     async for chunk in stream_chat(
         model=model,
         messages=agent_messages,

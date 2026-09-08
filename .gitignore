@@ -28,3 +28,6 @@ apps/desktop/src-tauri/target/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Phase 10B local voice model/runtime data
+data/voice/

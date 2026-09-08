@@ -42,6 +42,8 @@ import {
   getSettings,
   getToolAudit,
   getTools,
+  getVoiceSettings,
+  getVoiceStatus,
   resetSettings,
   resolveToolApproval,
   authorizeSensitiveControl,
@@ -55,6 +57,8 @@ import {
   updateMemory,
   updateSettings,
   updateToolPermission,
+  updateVoiceSettings,
+  resetVoiceSettings,
   uploadAttachment,
 } from "./api";
 import { AutomationsView } from "./components/AutomationsView";
@@ -67,6 +71,8 @@ import { WebWorkspaceView } from "./components/WebWorkspaceView";
 import { SettingsView } from "./components/SettingsView";
 import { CommandCenter } from "./shell/CommandCenter";
 import { useRuntimeEvents, type JaceRuntimeState } from "./shell/runtime";
+import { useVoiceController } from "./voice/useVoiceController";
+import { classifySpokenApproval } from "./voice/approval";
 import { ToolApprovalModal } from "./components/ToolApprovalModal";
 import { ToolsView } from "./components/ToolsView";
 import type {
@@ -117,6 +123,8 @@ import type {
   ToolAuditRecord,
   ToolPermissionMode,
   ToolRecord,
+  VoiceSettings,
+  VoiceStatus,
 } from "./types";
 import "./styles.css";
 
@@ -163,6 +171,8 @@ export default function App() {
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [settings, setSettings] = useState<AssistantSettings | null>(null);
+  const [voiceSettings, setVoiceSettingsState] = useState<VoiceSettings | null>(null);
+  const [voiceStatus, setVoiceStatusState] = useState<VoiceStatus | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [toolsEnabled, setToolsEnabled] = useState(true);
@@ -191,12 +201,12 @@ export default function App() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [conversationSearch, setConversationSearch] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const isGeneratingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [memoryContextCount, setMemoryContextCount] = useState(0);
   const [toolContextCount, setToolContextCount] = useState(0);
   const [performanceDiagnostics, setPerformanceDiagnostics] = useState<PerformanceDiagnostics | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const submitLockRef = useRef(false);
   const fallbackRuntimeState: JaceRuntimeState = pendingApproval
     ? "waiting_permission"
     : isGenerating
@@ -205,6 +215,19 @@ export default function App() {
         ? "idle"
         : "offline";
   const runtime = useRuntimeEvents(fallbackRuntimeState);
+  const voiceController = useVoiceController({
+    settings: voiceSettings,
+    status: voiceStatus,
+    onTranscript: handleVoiceTranscript,
+    onError: (message) => setError(message),
+  });
+  const effectiveRuntimeState: JaceRuntimeState = voiceController.phase === "error"
+    ? "warning"
+    : voiceController.phase !== "idle"
+      ? voiceController.phase
+      : (pendingApproval || isGenerating)
+        ? fallbackRuntimeState
+        : runtime.state;
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
@@ -306,8 +329,10 @@ export default function App() {
       const currentHealth = await getHealth();
       setHealth(currentHealth);
 
-      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse, computerStatusResponse, computerWorkspaceResponse, attachmentStatusResponse, automationStatusResponse, automationResponse, notificationResponse] = await Promise.all([
+      const [profile, voiceProfile, voiceRuntimeStatus, conversationResponse, memoryResponse, toolResponse, auditResponse, computerStatusResponse, computerWorkspaceResponse, attachmentStatusResponse, automationStatusResponse, automationResponse, notificationResponse] = await Promise.all([
         getSettings(),
+        getVoiceSettings(),
+        getVoiceStatus(),
         getConversations(),
         getMemories(false),
         getTools(),
@@ -321,6 +346,8 @@ export default function App() {
       ]);
 
       setSettings(profile);
+      setVoiceSettingsState(voiceProfile);
+      setVoiceStatusState(voiceRuntimeStatus);
       setReasoningMode(profile.reasoning_mode);
       setSelectedModel(profile.default_model);
       setConversationPrompt(profile.system_prompt);
@@ -450,11 +477,11 @@ export default function App() {
     });
   }
 
-  function registerApproval(event: StreamApprovalRequiredEvent, conversationId?: string | null) {
+  function registerApproval(event: StreamApprovalRequiredEvent) {
     setPendingApproval({
       approval_id: event.approval_id,
       call_id: event.call_id,
-      conversation_id: conversationId ?? activeConversationId,
+      conversation_id: activeConversationId,
       tool_name: event.tool_name,
       label: event.label,
       description: event.description,
@@ -526,34 +553,74 @@ export default function App() {
     });
   }
 
-  async function submit(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    const text = input.trim();
+  async function handleVoiceTranscript(transcript: string) {
+    const text = transcript.trim();
+    if (!text) return;
 
-    if (
-      (!text && pendingAttachments.length === 0)
-      || isGenerating
-      || submitLockRef.current
-      || connectionState !== "online"
-      || !settings
-      || !selectedModel
-    ) {
+    if (pendingApproval) {
+      if (!voiceSettings?.verbal_approvals) {
+        setInput(text);
+        setScreen("chat");
+        setError("A tool permission is waiting. Resolve it in the approval dialog before starting another request.");
+        return;
+      }
+
+      const decision = classifySpokenApproval(text);
+      if (decision === "allow_once") {
+        await decideToolApproval("allow_once");
+        voiceController.speakSystem("Approved.");
+        return;
+      }
+      if (decision === "deny_once") {
+        await decideToolApproval("deny_once");
+        voiceController.speakSystem("Denied.");
+        return;
+      }
+      if (decision === "details") {
+        voiceController.speakSystem(
+          `${pendingApproval.label}. ${pendingApproval.description}. Say yes to allow it once, or no to deny it.`,
+        );
+        return;
+      }
+
+      voiceController.speakSystem("I still need a clear yes or no for the pending permission. You can also say details.");
       return;
     }
 
-    // React state updates are asynchronous, so use a synchronous ref as the
-    // authoritative submission lock. This closes the small window where a
-    // second submit could arrive while a new conversation or its attachments
-    // are still being created.
-    submitLockRef.current = true;
-    setIsGenerating(true);
+    // Pressing push-to-talk during a generated answer interrupts the answer.
+    // Give the aborted stream a brief chance to settle before starting the new turn.
+    for (let attempt = 0; attempt < 30 && isGeneratingRef.current; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    if (isGeneratingRef.current) {
+      setInput(text);
+      setError("The previous response is still stopping. Your transcription has been placed in the chat box.");
+      return;
+    }
+
+    await submit(undefined, text, true);
+  }
+
+  async function startVoicePushToTalk() {
+    if (isGeneratingRef.current && !pendingApproval) {
+      abortRef.current?.abort();
+    }
+    await voiceController.startListening();
+  }
+
+  async function submit(
+    event?: FormEvent<HTMLFormElement>,
+    textOverride?: string,
+    fromVoice = false,
+  ) {
+    event?.preventDefault();
+    const text = (textOverride ?? input).trim();
+    if ((!text && pendingAttachments.length === 0) || isGeneratingRef.current || connectionState !== "online" || !settings || !selectedModel) return;
 
     let conversationId: string;
     try {
       conversationId = await ensureConversation();
     } catch (conversationError) {
-      submitLockRef.current = false;
-      setIsGenerating(false);
       setError(conversationError instanceof Error ? conversationError.message : "Could not create conversation.");
       return;
     }
@@ -567,8 +634,6 @@ export default function App() {
       for (const attachment of uploadedAttachments) {
         try { await deleteAttachment(attachment.id); } catch { /* best-effort orphan cleanup */ }
       }
-      submitLockRef.current = false;
-      setIsGenerating(false);
       setError(uploadError instanceof Error ? uploadError.message : "Could not upload attachment.");
       return;
     }
@@ -579,7 +644,7 @@ export default function App() {
     const user = { ...localMessage("user", displayText), attachments: uploadedAttachments };
     const assistant: ChatMessage = { ...localMessage("assistant", ""), isStreaming: true };
     setMessages((current) => [...current, user, assistant]);
-    setInput("");
+    if (!fromVoice) setInput("");
     clearPendingAttachments();
     setError(null);
     setMemoryContextCount(0);
@@ -587,6 +652,15 @@ export default function App() {
     setPerformanceDiagnostics(null);
     setToolActivity([]);
     setPendingApproval(null);
+    setIsGenerating(true);
+    isGeneratingRef.current = true;
+
+    const speakResponse = Boolean(
+      voiceSettings?.enabled
+        && voiceController.canSpeak
+        && (fromVoice || voiceSettings.auto_speak),
+    );
+    voiceController.beginResponse(speakResponse);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -601,6 +675,7 @@ export default function App() {
           reasoning_mode: reasoningMode,
           temperature: settings.temperature,
           attachment_ids: uploadedAttachments.map((attachment) => attachment.id),
+          voice_mode: speakResponse,
         },
         {
           onContext: (context) => {
@@ -620,11 +695,22 @@ export default function App() {
               attachment_processing_ms: context.attachment_processing_ms,
             });
           },
-          onToken: (content) => updateAssistant(assistant.id, (message) => ({ ...message, content: message.content + content })),
+          onToken: (content) => {
+            updateAssistant(assistant.id, (message) => ({ ...message, content: message.content + content }));
+            voiceController.ingestResponseToken(content);
+          },
           onToolCall: registerToolCall,
-          onApprovalRequired: (approval) => registerApproval(approval, conversationId),
+          onApprovalRequired: (approval) => {
+            registerApproval(approval);
+            if (voiceSettings?.verbal_approvals && voiceController.canSpeak) {
+              voiceController.speakSystem(
+                `I need your approval to ${approval.label}. Say yes or no, or say details.`,
+              );
+            }
+          },
           onToolResult: registerToolResult,
           onDone: (done: StreamDoneEvent) => {
+            voiceController.finishResponse();
             if (done.diagnostics) setPerformanceDiagnostics(done.diagnostics);
             updateAssistant(assistant.id, (message) => ({
               ...message,
@@ -655,15 +741,17 @@ export default function App() {
       window.setTimeout(() => { void refreshMemories(); }, 1200);
     } catch (chatError) {
       if (controller.signal.aborted) {
+        voiceController.stopSpeaking();
         updateAssistant(assistant.id, (message) => ({ ...message, isStreaming: false, stopped: true }));
       } else {
+        voiceController.stopSpeaking();
         updateAssistant(assistant.id, (message) => ({ ...message, isStreaming: false }));
         setError(chatError instanceof Error ? chatError.message : "Jace could not generate a response.");
       }
     } finally {
       abortRef.current = null;
       setPendingApproval(null);
-      submitLockRef.current = false;
+      isGeneratingRef.current = false;
       setIsGenerating(false);
     }
   }
@@ -758,6 +846,35 @@ export default function App() {
       setConversationPrompt(updated.system_prompt);
       setReasoningMode(updated.reasoning_mode);
     }
+  }
+
+  async function saveVoiceProfile(next: VoiceSettings) {
+    const updated = await updateVoiceSettings({
+      enabled: next.enabled,
+      auto_speak: next.auto_speak,
+      verbal_approvals: next.verbal_approvals,
+      microphone_mode: next.microphone_mode,
+      tts_voice: next.tts_voice,
+      tts_speed: next.tts_speed,
+      tts_language: next.tts_language,
+    });
+    setVoiceSettingsState(updated);
+    setVoiceStatusState(await getVoiceStatus());
+  }
+
+  async function resetVoiceProfile() {
+    const updated = await resetVoiceSettings();
+    setVoiceSettingsState(updated);
+    setVoiceStatusState(await getVoiceStatus());
+  }
+
+  function testVoiceProfile() {
+    const userName = settings?.user_name?.trim();
+    voiceController.speakSystem(
+      userName
+        ? `Hello ${userName}. Jace voice is online and ready.`
+        : "Jace voice is online and ready.",
+    );
   }
 
   async function resetProfile() {
@@ -1058,7 +1175,7 @@ export default function App() {
     }
   }
 
-  if (!settings) {
+  if (!settings || !voiceSettings) {
     return (
       <main className="boot-screen">
         <div className="welcome-mark">J</div>
@@ -1176,10 +1293,15 @@ export default function App() {
       {screen === "settings" && (
         <SettingsView
           settings={settings}
+          voiceSettings={voiceSettings}
+          voiceStatus={voiceStatus}
           models={models}
           hasActiveConversation={activeConversationId !== null}
           onSave={saveSettings}
+          onSaveVoice={saveVoiceProfile}
           onReset={resetProfile}
+          onResetVoice={resetVoiceProfile}
+          onTestVoice={testVoiceProfile}
           onApplyToCurrentConversation={applySettingsToCurrent}
         />
       )}
@@ -1190,10 +1312,16 @@ export default function App() {
     <>
       <CommandCenter
         assistantName={settings.assistant_name}
-        appVersion={health?.app_version ?? "0.10.0-alpha.2"}
+        appVersion={health?.app_version ?? "0.10.0-beta.1"}
         model={selectedModel}
-        state={runtime.state}
+        state={effectiveRuntimeState}
         runtimeConnected={runtime.connected}
+        voicePhase={voiceController.phase}
+        voiceAmplitude={voiceController.amplitude}
+        voiceReady={Boolean(voiceSettings.enabled && voiceController.canRecord)}
+        voiceLastTranscript={voiceController.lastTranscript}
+        onVoiceStart={startVoicePushToTalk}
+        onVoiceStop={voiceController.stopListening}
         screen={screen}
         workspace={workspace}
         conversations={conversations}
@@ -1214,4 +1342,5 @@ export default function App() {
       <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />
     </>
   );
+
 }

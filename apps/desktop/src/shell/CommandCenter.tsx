@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { ConversationSummary, Screen } from "../types";
+import type { ConversationSummary, Screen, VoicePhase } from "../types";
 import type { JaceRuntimeState } from "./runtime";
 import { JaceCore } from "./JaceCore";
 import { AgentOffice } from "./AgentOffice";
@@ -35,6 +35,12 @@ export function CommandCenter(props: {
   notifications: AutomationNotificationRecord[];
   online: boolean;
   controlActive: boolean;
+  voicePhase: VoicePhase;
+  voiceAmplitude: number;
+  voiceReady: boolean;
+  voiceLastTranscript: string;
+  onVoiceStart: () => void | Promise<void>;
+  onVoiceStop: () => void | Promise<void>;
   onScreenChange: (screen: Screen) => void;
   onNewChat: () => void;
   onLoadConversation: (id: string) => void;
@@ -72,7 +78,7 @@ export function CommandCenter(props: {
         />
 
         <div className="command-center-column">
-          <JaceCore name={props.assistantName} state={props.state} model={props.model} runtimeConnected={props.runtimeConnected} onExpand={() => setFocus(focus === "core" ? "none" : "core")} />
+          <JaceCore name={props.assistantName} state={props.state} model={props.model} runtimeConnected={props.runtimeConnected} amplitude={props.voiceAmplitude} onExpand={() => setFocus(focus === "core" ? "none" : "core")} />
           <AgentOffice activities={props.toolActivity} onExpand={() => setFocus(focus === "office" ? "none" : "office")} />
         </div>
 
@@ -88,8 +94,44 @@ export function CommandCenter(props: {
       </div>
 
       <footer className="command-footer">
-        <button className="voice-placeholder" disabled title="Voice arrives in Phase 10B"><span>🎙</span> HOLD TO TALK <small>10B</small></button>
-        <div className="footer-state"><span className={`state-led state-${props.state}`} />{props.state === "idle" ? "Ready when you are." : props.state.replace(/_/g, " ")}</div>
+        <button
+          className={`voice-placeholder voice-live voice-${props.voicePhase}`}
+          disabled={!props.voiceReady || props.voicePhase === "transcribing"}
+          title={props.voiceReady ? "Hold while speaking. Release to send. Press while Jace is speaking to interrupt." : "Local voice runtime is not ready."}
+          onPointerDown={(event) => {
+            if (!props.voiceReady || props.voicePhase === "transcribing") return;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            void props.onVoiceStart();
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+            if (props.voicePhase === "listening") void props.onVoiceStop();
+          }}
+          onPointerCancel={() => { if (props.voicePhase === "listening") void props.onVoiceStop(); }}
+          onKeyDown={(event) => {
+            if ((event.key === " " || event.key === "Enter") && !event.repeat && props.voiceReady && props.voicePhase !== "transcribing") {
+              event.preventDefault();
+              void props.onVoiceStart();
+            }
+          }}
+          onKeyUp={(event) => {
+            if ((event.key === " " || event.key === "Enter") && props.voicePhase === "listening") {
+              event.preventDefault();
+              void props.onVoiceStop();
+            }
+          }}
+        >
+          <span>🎙</span>
+          {props.voicePhase === "listening" && <>LISTENING <small>RELEASE TO SEND</small></>}
+          {props.voicePhase === "transcribing" && <>TRANSCRIBING <small>LOCAL WHISPER</small></>}
+          {props.voicePhase === "speaking" && <>SPEAKING <small>HOLD TO INTERRUPT</small></>}
+          {(props.voicePhase === "idle" || props.voicePhase === "error") && <>HOLD TO TALK <small>{props.voiceReady ? "LOCAL" : "SETUP"}</small></>}
+        </button>
+        <div className="footer-state">
+          <span className={`state-led state-${props.state}`} />
+          <span>{props.state === "idle" ? "Ready when you are." : props.state.replace(/_/g, " ")}</span>
+          {props.voiceLastTranscript && <small className="footer-transcript">Heard: {props.voiceLastTranscript}</small>}
+        </div>
         <div className="footer-private">● Local / Private</div>
       </footer>
 

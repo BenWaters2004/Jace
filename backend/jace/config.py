@@ -7,11 +7,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIRECTORY = PROJECT_ROOT / "data"
 DATABASE_PATH = DATA_DIRECTORY / "jace.db"
 ATTACHMENTS_DIRECTORY = DATA_DIRECTORY / "attachments"
+VOICE_DIRECTORY = DATA_DIRECTORY / "voice"
+VOICE_KOKORO_DIRECTORY = VOICE_DIRECTORY / "kokoro"
+VOICE_WHISPER_DIRECTORY = VOICE_DIRECTORY / "whisper"
 
 
 class Settings(BaseSettings):
     app_name: str = "Jace"
-    app_version: str = "0.10.0-alpha.2"
+    app_version: str = "0.10.0-beta.1"
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:4b"
@@ -112,6 +115,7 @@ class Settings(BaseSettings):
     audio_compute_type: str = "int8"
     audio_beam_size: int = 3
     audio_local_files_only: bool = True
+    audio_download_root: Path = VOICE_WHISPER_DIRECTORY
 
     # Permissioned screen capture.
     screen_capture_enabled: bool = True
@@ -129,6 +133,20 @@ class Settings(BaseSettings):
     automation_notification_poll_seconds: int = 10
     automation_max_result_chars: int = 20_000
     automation_watcher_state_chars: int = 10_000
+
+
+    # Phase 10B local voice / presence. Push-to-talk is intentionally the
+    # default: the microphone is opened only while the user is actively
+    # holding the control in the desktop UI. STT uses the existing local
+    # faster-whisper model; TTS uses local Kokoro ONNX model files.
+    voice_enabled: bool = True
+    voice_default_voice: str = "bm_lewis"
+    voice_default_speed: float = 1.06
+    voice_default_language: str = "en-gb"
+    voice_tts_max_chars: int = 900
+    voice_recording_max_bytes: int = 20_000_000
+    voice_kokoro_model_path: Path = VOICE_KOKORO_DIRECTORY / "kokoro-v1.0.onnx"
+    voice_kokoro_voices_path: Path = VOICE_KOKORO_DIRECTORY / "voices-v1.0.bin"
 
     # Phase 9 interactive GUI control. This is intentionally Windows-first.
     interactive_control_enabled: bool = True

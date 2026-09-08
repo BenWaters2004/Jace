@@ -39,7 +39,7 @@ def expect_value_error(fn, message: str) -> None:
 
 def main() -> int:
     print(f"Jace version: {settings.app_version}")
-    require(settings.app_version == "0.10.0-alpha.2", "version is 0.10.0-alpha.2")
+    require(settings.app_version == "0.10.0-beta.1", "version is 0.10.0-beta.1")
     require(settings.ollama_keep_alive == "-1m", "Ollama keep_alive regression remains fixed")
     require(settings.automation_enabled, "automation scheduler is enabled by default")
     require(settings.automation_max_parallel_runs >= 1, "automation concurrency limit is configured")

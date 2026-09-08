@@ -163,6 +163,55 @@ export interface AssistantSettingsUpdate {
   memory_min_similarity?: number;
 }
 
+
+export type VoicePhase = "idle" | "listening" | "transcribing" | "speaking" | "error";
+
+export interface VoiceSettings {
+  enabled: boolean;
+  auto_speak: boolean;
+  verbal_approvals: boolean;
+  microphone_mode: "push_to_talk";
+  tts_voice: string;
+  tts_speed: number;
+  tts_language: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VoiceSettingsUpdate {
+  enabled?: boolean;
+  auto_speak?: boolean;
+  verbal_approvals?: boolean;
+  microphone_mode?: "push_to_talk";
+  tts_voice?: string;
+  tts_speed?: number;
+  tts_language?: string;
+}
+
+export interface VoiceCatalogItem {
+  id: string;
+  label: string;
+  language: string;
+}
+
+export interface VoiceStatus {
+  enabled: boolean;
+  stt_dependency_available: boolean;
+  tts_dependency_available: boolean;
+  tts_model_files_available: boolean;
+  stt_model: string;
+  tts_model_path: string;
+  tts_voices_path: string;
+  voices: VoiceCatalogItem[];
+}
+
+export interface VoiceTranscriptionResponse {
+  text: string;
+  language: string | null;
+  language_probability: number | null;
+  duration: number | null;
+}
+
 export interface MemoryRecord {
   id: string;
   memory_type: MemoryType;
@@ -207,6 +256,7 @@ export interface ChatRequest {
   reasoning_mode?: ReasoningMode;
   temperature?: number;
   attachment_ids?: string[];
+  voice_mode?: boolean;
 }
 
 export interface StreamMetrics {

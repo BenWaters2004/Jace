@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError
-from jace.ai.prompts import TOOL_AGENT_SYSTEM_PROMPT
+from jace.ai.prompts import TOOL_AGENT_SYSTEM_PROMPT, VOICE_RESPONSE_STYLE
 from jace.attachments.processors import prepare_attachments
 from jace.attachments.service import assign_attachments_to_message, get_attachments
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
@@ -69,10 +69,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
             conversation_id=conversation.id,
         )
         if len(attachments) != len(list(dict.fromkeys(request.attachment_ids))):
-            raise HTTPException(
-                status_code=400,
-                detail="One or more attachments are unavailable for this conversation.",
-            )
+            raise HTTPException(status_code=400, detail="One or more attachments are unavailable for this conversation.")
 
         attachment_names = ", ".join(item.original_name for item in attachments)
         stored_user_text = request.message.strip()
@@ -89,6 +86,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
         memory_action_context = ""
 
         memory_allowed = bool(profile.memory_enabled and env_settings.memory_enabled)
+
         if memory_command is not None:
             if not memory_allowed:
                 memory_action_context = (
@@ -175,18 +173,12 @@ async def send_streaming_chat(request: PersistentChatRequest):
         response_model = conversation_model
 
         await chat_activity.begin()
-        await runtime_events.publish(
-            "jace.state.changed",
-            state="thinking",
-            conversation_id=conversation_id,
-        )
-
+        await runtime_events.publish("jace.state.changed", state="thinking", conversation_id=conversation_id)
         try:
             attachment_started = time.perf_counter()
             attachment_context = ""
             attachment_images: list[str] = []
             attachment_summaries: list[dict] = []
-
             if current_attachment_ids:
                 async with SessionLocal() as session:
                     current_attachments = await get_attachments(
@@ -195,14 +187,9 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         conversation_id=conversation_id,
                     )
                     attachment_context, attachment_images, attachment_summaries = await prepare_attachments(
-                        session,
-                        current_attachments,
+                        session, current_attachments
                     )
-
-            attachment_processing_ms = round(
-                (time.perf_counter() - attachment_started) * 1000,
-                2,
-            )
+            attachment_processing_ms = round((time.perf_counter() - attachment_started) * 1000, 2)
 
             memory_started = time.perf_counter()
             memory_retrieval_used = bool(
@@ -230,11 +217,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             min_similarity=memory_min_similarity,
                             update_access=True,
                         )
-
-            memory_retrieval_ms = round(
-                (time.perf_counter() - memory_started) * 1000,
-                2,
-            )
+            memory_retrieval_ms = round((time.perf_counter() - memory_started) * 1000, 2)
 
             tool_started = time.perf_counter()
             routed_tools = await routed_tool_names(request.message)
@@ -261,6 +244,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
             )
 
             preprocess_ms = round((time.perf_counter() - started_at) * 1000, 2)
+
             yield ndjson_event(
                 {
                     "type": "context",
@@ -290,6 +274,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 + memory_context
                 + memory_action_context
                 + tool_context
+                + ("\n\n" + VOICE_RESPONSE_STYLE if request.voice_mode else "")
             )
 
             async for event in stream_agent(
@@ -311,12 +296,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     if content:
                         if first_token_at is None:
                             first_token_at = time.perf_counter()
-                            await runtime_events.publish(
-                                "jace.state.changed",
-                                state="working",
-                                conversation_id=conversation_id,
-                                reason="responding",
-                            )
+                            await runtime_events.publish("jace.state.changed", state="working", conversation_id=conversation_id, reason="responding")
                         response_parts.append(content)
                         yield ndjson_event({"type": "token", "content": content})
                     continue
@@ -329,12 +309,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             tool_name=event.get("tool_name"),
                             label=event.get("label"),
                         )
-                        await runtime_events.publish(
-                            "jace.state.changed",
-                            state="working",
-                            reason="tool",
-                            conversation_id=conversation_id,
-                        )
+                        await runtime_events.publish("jace.state.changed", state="working", reason="tool", conversation_id=conversation_id)
                     elif event_type == "approval_required":
                         await runtime_events.publish(
                             "permission.requested",
@@ -343,11 +318,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             label=event.get("label"),
                             risk=event.get("risk"),
                         )
-                        await runtime_events.publish(
-                            "jace.state.changed",
-                            state="waiting_permission",
-                            conversation_id=conversation_id,
-                        )
+                        await runtime_events.publish("jace.state.changed", state="waiting_permission", conversation_id=conversation_id)
                     else:
                         await runtime_events.publish(
                             "tool.completed",
@@ -356,12 +327,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             status=event.get("status"),
                             summary=event.get("summary"),
                         )
-                        await runtime_events.publish(
-                            "jace.state.changed",
-                            state="thinking",
-                            conversation_id=conversation_id,
-                        )
-
+                        await runtime_events.publish("jace.state.changed", state="thinking", conversation_id=conversation_id)
                     yield ndjson_event(event)
                     continue
 
@@ -369,7 +335,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     raw_metrics = event.get("metrics") or {}
                     eval_count = raw_metrics.get("eval_count")
                     eval_duration = raw_metrics.get("eval_duration")
-
                     metrics = {
                         "time_to_first_token_ms": (
                             round((first_token_at - started_at) * 1000, 2)
@@ -387,7 +352,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         "eval_duration_ms": nanoseconds_to_ms(eval_duration),
                         "tokens_per_second": tokens_per_second(eval_count, eval_duration),
                     }
-
                     full_response = "".join(response_parts)
                     assistant_message_id = await persist_assistant(
                         full_response,
@@ -395,19 +359,8 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         metrics,
                         model_name=response_model,
                     )
-
-                    # An empty response is not a successful turn. Without this
-                    # guard the user message remains in history without a paired
-                    # assistant message, which produces the apparent every-other-
-                    # message behaviour on later turns.
-                    if assistant_message_id is None:
-                        raise OllamaRequestError(
-                            "The model completed the turn without producing a response."
-                        )
-
                     saved = True
-
-                    if not memory_command_handled:
+                    if not memory_command_handled and assistant_message_id:
                         schedule_memory_extraction(
                             conversation_id=conversation_id,
                             source_message_id=user_message_id,
@@ -416,12 +369,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                             enabled=auto_extract,
                         )
 
-                    await runtime_events.publish(
-                        "jace.state.changed",
-                        state="idle",
-                        conversation_id=conversation_id,
-                        reason="response_complete",
-                    )
+                    await runtime_events.publish("jace.state.changed", state="idle", conversation_id=conversation_id, reason="response_complete")
 
                     yield ndjson_event(
                         {
@@ -459,7 +407,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     )
                 )
             raise
-
         except (OllamaUnavailableError, OllamaRequestError) as exc:
             if response_parts and not saved:
                 await persist_assistant(
@@ -469,7 +416,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 )
                 saved = True
             yield ndjson_event({"type": "error", "message": str(exc)})
-
         except Exception as exc:
             if response_parts and not saved:
                 await persist_assistant(
@@ -483,16 +429,10 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     "message": f"Unexpected streaming error: {exc}",
                 }
             )
-
         finally:
             await chat_activity.end()
             if runtime_events.state != "offline":
-                await runtime_events.publish(
-                    "jace.state.changed",
-                    state="idle",
-                    conversation_id=conversation_id,
-                    reason="stream_finished",
-                )
+                await runtime_events.publish("jace.state.changed", state="idle", conversation_id=conversation_id, reason="stream_finished")
 
     return StreamingResponse(
         generate(),
