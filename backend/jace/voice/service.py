@@ -22,7 +22,16 @@ MAX_AUDIO_BYTES = 25 * 1024 * 1024
 WELCOME_LINE = "All systems online, sir. What are we working on today?"
 
 
-class VoiceError(RuntimeError):
+class VoiceRuntimeError(RuntimeError):
+    """Compatibility base error for the local Jace voice runtime.
+
+    Earlier Phase 10B modules imported VoiceRuntimeError directly.  Keep that
+    public name as the root of the current voice exception hierarchy so older
+    imports and exception handlers continue to work.
+    """
+
+
+class VoiceError(VoiceRuntimeError):
     """Base error for the local Jace voice pipeline."""
 
 
