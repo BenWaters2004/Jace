@@ -1,0 +1,199 @@
+/*
+ * Phase 10A reliability/core visual hotfix.
+ * Imported after the global stylesheet by JaceCore.tsx, so these rules safely
+ * override the older decorative trace animation without replacing styles.css.
+ */
+
+.core-network {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.network-wire,
+.network-flow {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.network-wire {
+  stroke: rgba(89, 202, 232, 0.15);
+  stroke-width: 1;
+}
+
+.network-flow {
+  stroke: rgba(118, 235, 255, 0.9);
+  stroke-width: 1.7;
+  stroke-dasharray: 1 17;
+  stroke-dashoffset: 0;
+  opacity: 0.38;
+  filter:
+    drop-shadow(0 0 3px rgba(108, 231, 255, 0.85))
+    drop-shadow(0 0 8px rgba(67, 207, 255, 0.35));
+  animation: jace-core-network-flow 4.5s linear infinite;
+}
+
+.network-junctions circle {
+  fill: rgba(110, 230, 255, 0.52);
+  stroke: rgba(151, 242, 255, 0.55);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 6px rgba(85, 224, 255, 0.7));
+  animation: jace-network-junction-pulse 2.6s ease-in-out infinite;
+}
+
+.state-thinking .network-flow {
+  animation-duration: 1.35s;
+  opacity: 0.92;
+}
+
+.state-working .network-flow {
+  animation-duration: 0.9s;
+  opacity: 1;
+}
+
+.state-listening .network-flow,
+.state-speaking .network-flow,
+.state-transcribing .network-flow {
+  animation-duration: 1.8s;
+  opacity: 0.72;
+}
+
+.state-idle .network-flow {
+  animation-duration: 5.5s;
+  opacity: 0.28;
+}
+
+.state-offline .network-flow {
+  animation-play-state: paused;
+  opacity: 0.08;
+}
+
+.state-waiting_permission .network-flow {
+  stroke: rgba(232, 190, 101, 0.92);
+  animation-duration: 2.6s;
+}
+
+.state-waiting_permission .network-junctions circle {
+  fill: rgba(232, 190, 101, 0.62);
+  stroke: rgba(244, 213, 143, 0.75);
+}
+
+.core-board-layer {
+  z-index: 1;
+}
+
+.core-node-stack,
+.core-ring,
+.core-orbit,
+.core-pulse {
+  z-index: 2;
+}
+
+.core-center,
+.core-caption-block,
+.core-scanline {
+  z-index: 3;
+}
+
+.board-ambient {
+  --drift-x: 0px;
+  --drift-y: 0px;
+  animation: jace-core-ambient-drift 5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.ambient-1 {
+  --drift-x: 54px;
+  --drift-y: -20px;
+  animation-delay: -0.25s;
+}
+
+.ambient-2 {
+  --drift-x: -48px;
+  --drift-y: 26px;
+  animation-delay: -1.05s;
+}
+
+.ambient-3 {
+  --drift-x: 72px;
+  --drift-y: -12px;
+  animation-delay: -1.8s;
+}
+
+.ambient-4 {
+  --drift-x: -66px;
+  --drift-y: -24px;
+  animation-delay: -2.55s;
+}
+
+.ambient-5 {
+  --drift-x: -42px;
+  --drift-y: 38px;
+  animation-delay: -3.3s;
+}
+
+.ambient-6 {
+  --drift-x: 46px;
+  --drift-y: -36px;
+  animation-delay: -4.05s;
+}
+
+.state-thinking .board-ambient {
+  animation-duration: 2.5s;
+}
+
+.state-working .board-ambient {
+  animation-duration: 1.8s;
+}
+
+.state-offline .board-ambient {
+  animation-play-state: paused;
+  opacity: 0.08;
+}
+
+@keyframes jace-core-network-flow {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes jace-network-junction-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes jace-core-ambient-drift {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: translate3d(0, 0, 0) scale(0.88);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform:
+      translate3d(var(--drift-x), var(--drift-y), 0)
+      scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .network-flow,
+  .network-junctions circle,
+  .board-ambient {
+    animation: none !important;
+  }
+}

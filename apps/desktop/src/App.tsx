@@ -196,6 +196,7 @@ export default function App() {
   const [toolContextCount, setToolContextCount] = useState(0);
   const [performanceDiagnostics, setPerformanceDiagnostics] = useState<PerformanceDiagnostics | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const submitLockRef = useRef(false);
   const fallbackRuntimeState: JaceRuntimeState = pendingApproval
     ? "waiting_permission"
     : isGenerating
@@ -449,11 +450,11 @@ export default function App() {
     });
   }
 
-  function registerApproval(event: StreamApprovalRequiredEvent) {
+  function registerApproval(event: StreamApprovalRequiredEvent, conversationId?: string | null) {
     setPendingApproval({
       approval_id: event.approval_id,
       call_id: event.call_id,
-      conversation_id: activeConversationId,
+      conversation_id: conversationId ?? activeConversationId,
       tool_name: event.tool_name,
       label: event.label,
       description: event.description,
@@ -528,12 +529,31 @@ export default function App() {
   async function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const text = input.trim();
-    if ((!text && pendingAttachments.length === 0) || isGenerating || connectionState !== "online" || !settings || !selectedModel) return;
+
+    if (
+      (!text && pendingAttachments.length === 0)
+      || isGenerating
+      || submitLockRef.current
+      || connectionState !== "online"
+      || !settings
+      || !selectedModel
+    ) {
+      return;
+    }
+
+    // React state updates are asynchronous, so use a synchronous ref as the
+    // authoritative submission lock. This closes the small window where a
+    // second submit could arrive while a new conversation or its attachments
+    // are still being created.
+    submitLockRef.current = true;
+    setIsGenerating(true);
 
     let conversationId: string;
     try {
       conversationId = await ensureConversation();
     } catch (conversationError) {
+      submitLockRef.current = false;
+      setIsGenerating(false);
       setError(conversationError instanceof Error ? conversationError.message : "Could not create conversation.");
       return;
     }
@@ -547,6 +567,8 @@ export default function App() {
       for (const attachment of uploadedAttachments) {
         try { await deleteAttachment(attachment.id); } catch { /* best-effort orphan cleanup */ }
       }
+      submitLockRef.current = false;
+      setIsGenerating(false);
       setError(uploadError instanceof Error ? uploadError.message : "Could not upload attachment.");
       return;
     }
@@ -565,7 +587,6 @@ export default function App() {
     setPerformanceDiagnostics(null);
     setToolActivity([]);
     setPendingApproval(null);
-    setIsGenerating(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -601,7 +622,7 @@ export default function App() {
           },
           onToken: (content) => updateAssistant(assistant.id, (message) => ({ ...message, content: message.content + content })),
           onToolCall: registerToolCall,
-          onApprovalRequired: registerApproval,
+          onApprovalRequired: (approval) => registerApproval(approval, conversationId),
           onToolResult: registerToolResult,
           onDone: (done: StreamDoneEvent) => {
             if (done.diagnostics) setPerformanceDiagnostics(done.diagnostics);
@@ -609,14 +630,14 @@ export default function App() {
               ...message,
               isStreaming: false,
               stats: {
-              timeToFirstTokenMs: done.metrics.time_to_first_token_ms,
-              totalDurationMs: done.metrics.total_duration_ms,
-              loadDurationMs: done.metrics.load_duration_ms,
-              promptEvalCount: done.metrics.prompt_eval_count,
-              promptEvalCachedCount: done.metrics.prompt_eval_cached_count,
-              promptEvalDurationMs: done.metrics.prompt_eval_duration_ms,
-              evalCount: done.metrics.eval_count,
-              evalDurationMs: done.metrics.eval_duration_ms,
+                timeToFirstTokenMs: done.metrics.time_to_first_token_ms,
+                totalDurationMs: done.metrics.total_duration_ms,
+                loadDurationMs: done.metrics.load_duration_ms,
+                promptEvalCount: done.metrics.prompt_eval_count,
+                promptEvalCachedCount: done.metrics.prompt_eval_cached_count,
+                promptEvalDurationMs: done.metrics.prompt_eval_duration_ms,
+                evalCount: done.metrics.eval_count,
+                evalDurationMs: done.metrics.eval_duration_ms,
                 tokensPerSecond: done.metrics.tokens_per_second,
               },
             }));
@@ -642,6 +663,7 @@ export default function App() {
     } finally {
       abortRef.current = null;
       setPendingApproval(null);
+      submitLockRef.current = false;
       setIsGenerating(false);
     }
   }
@@ -1192,5 +1214,4 @@ export default function App() {
       <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />
     </>
   );
-
 }

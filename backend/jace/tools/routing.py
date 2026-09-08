@@ -1,7 +1,6 @@
 import re
 from urllib.parse import urlparse
 
-
 ALL_TOOL_NAMES = {
     "calculator",
     "current_datetime",
@@ -53,6 +52,20 @@ def _contains_url(text: str) -> bool:
     return False
 
 
+BARE_WEB_TARGET_RE = re.compile(
+    r"(?<![@\w])"
+    r"(?:www\.)?"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"(?:com|org|net|io|ai|dev|app|tech|info|me|uk|co\.uk|gov\.uk|ac\.uk|de|fr|nl|eu|us|ca|au)"
+    r"(?:/[^\s<>()]*)?",
+    flags=re.IGNORECASE,
+)
+
+
+def _contains_bare_web_target(text: str) -> bool:
+    return bool(BARE_WEB_TARGET_RE.search(text))
+
+
 def _looks_like_arithmetic(text: str) -> bool:
     stripped = text.strip()
     if re.fullmatch(r"[\d\s().,+\-*/%^]+", stripped) and re.search(r"\d", stripped):
@@ -80,7 +93,6 @@ def route_tool_names(message: str) -> set[str]:
 
     if _looks_like_arithmetic(text):
         selected.add("calculator")
-
     if re.search(
         r"\b(?:current time|what time|time is it|current date|today'?s date|what date|day is it|date and time)\b",
         lowered,
@@ -92,7 +104,6 @@ def route_tool_names(message: str) -> set[str]:
         lowered,
     ):
         selected.add("search_memory")
-
     if re.search(
         r"\b(?:past conversations?|previous conversations?|last conversation|chat history|conversation history|search (?:my )?(?:past |previous )?(?:chats|conversations)|what did (?:i|we) (?:say|discuss|talk about)|what were we (?:discussing|talking about))\b",
         lowered,
@@ -101,28 +112,26 @@ def route_tool_names(message: str) -> set[str]:
 
     if re.search(r"\b(?:rename|retitle)\b.{0,30}\b(?:chat|conversation|this)\b", lowered):
         selected.add("rename_current_conversation")
-
     if re.search(r"\b(?:create|add|save|store)\b.{0,25}\bmemory\b", lowered):
         selected.add("create_memory")
     if re.search(r"\b(?:deactivate|disable|remove)\b.{0,25}\bmemory\b", lowered):
         selected.update({"search_memory", "deactivate_memory"})
 
-    has_url = _contains_url(text)
-    if has_url:
-        selected.update({"read_web_page", "browser_read_page"})
-
+    has_web_target = _contains_url(text) or _contains_bare_web_target(text)
+    if has_web_target:
+        # Bare domains need search as well as page-read tools so the model can
+        # resolve/canonicalise the target instead of deciding it has no web access.
+        selected.update({"web_search", "read_web_page", "browser_read_page"})
     if re.search(
         r"\b(?:search (?:the )?web|search online|look online|look up(?: online)?|google|latest|recent news|news about|find online|internet search|current information|current info)\b",
         lowered,
     ):
         selected.update({"web_search", "read_web_page", "browser_read_page"})
-
     if re.search(
         r"\b(?:weather|forecast|stock price|share price|price of|current president|current prime minister|current ceo|latest version|latest release|today'?s news|recent developments)\b",
         lowered,
     ):
         selected.update({"web_search", "read_web_page", "browser_read_page"})
-
     if re.search(
         r"\b(?:research|find sources|find articles|find documentation|latest documentation|find information about)\b",
         lowered,
@@ -134,7 +143,6 @@ def route_tool_names(message: str) -> set[str]:
         r"local (?:file|files|folder|folders|project|repo|repository)|workspace|working tree|source file|code file)\b",
         lowered,
     )
-
     if computer_hint or re.search(
         r"\b(?:list|show|find|search|read|open|inspect)\b.{0,30}\b(?:files?|folders?|directories|repo|repository|codebase)\b",
         lowered,
@@ -143,13 +151,11 @@ def route_tool_names(message: str) -> set[str]:
 
     if re.search(r"\b(?:list|show|browse|what(?:'s| is) in)\b.{0,35}\b(?:files?|folders?|directories|workspace|repo|repository)\b", lowered):
         selected.update({"list_computer_workspaces", "list_workspace_files"})
-
     if re.search(r"\b(?:read|open|inspect|show|view|look at)\b.{0,40}\b(?:file|source|code|readme|config|configuration)\b", lowered):
         selected.update({"list_computer_workspaces", "read_workspace_file", "workspace_file_info"})
 
     if re.search(r"\b(?:find|search|locate|grep)\b.{0,35}\b(?:file|files|text|code|project|repo|repository|workspace)\b", lowered):
         selected.update({"list_computer_workspaces", "search_workspace_files", "read_workspace_file"})
-
     if re.search(r"\b(?:edit|modify|change|update|fix|refactor|replace|write|create)\b.{0,45}\b(?:file|code|source|component|module|class|function|config|configuration)\b", lowered):
         selected.update({
             "list_computer_workspaces",
@@ -159,13 +165,11 @@ def route_tool_names(message: str) -> set[str]:
             "write_workspace_file",
             "replace_workspace_text",
         })
-
     if re.search(r"\b(?:create|make|add)\b.{0,30}\b(?:folder|directory)\b", lowered):
         selected.update({"list_computer_workspaces", "create_workspace_directory"})
 
     if re.search(r"\b(?:rename|move)\b.{0,30}\b(?:file|folder|directory|path)\b", lowered):
         selected.update({"list_computer_workspaces", "workspace_file_info", "move_workspace_path"})
-
     if re.search(r"\b(?:delete|remove)\b.{0,30}\b(?:file)\b", lowered):
         selected.update({"list_computer_workspaces", "workspace_file_info", "delete_workspace_file"})
 
@@ -182,14 +186,12 @@ def route_tool_names(message: str) -> set[str]:
         lowered,
     ):
         selected.add("inspect_attachment")
-
     if re.search(
         r"\b(?:look at|inspect|analyse|analyze|read|open|view|transcribe)\b.{0,45}"
         r"\b(?:image|photo|picture|pdf|document|audio|recording|voice note)\b",
         lowered,
     ) and computer_hint:
         selected.update({"list_computer_workspaces", "inspect_workspace_media"})
-
     if re.search(
         r"\b(?:look at|inspect|see|capture|take (?:a )?screenshot of|what(?:'s| is) on)\b.{0,35}"
         r"\b(?:my |the |current )?(?:screen|display|monitor|desktop)\b",
@@ -205,7 +207,6 @@ def route_tool_names(message: str) -> set[str]:
         lowered,
     ):
         selected.update({"list_automations", "create_automation", "current_datetime"})
-
     if re.search(r"\b(?:list|show|what are|which)\b.{0,25}\bautomations?\b", lowered):
         selected.add("list_automations")
 
@@ -215,15 +216,28 @@ def route_tool_names(message: str) -> set[str]:
     if re.search(r"\b(?:run|execute|start)\b.{0,35}\b(?:automation|scheduled task|watcher)\b", lowered):
         selected.update({"list_automations", "run_automation_now"})
 
-    # Phase 9 interactive GUI control. Selecting the family lets the model
-    # observe first and then act within an approved short-lived session.
-    if re.search(
-        r"\b(?:click|type|press|scroll|move (?:the )?mouse|mouse|keyboard|focus (?:the )?window|"
-        r"open (?:it|the app|the window)|use (?:my |the )?(?:browser|desktop|computer)|"
-        r"control (?:my |the )?(?:screen|desktop|computer|browser|app)|interact with|fill (?:in|out)|"
-        r"operate (?:the |my )?(?:browser|app|application|computer)|do it on my screen)\b",
-        lowered,
-    ):
+    # Phase 9 interactive GUI control. Natural imperative wording should route
+    # to the complete control family rather than requiring the model to infer
+    # that "open YouTube" or "type in Notepad" means GUI control.
+    control_requested = bool(
+        re.search(
+            r"\b(?:click|type|press|scroll|move (?:the )?mouse|mouse|keyboard|focus (?:the )?window|"
+            r"open (?:it|the app|the window)|use (?:my |the )?(?:browser|desktop|computer)|"
+            r"control (?:my |the )?(?:screen|desktop|computer|browser|app)|interact with|fill (?:in|out)|"
+            r"operate (?:the |my )?(?:browser|app|application|computer)|do it on my screen)\b",
+            lowered,
+        )
+    )
+    control_requested = control_requested or bool(
+        re.search(
+            r"\b(?:open|open up|launch|navigate to|go to|visit|play)\b"
+            r".{0,60}"
+            r"\b(?:youtube|browser|chrome|edge|firefox|notepad|website|site|video|app|application|window)\b",
+            lowered,
+        )
+    )
+
+    if control_requested:
         selected.update({
             "start_control_session",
             "control_status",
@@ -237,6 +251,10 @@ def route_tool_names(message: str) -> set[str]:
             "press_control_keys",
             "stop_control_session",
         })
+
+    # Opening/finding web media can require discovery plus GUI control.
+    if re.search(r"\b(?:open|play|find|watch)\b.{0,45}\b(?:youtube|web video)\b", lowered):
+        selected.update({"web_search", "read_web_page", "browser_read_page"})
 
     if re.search(r"\b(?:stop|cancel|abort|emergency stop)\b.{0,25}\b(?:control|mouse|computer|desktop|browser)\b", lowered):
         selected.update({"control_status", "stop_control_session"})

@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from jace.ai.engine import stream_chat
+from jace.ai.engine import OllamaRequestError, stream_chat
 from jace.config import settings
 from jace.database import SessionLocal
 from jace.tools import ensure_tools_registered
@@ -111,7 +111,6 @@ def _dedupe_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         if fingerprint in fingerprints:
             continue
-
         fingerprints.add(fingerprint)
         unique.append(normalised)
 
@@ -212,7 +211,6 @@ async def _execute_tool_call(
         )
 
     call_id = audit.id
-
     yield {
         "type": "tool_call",
         "call_id": call_id,
@@ -233,7 +231,6 @@ async def _execute_tool_call(
                 error="Tool is disabled by permission policy.",
                 completed=True,
             )
-
         yield {
             "type": "tool_result",
             "call_id": call_id,
@@ -292,7 +289,6 @@ async def _execute_tool_call(
                     error="User approval timed out.",
                     completed=True,
                 )
-
             yield {
                 "type": "tool_result",
                 "call_id": call_id,
@@ -323,7 +319,6 @@ async def _execute_tool_call(
                     error="User denied tool execution.",
                     completed=True,
                 )
-
             yield {
                 "type": "tool_result",
                 "call_id": call_id,
@@ -378,7 +373,8 @@ async def _execute_tool_call(
             "status": "completed",
             "summary": display,
         }
-        tool_message = {
+
+        tool_message: dict[str, Any] = {
             "role": "tool",
             "tool_name": tool_name,
             "content": model_content,
@@ -468,22 +464,35 @@ async def stream_agent(
     """
     Streaming multi-turn agent loop.
 
-    Normal answers keep streaming. If the model emits tool calls, their results
-    are appended as role=tool messages and the model continues until it produces
-    a turn with no more tool calls.
+    Plain chat still streams immediately. Tool-enabled turns are buffered for a
+    single model turn so preliminary narration is never leaked before we know
+    whether that turn contains a tool call. This keeps internal phrases such as
+    "Let me start a control session" out of the user's answer and lets the agent
+    continue through the tool sequence in the same request.
     """
     ensure_tools_registered()
-
     agent_messages = [dict(message) for message in messages]
+
     if agent_messages and agent_messages[-1].get("role") == "user":
         if attachment_context.strip():
             existing = str(agent_messages[-1].get("content") or "")
-            agent_messages[-1]["content"] = (existing + "\n\n" + attachment_context.strip()).strip()
+            agent_messages[-1]["content"] = (
+                existing + "\n\n" + attachment_context.strip()
+            ).strip()
         if current_images:
             agent_messages[-1]["images"] = current_images
-    selected_tool_names = tool_names if tool_names is not None else await routed_tool_names(user_message)
+
+    selected_tool_names = (
+        tool_names
+        if tool_names is not None
+        else await routed_tool_names(user_message)
+    )
     tools = _tool_schemas_for_names(selected_tool_names)
+
     usage = AgentUsage()
+    empty_response_retries = 0
+    active_system_prompt = system_prompt
+    buffer_until_tool_decision = bool(tools)
 
     for _step in range(settings.max_tool_steps):
         content_parts: list[str] = []
@@ -494,7 +503,7 @@ async def stream_agent(
         async for chunk in stream_chat(
             model=model,
             messages=agent_messages,
-            system_prompt=system_prompt,
+            system_prompt=active_system_prompt,
             reasoning_mode=reasoning_mode,
             temperature=temperature,
             tools=tools or None,
@@ -508,30 +517,59 @@ async def stream_agent(
             content = message.get("content") or ""
             if content:
                 content_parts.append(content)
-                yield {"type": "token", "content": content}
+                if not buffer_until_tool_decision:
+                    yield {"type": "token", "content": content}
 
             calls = message.get("tool_calls") or []
             if isinstance(calls, list):
-                raw_tool_calls.extend(call for call in calls if isinstance(call, dict))
+                raw_tool_calls.extend(
+                    call for call in calls if isinstance(call, dict)
+                )
 
             if chunk.get("done"):
                 final_chunk = chunk
                 usage.add_chunk(chunk)
 
         tool_calls = _dedupe_tool_calls(raw_tool_calls)
+        content_text = "".join(content_parts)
 
         assistant_message: dict[str, Any] = {
             "role": "assistant",
-            "content": "".join(content_parts),
+            "content": content_text,
         }
         if thinking_parts:
             assistant_message["thinking"] = "".join(thinking_parts)
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
 
-        agent_messages.append(assistant_message)
-
         if not tool_calls:
+            if not content_text.strip():
+                if empty_response_retries < 1:
+                    empty_response_retries += 1
+                    active_system_prompt = (
+                        system_prompt
+                        + "\n\nEMPTY RESPONSE RECOVERY\n"
+                        + "Your previous model turn produced no user-visible response. "
+                        + "Respond to the user's latest request now. If one of the supplied "
+                        + "tools is required, call it. Otherwise answer the user directly. "
+                        + "Do not return an empty response.\n"
+                        + "END EMPTY RESPONSE RECOVERY"
+                    )
+                    # Never append an empty assistant turn to history.
+                    continue
+
+                raise OllamaRequestError(
+                    "Ollama returned an empty assistant response twice."
+                )
+
+            agent_messages.append(assistant_message)
+
+            # Tool-enabled requests were buffered only until the tool decision
+            # was known. With no tool call, this is the genuine final response.
+            if buffer_until_tool_decision:
+                for content in content_parts:
+                    yield {"type": "token", "content": content}
+
             yield {
                 "type": "agent_done",
                 "model": (final_chunk or {}).get("model", model),
@@ -539,6 +577,12 @@ async def stream_agent(
                 "metrics": usage.raw_metrics(),
             }
             return
+
+        # This is an internal tool-planning turn. Keep it in model context but
+        # do not expose its narration to the user.
+        agent_messages.append(assistant_message)
+        active_system_prompt = system_prompt
+        empty_response_retries = 0
 
         for call in tool_calls:
             usage.tool_calls += 1
@@ -576,6 +620,8 @@ async def stream_agent(
     )
 
     final_chunk: dict[str, Any] | None = None
+    final_content_parts: list[str] = []
+
     async for chunk in stream_chat(
         model=model,
         messages=agent_messages,
@@ -587,10 +633,16 @@ async def stream_agent(
         message = chunk.get("message") or {}
         content = message.get("content") or ""
         if content:
+            final_content_parts.append(content)
             yield {"type": "token", "content": content}
         if chunk.get("done"):
             final_chunk = chunk
             usage.add_chunk(chunk)
+
+    if not "".join(final_content_parts).strip():
+        raise OllamaRequestError(
+            "Ollama returned an empty response after reaching the tool step limit."
+        )
 
     yield {
         "type": "agent_done",
