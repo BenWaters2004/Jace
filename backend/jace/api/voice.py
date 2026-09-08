@@ -1,177 +1,101 @@
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+import asyncio
+import logging
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
-from jace.attachments.audio import AudioTranscriptionError, transcribe_audio
-from jace.config import settings as env_settings
-from jace.database import SessionLocal
-from jace.db.voice import (
-    get_or_create_voice_settings,
-    reset_voice_settings,
-    update_voice_settings,
+from jace.voice.service import (
+    MAX_AUDIO_BYTES,
+    VoiceDecodeError,
+    VoiceError,
+    VoiceUnavailableError,
+    voice_service,
 )
-from jace.runtime import runtime_events
-from jace.schemas import (
-    VoiceSettingsResponse,
-    VoiceSettingsUpdate,
-    VoiceStateRequest,
-    VoiceStatusResponse,
-    VoiceSynthesisRequest,
-    VoiceTranscriptionResponse,
-)
-from jace.voice import VoiceRuntimeError, get_voice_runtime_status, synthesize_wav
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice"])
 
 
-def _voice_settings_response(profile) -> VoiceSettingsResponse:
-    return VoiceSettingsResponse(
-        enabled=profile.enabled,
-        auto_speak=profile.auto_speak,
-        verbal_approvals=profile.verbal_approvals,
-        microphone_mode=profile.microphone_mode,
-        tts_voice=profile.tts_voice,
-        tts_speed=profile.tts_speed,
-        tts_language=profile.tts_language,
-        created_at=profile.created_at,
-        updated_at=profile.updated_at,
-    )
+class SpeechRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=20_000)
 
 
-@router.get("/status", response_model=VoiceStatusResponse)
-async def voice_status():
-    status = get_voice_runtime_status()
-    return VoiceStatusResponse(
-        **status,
-        stt_model=env_settings.audio_model,
-    )
+@router.get("/status")
+async def get_status():
+    return voice_service.status()
 
 
-@router.get("/settings", response_model=VoiceSettingsResponse)
-async def get_voice_settings():
-    async with SessionLocal() as session:
-        return _voice_settings_response(await get_or_create_voice_settings(session))
-
-
-@router.patch("/settings", response_model=VoiceSettingsResponse)
-async def patch_voice_settings(request: VoiceSettingsUpdate):
-    async with SessionLocal() as session:
-        profile = await get_or_create_voice_settings(session)
-        profile = await update_voice_settings(
-            session,
-            profile,
-            **request.model_dump(exclude_unset=True),
-        )
-        return _voice_settings_response(profile)
-
-
-@router.post("/settings/reset", response_model=VoiceSettingsResponse)
-async def reset_voice_profile():
-    async with SessionLocal() as session:
-        return _voice_settings_response(await reset_voice_settings(session))
-
-
-@router.post("/listening")
-async def set_listening(request: VoiceStateRequest):
-    if request.active:
-        await runtime_events.publish("voice.listening.started")
-        await runtime_events.publish("jace.state.changed", state="listening", reason="push_to_talk")
-    else:
-        await runtime_events.publish("voice.listening.stopped")
-        if runtime_events.state == "listening":
-            await runtime_events.publish("jace.state.changed", state="transcribing", reason="push_to_talk_released")
-    return {"success": True}
-
-
-@router.post("/speaking")
-async def set_speaking(request: VoiceStateRequest):
-    if request.active:
-        await runtime_events.publish("speech.started")
-        await runtime_events.publish("jace.state.changed", state="speaking", reason="voice_playback")
-    else:
-        await runtime_events.publish("speech.complete")
-        if runtime_events.state == "speaking":
-            await runtime_events.publish("jace.state.changed", state="idle", reason="voice_playback_complete")
-    return {"success": True}
-
-
-@router.post("/transcribe", response_model=VoiceTranscriptionResponse)
+@router.post("/transcribe")
 async def transcribe_voice(file: UploadFile = File(...)):
-    if not env_settings.voice_enabled:
-        raise HTTPException(status_code=403, detail="Voice is disabled in Jace configuration.")
-
-    raw = await file.read(env_settings.voice_recording_max_bytes + 1)
-    await file.close()
-    if not raw:
-        raise HTTPException(status_code=400, detail="The microphone recording was empty.")
-    if len(raw) > env_settings.voice_recording_max_bytes:
-        raise HTTPException(status_code=413, detail="The microphone recording is too large.")
-
-    suffix = Path(file.filename or "voice.webm").suffix or ".webm"
-    await runtime_events.publish("voice.transcription.started")
-    await runtime_events.publish("jace.state.changed", state="transcribing", reason="local_whisper")
-
-    temp_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(prefix="jace-voice-", suffix=suffix, delete=False) as handle:
-            handle.write(raw)
-            temp_path = Path(handle.name)
-
-        text, metadata = await transcribe_audio(temp_path)
-        await runtime_events.publish(
-            "voice.transcription.complete",
-            transcript_chars=len(text),
-            language=metadata.get("language"),
-        )
-        return VoiceTranscriptionResponse(
-            text=text,
-            language=metadata.get("language"),
-            language_probability=metadata.get("language_probability"),
-            duration=metadata.get("duration"),
-        )
-    except AudioTranscriptionError as exc:
-        await runtime_events.publish("voice.transcription.failed", error=str(exc))
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        audio_bytes = await file.read(MAX_AUDIO_BYTES + 1)
     finally:
-        if temp_path is not None:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-        if runtime_events.state == "transcribing":
-            await runtime_events.publish("jace.state.changed", state="idle", reason="transcription_finished")
+        await file.close()
+
+    logger.info(
+        "Voice upload received: filename=%s content_type=%s bytes=%d",
+        file.filename,
+        file.content_type,
+        len(audio_bytes),
+    )
+
+    if not audio_bytes:
+        raise HTTPException(status_code=422, detail="The microphone upload was empty.")
+
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="The microphone recording is too large to transcribe.")
+
+    try:
+        result = await asyncio.to_thread(
+            voice_service.transcribe_bytes,
+            audio_bytes,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
+        return result.as_dict()
+    except VoiceDecodeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except VoiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except VoiceError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected local voice transcription failure")
+        message = str(exc)
+        if "1094995529" in message or "Invalid data found when processing input" in message:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "The microphone recording was incomplete or corrupt and could not be decoded. "
+                    "Hold Home, speak, then release Home and try again."
+                ),
+            ) from exc
+        raise HTTPException(status_code=500, detail=f"Audio transcription failed: {message}") from exc
 
 
 @router.post("/synthesize")
-async def synthesize_voice(request: VoiceSynthesisRequest):
-    if not env_settings.voice_enabled:
-        raise HTTPException(status_code=403, detail="Voice is disabled in Jace configuration.")
-
-    async with SessionLocal() as session:
-        profile = await get_or_create_voice_settings(session)
-        if not profile.enabled:
-            raise HTTPException(status_code=403, detail="Voice is disabled in Jace settings.")
-        voice = request.voice or profile.tts_voice
-        speed = request.speed if request.speed is not None else profile.tts_speed
-        language = request.language or profile.tts_language
-
+async def synthesize_voice(request: SpeechRequest):
     try:
-        wav = await synthesize_wav(
-            request.text,
-            voice=voice,
-            speed=speed,
-            language=language,
+        wav_bytes = await asyncio.to_thread(voice_service.synthesize_wav, request.text)
+        return Response(
+            content=wav_bytes,
+            media_type="audio/wav",
+            headers={"Cache-Control": "no-store"},
         )
-    except VoiceRuntimeError as exc:
+    except VoiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except VoiceError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected local voice synthesis failure")
+        raise HTTPException(status_code=500, detail=f"Speech synthesis failed: {exc}") from exc
 
-    return Response(
-        wav,
-        media_type="audio/wav",
-        headers={"Cache-Control": "no-store"},
-    )
+
+# British-spelling compatibility route for any early Phase 10B client builds.
+@router.post("/synthesise")
+async def synthesise_voice(request: SpeechRequest):
+    return await synthesize_voice(request)
