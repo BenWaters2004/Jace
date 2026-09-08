@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 ToolPermissionMode = Literal["allow", "ask", "deny"]
-ToolRisk = Literal["read", "write"]
+ToolRisk = Literal["read", "write", "execute"]
 
 
 class ToolError(Exception):

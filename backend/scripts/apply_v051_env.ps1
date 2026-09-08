@@ -17,7 +17,7 @@ $backupPath = "$envPath.v0.5.0-backup"
 Copy-Item $envPath $backupPath -Force
 
 $updates = [ordered]@{
-    "JACE_OLLAMA_KEEP_ALIVE" = "1m"
+    "JACE_OLLAMA_KEEP_ALIVE" = "-1m"
     "JACE_EMBEDDING_KEEP_ALIVE" = "20m"
     "JACE_PRELOAD_DEFAULT_MODEL" = "true"
     "JACE_PRELOAD_TIMEOUT_SECONDS" = "120"

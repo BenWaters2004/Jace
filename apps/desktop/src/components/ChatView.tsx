@@ -1,5 +1,5 @@
 import type { FormEvent, KeyboardEvent } from "react";
-import type { ChatMessage, ModelInfo, ReasoningMode, ToolActivity } from "../types";
+import type { ChatMessage, ModelInfo, PerformanceDiagnostics, ReasoningMode, ToolActivity } from "../types";
 
 interface ChatViewProps {
   title: string;
@@ -15,6 +15,7 @@ interface ChatViewProps {
   reasoningMode: ReasoningMode;
   memoryContextCount: number;
   toolContextCount: number;
+  performanceDiagnostics: PerformanceDiagnostics | null;
   toolActivity: ToolActivity[];
   onInputChange: (value: string) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
@@ -71,6 +72,23 @@ export function ChatView(props: ChatViewProps) {
           </select>
         </div>
       </header>
+
+      {props.performanceDiagnostics && (
+        <div className="performance-strip">
+          <span><strong>Prep</strong> {formatDuration(props.performanceDiagnostics.preprocess_ms)}</span>
+          <span>
+            <strong>Memory</strong> {props.performanceDiagnostics.memory_retrieval_used
+              ? `${formatDuration(props.performanceDiagnostics.memory_retrieval_ms)} · ${props.performanceDiagnostics.memory_count} hit${props.performanceDiagnostics.memory_count === 1 ? "" : "s"}`
+              : "skipped"}
+          </span>
+          <span><strong>History</strong> {props.performanceDiagnostics.history_messages} msgs</span>
+          <span>
+            <strong>Tools</strong> {props.performanceDiagnostics.tool_names.length
+              ? props.performanceDiagnostics.tool_names.join(", ")
+              : "none"}
+          </span>
+        </div>
+      )}
 
       <div className="chat-scroll">
         {props.messages.length === 0 ? (

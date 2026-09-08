@@ -29,7 +29,7 @@ export function ToolApprovalModal({ approval, onDecision }: ToolApprovalModalPro
   return (
     <Modal title="Tool approval required" onClose={() => void decide("deny_once")}>
       <div className="approval-content">
-        <div className={`approval-risk ${approval.risk}`}>{approval.risk === "write" ? "Changes local data" : "Read only"}</div>
+        <div className={`approval-risk ${approval.risk}`}>{approval.risk === "write" ? "Changes local data" : approval.risk === "execute" ? "Runs approved program" : "Read only"}</div>
         <h3>{approval.label}</h3>
         <p>{approval.description}</p>
 

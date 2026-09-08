@@ -3,6 +3,14 @@ import type {
   AssistantSettings,
   AssistantSettingsUpdate,
   ChatRequest,
+  ComputerCommandCreateRequest,
+  ComputerCommandPreset,
+  ComputerCommandUpdateRequest,
+  ComputerStatus,
+  ComputerWorkspace,
+  ComputerWorkspaceCreateRequest,
+  ComputerWorkspaceListResponse,
+  ComputerWorkspaceUpdateRequest,
   ChatStreamEvent,
   ConversationDetail,
   ConversationListResponse,
@@ -77,6 +85,27 @@ export const updateMemory = (id: string, payload: MemoryUpdateRequest) =>
   request<MemoryRecord>(`/memories/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
 export async function deleteMemory(id: string): Promise<void> {
   await request(`/memories/${id}`, { method: "DELETE" });
+}
+
+
+export const getComputerStatus = () => request<ComputerStatus>("/computer/status");
+export const getComputerWorkspaces = () => request<ComputerWorkspaceListResponse>("/computer/workspaces");
+export const createComputerWorkspace = (payload: ComputerWorkspaceCreateRequest) =>
+  request<ComputerWorkspace>("/computer/workspaces", { method: "POST", body: JSON.stringify(payload) });
+export const updateComputerWorkspace = (id: string, payload: ComputerWorkspaceUpdateRequest) =>
+  request<ComputerWorkspace>(`/computer/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export async function deleteComputerWorkspace(id: string): Promise<void> {
+  await request(`/computer/workspaces/${id}`, { method: "DELETE" });
+}
+export const createComputerCommand = (workspaceId: string, payload: ComputerCommandCreateRequest) =>
+  request<ComputerCommandPreset>(`/computer/workspaces/${workspaceId}/commands`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+export const updateComputerCommand = (id: string, payload: ComputerCommandUpdateRequest) =>
+  request<ComputerCommandPreset>(`/computer/commands/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export async function deleteComputerCommand(id: string): Promise<void> {
+  await request(`/computer/commands/${id}`, { method: "DELETE" });
 }
 
 export const getTools = () => request<ToolListResponse>("/tools");

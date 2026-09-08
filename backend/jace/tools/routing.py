@@ -13,6 +13,17 @@ ALL_TOOL_NAMES = {
     "web_search",
     "read_web_page",
     "browser_read_page",
+    "list_computer_workspaces",
+    "list_workspace_files",
+    "read_workspace_file",
+    "search_workspace_files",
+    "workspace_file_info",
+    "create_workspace_directory",
+    "write_workspace_file",
+    "replace_workspace_text",
+    "move_workspace_path",
+    "delete_workspace_file",
+    "run_workspace_command",
 }
 
 
@@ -102,5 +113,48 @@ def route_tool_names(message: str) -> set[str]:
     # Research phrasing often needs search even without the literal word web.
     if re.search(r"\b(?:research|find sources|find articles|find documentation|latest documentation|find information about)\b", lowered):
         selected.update({"web_search", "read_web_page", "browser_read_page"})
+
+    # Phase 6 controlled local-computer/workspace requests. Always expose the
+    # workspace discovery tool alongside a relevant action so the model can
+    # obtain exact workspace IDs rather than guessing paths or identifiers.
+    computer_hint = re.search(
+        r"\b(?:my (?:file|files|folder|folders|directory|directories|project|repo|repository|codebase)|"
+        r"local (?:file|files|folder|folders|project|repo|repository)|workspace|working tree|source file|code file)\b",
+        lowered,
+    )
+
+    if computer_hint or re.search(r"\b(?:list|show|find|search|read|open|inspect)\b.{0,30}\b(?:files?|folders?|directories|repo|repository|codebase)\b", lowered):
+        selected.add("list_computer_workspaces")
+
+    if re.search(r"\b(?:list|show|browse|what(?:'s| is) in)\b.{0,35}\b(?:files?|folders?|directories|workspace|repo|repository)\b", lowered):
+        selected.update({"list_computer_workspaces", "list_workspace_files"})
+
+    if re.search(r"\b(?:read|open|inspect|show|view|look at)\b.{0,40}\b(?:file|source|code|readme|config|configuration)\b", lowered):
+        selected.update({"list_computer_workspaces", "read_workspace_file", "workspace_file_info"})
+
+    if re.search(r"\b(?:find|search|locate|grep)\b.{0,35}\b(?:file|files|text|code|project|repo|repository|workspace)\b", lowered):
+        selected.update({"list_computer_workspaces", "search_workspace_files", "read_workspace_file"})
+
+    if re.search(r"\b(?:edit|modify|change|update|fix|refactor|replace|write|create)\b.{0,45}\b(?:file|code|source|component|module|class|function|config|configuration)\b", lowered):
+        selected.update({
+            "list_computer_workspaces",
+            "search_workspace_files",
+            "read_workspace_file",
+            "workspace_file_info",
+            "write_workspace_file",
+            "replace_workspace_text",
+        })
+
+    if re.search(r"\b(?:create|make|add)\b.{0,30}\b(?:folder|directory)\b", lowered):
+        selected.update({"list_computer_workspaces", "create_workspace_directory"})
+
+    if re.search(r"\b(?:rename|move)\b.{0,30}\b(?:file|folder|directory|path)\b", lowered):
+        selected.update({"list_computer_workspaces", "workspace_file_info", "move_workspace_path"})
+
+    if re.search(r"\b(?:delete|remove)\b.{0,30}\b(?:file)\b", lowered):
+        selected.update({"list_computer_workspaces", "workspace_file_info", "delete_workspace_file"})
+
+    if re.search(r"\b(?:run|execute|build|test|tests|lint|format|git status|check the project)\b", lowered) and (computer_hint or re.search(r"\b(?:project|repo|repository|workspace|code|build|tests?|lint|git)\b", lowered)):
+        selected.update({"list_computer_workspaces", "run_workspace_command"})
 
     return selected

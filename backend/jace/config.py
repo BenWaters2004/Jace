@@ -10,7 +10,7 @@ DATABASE_PATH = DATA_DIRECTORY / "jace.db"
 
 class Settings(BaseSettings):
     app_name: str = "Jace"
-    app_version: str = "0.5.1"
+    app_version: str = "0.6.0"
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:4b"
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Performance: keep the main chat model resident for the lifetime of a
     # normal Jace session. The embedding model can still expire sooner.
-    ollama_keep_alive: int | str = -1
+    ollama_keep_alive: str = "-1m"
     embedding_keep_alive: str = "20m"
     preload_default_model: bool = True
     preload_timeout_seconds: float = 120.0
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     web_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36 Jace/0.5.1"
+        "Chrome/131.0 Safari/537.36 Jace/0.6.0"
     )
 
     # JavaScript-rendered read-only browser.
@@ -88,6 +88,19 @@ class Settings(BaseSettings):
     browser_wait_after_load_ms: int = 350
     browser_max_page_chars: int = 7_000
     browser_max_links: int = 25
+
+    # Phase 6 controlled local-computer access. Filesystem tools can only see
+    # explicitly configured workspace roots. Potential credential files remain
+    # blocked even inside a workspace unless this env-only escape hatch is set.
+    computer_enabled: bool = True
+    computer_allow_sensitive_files: bool = False
+    computer_max_read_bytes: int = 1_000_000
+    computer_max_write_chars: int = 200_000
+    computer_search_max_files: int = 1_500
+    computer_search_max_results: int = 50
+    computer_command_output_chars: int = 12_000
+    computer_command_inherit_environment: bool = False
+    computer_command_max_timeout_seconds: int = 900
 
     model_config = SettingsConfigDict(
         env_file=".env",

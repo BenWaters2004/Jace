@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from jace.ai.client import close_ollama_client
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError, warm_model
 from jace.api.chat import router as chat_router
+from jace.api.computer import router as computer_router
 from jace.api.conversations import router as conversations_router
 from jace.api.memories import router as memories_router
 from jace.api.settings import router as settings_router
@@ -75,6 +76,7 @@ app.add_middleware(
 app.include_router(system_router)
 app.include_router(settings_router)
 app.include_router(memories_router)
+app.include_router(computer_router)
 app.include_router(tools_router)
 app.include_router(conversations_router)
 app.include_router(chat_router)

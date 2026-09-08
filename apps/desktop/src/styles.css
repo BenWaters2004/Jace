@@ -493,3 +493,163 @@ button { color: inherit; }
 
 /* Phase 5 - controlled internet access
    Web tools reuse the Phase 4 tool cards, approval modal and activity strip. */
+
+/* v0.5.1 performance diagnostics */
+.performance-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 7px 18px;
+  border-bottom: 1px solid #1d252d;
+  background: #0c1116;
+  color: #65717d;
+  font-size: 8.5px;
+  line-height: 1.35;
+}
+.performance-strip span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.performance-strip strong {
+  margin-right: 3px;
+  color: #83909c;
+  font-weight: 600;
+}
+.performance-strip span:last-child {
+  flex: 1 1 220px;
+}
+
+@media (max-width: 900px) {
+  .performance-strip {
+    padding-inline: 14px;
+  }
+  .performance-strip span:last-child {
+    display: none;
+  }
+}
+
+/* Phase 6 - controlled local computer access */
+.risk-tag.execute { background: #272219; color: #d1a867; }
+.approval-risk.execute { background: #2b2416; color: #d0aa62; }
+.computer-safety-banner { margin-bottom: 14px; }
+.computer-stat-grid { margin-bottom: 16px; }
+.computer-editor-card,
+.computer-workspace-card {
+  margin: 0 30px 12px;
+  padding: 17px;
+  border: 1px solid #222a34;
+  border-radius: 11px;
+  background: #10151c;
+}
+.computer-editor-card { border-color: #30394a; background: #111821; }
+.computer-workspace-list { display: grid; gap: 0; padding-bottom: 30px; }
+.computer-workspace-card.inactive { opacity: .67; }
+.computer-workspace-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid #202832;
+}
+.computer-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.computer-title-line h2 { margin: 0; color: #dde2e8; font-size: 14px; }
+.computer-workspace-head code {
+  display: block;
+  margin-top: 7px;
+  color: #738091;
+  font: 8.5px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.workspace-state { padding: 3px 6px; border-radius: 999px; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.workspace-state.active { background: #14251e; color: #74b495; }
+.workspace-state.inactive { background: #272028; color: #9d7e9f; }
+.computer-workspace-actions { display: flex; gap: 7px; flex-shrink: 0; }
+.computer-form-grid {
+  display: grid;
+  grid-template-columns: minmax(150px,.5fr) minmax(260px,1.5fr);
+  gap: 10px;
+}
+.computer-form-grid label { display: flex; flex-direction: column; gap: 5px; }
+.computer-form-grid label > span { color: #717d8a; font-size: 8px; font-weight: 650; }
+.computer-form-grid input {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #29323d;
+  border-radius: 7px;
+  outline: none;
+  background: #0d1218;
+  color: #c6ccd4;
+  font-size: 9px;
+}
+.computer-form-grid input:focus { border-color: #4b586a; }
+.computer-toggle-row,
+.workspace-access-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 9px;
+  margin-top: 11px;
+}
+.toggle-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #252e38;
+  border-radius: 8px;
+  background: #0e1319;
+}
+.toggle-line input { margin-top: 2px; accent-color: #7686e9; }
+.toggle-line > span { display: flex; flex-direction: column; gap: 3px; }
+.toggle-line strong { color: #aeb7c2; font-size: 9px; }
+.toggle-line small { color: #596573; font-size: 8px; line-height: 1.45; }
+.compact-toggle { padding: 9px; }
+.computer-editor-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.command-section { margin-top: 15px; padding-top: 2px; }
+.command-heading { align-items: center; margin-bottom: 9px; }
+.command-heading h3 { margin: 3px 0 0; color: #cfd5dd; font-size: 11px; }
+.command-editor {
+  margin: 9px 0 11px;
+  padding: 12px;
+  border: 1px solid #2a3440;
+  border-radius: 8px;
+  background: #0d131a;
+}
+.command-form-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+.command-form-grid .wide-field { grid-column: 1 / -1; }
+.command-warning { margin: 9px 0; color: #80715a; font-size: 8px; line-height: 1.5; }
+.command-empty { padding: 14px; border: 1px dashed #26303a; border-radius: 8px; color: #566271; font-size: 8.5px; text-align: center; }
+.command-list { display: grid; gap: 7px; }
+.command-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid #242d37;
+  border-radius: 8px;
+  background: #0e1319;
+}
+.command-row.inactive { opacity: .55; }
+.command-row > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.command-row strong { color: #bfc6cf; font-size: 9.5px; }
+.command-row code { overflow: hidden; color: #7d8998; font-size: 8px; white-space: nowrap; text-overflow: ellipsis; }
+.command-row small { color: #505b68; font-size: 7px; }
+.command-row > div:last-child { display: flex; gap: 6px; flex-shrink: 0; }
+
+@media (max-width: 900px) {
+  .computer-form-grid,
+  .computer-toggle-row,
+  .workspace-access-grid { grid-template-columns: 1fr; }
+  .computer-workspace-head { flex-direction: column; }
+}
+
+@media (max-width: 760px) {
+  .computer-editor-card,
+  .computer-workspace-card { margin-left: 20px; margin-right: 20px; }
+  .command-row { flex-direction: column; align-items: stretch; }
+  .command-row > div:last-child { justify-content: flex-end; }
+}

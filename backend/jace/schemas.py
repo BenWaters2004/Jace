@@ -8,7 +8,7 @@ MemoryType = Literal["fact", "preference", "project", "decision", "goal", "tempo
 ReasoningMode = Literal["fast", "balanced", "deep"]
 ResponseStyle = Literal["concise", "balanced", "detailed"]
 ToolPermissionMode = Literal["allow", "ask", "deny"]
-ToolRisk = Literal["read", "write"]
+ToolRisk = Literal["read", "write", "execute"]
 
 
 class ModelInfo(BaseModel):
@@ -276,3 +276,78 @@ class PendingToolApprovalResponse(BaseModel):
 
 class PendingToolApprovalsResponse(BaseModel):
     approvals: list[PendingToolApprovalResponse]
+
+
+# -----------------------------
+# Phase 6 computer/workspaces
+# -----------------------------
+
+
+class ComputerCommandPresetResponse(BaseModel):
+    id: str
+    workspace_id: str
+    label: str
+    executable: str
+    arguments: list[str]
+    relative_cwd: str
+    timeout_seconds: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ComputerCommandPresetCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    executable: str = Field(min_length=1, max_length=800)
+    arguments: list[str] = Field(default_factory=list, max_length=40)
+    relative_cwd: str = Field(default=".", min_length=1, max_length=800)
+    timeout_seconds: int = Field(default=120, ge=1, le=900)
+
+
+class ComputerCommandPresetUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    executable: str | None = Field(default=None, min_length=1, max_length=800)
+    arguments: list[str] | None = Field(default=None, max_length=40)
+    relative_cwd: str | None = Field(default=None, min_length=1, max_length=800)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=900)
+    is_active: bool | None = None
+
+
+class ComputerWorkspaceResponse(BaseModel):
+    id: str
+    label: str
+    root_path: str
+    read_enabled: bool
+    write_enabled: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    commands: list[ComputerCommandPresetResponse]
+
+
+class ComputerWorkspaceListResponse(BaseModel):
+    enabled: bool
+    workspaces: list[ComputerWorkspaceResponse]
+
+
+class ComputerWorkspaceCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    root_path: str = Field(min_length=1, max_length=1200)
+    read_enabled: bool = True
+    write_enabled: bool = False
+
+
+class ComputerWorkspaceUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    root_path: str | None = Field(default=None, min_length=1, max_length=1200)
+    read_enabled: bool | None = None
+    write_enabled: bool | None = None
+    is_active: bool | None = None
+
+
+class ComputerStatusResponse(BaseModel):
+    enabled: bool
+    workspace_count: int
+    active_workspace_count: int
+    command_preset_count: int
+    sensitive_files_allowed: bool

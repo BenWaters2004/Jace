@@ -2,10 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   clearToolAudit,
+  createComputerCommand,
+  createComputerWorkspace,
   createConversation,
   createMemory,
+  deleteComputerCommand,
+  deleteComputerWorkspace,
   deleteConversation,
   deleteMemory,
+  getComputerStatus,
+  getComputerWorkspaces,
   getConversation,
   getConversations,
   getHealth,
@@ -17,12 +23,15 @@ import {
   resetSettings,
   resolveToolApproval,
   sendChatStream,
+  updateComputerCommand,
+  updateComputerWorkspace,
   updateConversation,
   updateMemory,
   updateSettings,
   updateToolPermission,
 } from "./api";
 import { ChatView } from "./components/ChatView";
+import { ComputerView } from "./components/ComputerView";
 import { MemoryView } from "./components/MemoryView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
@@ -32,6 +41,13 @@ import type {
   ApiGenerationStats,
   AssistantSettings,
   ChatMessage,
+  ComputerCommandCreateRequest,
+  ComputerCommandPreset,
+  ComputerCommandUpdateRequest,
+  ComputerStatus,
+  ComputerWorkspace,
+  ComputerWorkspaceCreateRequest,
+  ComputerWorkspaceUpdateRequest,
   ConversationDetail,
   ConversationSummary,
   GenerationStats,
@@ -41,6 +57,7 @@ import type {
   MemoryUpdateRequest,
   ModelInfo,
   PendingToolApproval,
+  PerformanceDiagnostics,
   ReasoningMode,
   Screen,
   StreamApprovalRequiredEvent,
@@ -101,6 +118,8 @@ export default function App() {
   const [toolsEnabled, setToolsEnabled] = useState(true);
   const [tools, setTools] = useState<ToolRecord[]>([]);
   const [toolAudit, setToolAudit] = useState<ToolAuditRecord[]>([]);
+  const [computerStatus, setComputerStatus] = useState<ComputerStatus | null>(null);
+  const [computerWorkspaces, setComputerWorkspaces] = useState<ComputerWorkspace[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingToolApproval | null>(null);
   const [toolActivity, setToolActivity] = useState<ToolActivity[]>([]);
 
@@ -115,6 +134,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [memoryContextCount, setMemoryContextCount] = useState(0);
   const [toolContextCount, setToolContextCount] = useState(0);
+  const [performanceDiagnostics, setPerformanceDiagnostics] = useState<PerformanceDiagnostics | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const activeConversation = useMemo(
@@ -142,6 +162,16 @@ export default function App() {
     return toolResponse.tools;
   }, []);
 
+  const refreshComputer = useCallback(async () => {
+    const [statusResponse, workspaceResponse] = await Promise.all([
+      getComputerStatus(),
+      getComputerWorkspaces(),
+    ]);
+    setComputerStatus(statusResponse);
+    setComputerWorkspaces(workspaceResponse.workspaces);
+    return workspaceResponse.workspaces;
+  }, []);
+
   const loadConversation = useCallback(async (id: string) => {
     if (isGenerating) return;
     try {
@@ -152,6 +182,7 @@ export default function App() {
       setConversationPrompt(conversation.system_prompt);
       setMemoryContextCount(0);
       setToolContextCount(0);
+      setPerformanceDiagnostics(null);
       setToolActivity([]);
       setError(null);
       setScreen("chat");
@@ -168,12 +199,14 @@ export default function App() {
       const currentHealth = await getHealth();
       setHealth(currentHealth);
 
-      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse] = await Promise.all([
+      const [profile, conversationResponse, memoryResponse, toolResponse, auditResponse, computerStatusResponse, computerWorkspaceResponse] = await Promise.all([
         getSettings(),
         getConversations(),
         getMemories(false),
         getTools(),
         getToolAudit(100),
+        getComputerStatus(),
+        getComputerWorkspaces(),
       ]);
 
       setSettings(profile);
@@ -185,6 +218,8 @@ export default function App() {
       setToolsEnabled(toolResponse.enabled);
       setTools(toolResponse.tools);
       setToolAudit(auditResponse.entries);
+      setComputerStatus(computerStatusResponse);
+      setComputerWorkspaces(computerWorkspaceResponse.workspaces);
 
       if (!currentHealth.ollama_connected) {
         setConnectionState("ollama-offline");
@@ -288,6 +323,7 @@ export default function App() {
     setError(null);
     setMemoryContextCount(0);
     setToolContextCount(0);
+    setPerformanceDiagnostics(null);
     setToolActivity([]);
     setPendingApproval(null);
     setIsGenerating(true);
@@ -309,15 +345,27 @@ export default function App() {
           onContext: (context) => {
             setMemoryContextCount(context.memory_count);
             setToolContextCount(context.tool_count);
+            setPerformanceDiagnostics({
+              preprocess_ms: context.preprocess_ms,
+              memory_retrieval_used: context.memory_retrieval_used,
+              memory_retrieval_ms: context.memory_retrieval_ms,
+              memory_count: context.memory_count,
+              tool_routing_ms: context.tool_routing_ms,
+              tool_names: context.tool_names,
+              history_messages: context.history_messages,
+              history_chars: context.history_chars,
+            });
           },
           onToken: (content) => updateAssistant(assistant.id, (message) => ({ ...message, content: message.content + content })),
           onToolCall: registerToolCall,
           onApprovalRequired: registerApproval,
           onToolResult: registerToolResult,
-          onDone: (done: StreamDoneEvent) => updateAssistant(assistant.id, (message) => ({
-            ...message,
-            isStreaming: false,
-            stats: {
+          onDone: (done: StreamDoneEvent) => {
+            if (done.diagnostics) setPerformanceDiagnostics(done.diagnostics);
+            updateAssistant(assistant.id, (message) => ({
+              ...message,
+              isStreaming: false,
+              stats: {
               timeToFirstTokenMs: done.metrics.time_to_first_token_ms,
               totalDurationMs: done.metrics.total_duration_ms,
               loadDurationMs: done.metrics.load_duration_ms,
@@ -326,9 +374,10 @@ export default function App() {
               promptEvalDurationMs: done.metrics.prompt_eval_duration_ms,
               evalCount: done.metrics.eval_count,
               evalDurationMs: done.metrics.eval_duration_ms,
-              tokensPerSecond: done.metrics.tokens_per_second,
-            },
-          })),
+                tokensPerSecond: done.metrics.tokens_per_second,
+              },
+            }));
+          },
         },
         controller.signal,
       );
@@ -379,6 +428,7 @@ export default function App() {
     setReasoningMode(settings.reasoning_mode);
     setMemoryContextCount(0);
     setToolContextCount(0);
+    setPerformanceDiagnostics(null);
     setToolActivity([]);
     setPendingApproval(null);
     setError(null);
@@ -520,6 +570,66 @@ export default function App() {
     }
   }
 
+  async function addComputerWorkspace(payload: ComputerWorkspaceCreateRequest) {
+    try {
+      await createComputerWorkspace(payload);
+      await refreshComputer();
+    } catch (computerError) {
+      setError(computerError instanceof Error ? computerError.message : "Could not add computer workspace.");
+      throw computerError;
+    }
+  }
+
+  async function patchComputerWorkspace(workspace: ComputerWorkspace, payload: ComputerWorkspaceUpdateRequest) {
+    try {
+      await updateComputerWorkspace(workspace.id, payload);
+      await refreshComputer();
+    } catch (computerError) {
+      setError(computerError instanceof Error ? computerError.message : "Could not update computer workspace.");
+      throw computerError;
+    }
+  }
+
+  async function removeComputerWorkspace(workspace: ComputerWorkspace) {
+    try {
+      await deleteComputerWorkspace(workspace.id);
+      await refreshComputer();
+    } catch (computerError) {
+      setError(computerError instanceof Error ? computerError.message : "Could not remove computer workspace.");
+      throw computerError;
+    }
+  }
+
+  async function addComputerCommand(workspace: ComputerWorkspace, payload: ComputerCommandCreateRequest) {
+    try {
+      await createComputerCommand(workspace.id, payload);
+      await refreshComputer();
+    } catch (computerError) {
+      setError(computerError instanceof Error ? computerError.message : "Could not create command preset.");
+      throw computerError;
+    }
+  }
+
+  async function patchComputerCommand(command: ComputerCommandPreset, payload: ComputerCommandUpdateRequest) {
+    try {
+      await updateComputerCommand(command.id, payload);
+      await refreshComputer();
+    } catch (computerError) {
+      setError(computerError instanceof Error ? computerError.message : "Could not update command preset.");
+      throw computerError;
+    }
+  }
+
+  async function removeComputerCommand(command: ComputerCommandPreset) {
+    try {
+      await deleteComputerCommand(command.id);
+      await refreshComputer();
+    } catch (computerError) {
+      setError(computerError instanceof Error ? computerError.message : "Could not delete command preset.");
+      throw computerError;
+    }
+  }
+
   if (!settings) {
     return (
       <main className="boot-screen">
@@ -540,7 +650,7 @@ export default function App() {
       <Sidebar
         screen={screen}
         assistantName={settings.assistant_name}
-        appVersion={health?.app_version ?? "0.5.0"}
+        appVersion={health?.app_version ?? "0.6.0"}
         connectionState={connectionState}
         conversations={conversations}
         activeConversationId={activeConversationId}
@@ -548,6 +658,7 @@ export default function App() {
         search={conversationSearch}
         memoryCount={activeMemoryCount}
         toolCount={availableToolCount}
+        computerCount={computerWorkspaces.filter((workspace) => workspace.is_active).length}
         onSearchChange={setConversationSearch}
         onScreenChange={setScreen}
         onNewChat={newChat}
@@ -571,6 +682,7 @@ export default function App() {
           reasoningMode={reasoningMode}
           memoryContextCount={memoryContextCount}
           toolContextCount={toolContextCount}
+          performanceDiagnostics={performanceDiagnostics}
           toolActivity={toolActivity}
           onInputChange={setInput}
           onSubmit={(event) => void submit(event)}
@@ -601,6 +713,20 @@ export default function App() {
           onRefresh={() => void refreshTools()}
           onPermissionChange={changeToolPermission}
           onClearAudit={removeToolAudit}
+        />
+      )}
+
+      {screen === "computer" && (
+        <ComputerView
+          status={computerStatus}
+          workspaces={computerWorkspaces}
+          onRefresh={() => void refreshComputer()}
+          onCreateWorkspace={addComputerWorkspace}
+          onUpdateWorkspace={patchComputerWorkspace}
+          onDeleteWorkspace={removeComputerWorkspace}
+          onCreateCommand={addComputerCommand}
+          onUpdateCommand={patchComputerCommand}
+          onDeleteCommand={removeComputerCommand}
         />
       )}
 

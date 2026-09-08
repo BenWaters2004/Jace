@@ -53,6 +53,12 @@ export function ToolsView(props: ToolsViewProps) {
         </div>
       )}
 
+      {props.enabled && props.tools.some((tool) => tool.category === "Computer") && (
+        <div className="notice-banner">
+          Phase 6 computer tools are confined to configured workspaces. File reads and writes start behind approval, destructive changes require exact file hashes, and command execution is limited to user-created presets.
+        </div>
+      )}
+
       <div className="stat-grid tool-stat-grid">
         <div className="stat-card"><strong>{props.tools.length}</strong><span>Registered tools</span></div>
         <div className="stat-card"><strong>{allowed}</strong><span>Automatic</span></div>
@@ -73,7 +79,7 @@ export function ToolsView(props: ToolsViewProps) {
                 <div className="tool-card-main">
                   <div className="tool-title-row">
                     <h3>{tool.label}</h3>
-                    <span className={`risk-tag ${tool.risk}`}>{tool.risk === "write" ? "Write" : "Read"}</span>
+                    <span className={`risk-tag ${tool.risk}`}>{tool.risk === "write" ? "Write" : tool.risk === "execute" ? "Execute" : "Read"}</span>
                     <span className="category-tag">{tool.category}</span>
                   </div>
                   <p>{tool.description}</p>
@@ -123,7 +129,7 @@ export function ToolsView(props: ToolsViewProps) {
                 <article className="audit-entry" key={entry.id}>
                   <div className="audit-entry-top">
                     <strong>{entry.tool_name}</strong>
-                    <span className={`audit-status ${statusClass(entry.status)}`}>{entry.status.replaceAll("_", " ")}</span>
+                    <span className={`audit-status ${statusClass(entry.status)}`}>{entry.status.replace(/_/g, " ")}</span>
                   </div>
                   <div className="audit-meta">{dateTime(entry.created_at)} · policy {entry.permission_mode}</div>
                   {Object.keys(entry.arguments).length > 0 && (

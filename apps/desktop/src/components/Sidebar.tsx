@@ -11,6 +11,7 @@ interface SidebarProps {
   search: string;
   memoryCount: number;
   toolCount: number;
+  computerCount: number;
   onSearchChange: (value: string) => void;
   onScreenChange: (screen: Screen) => void;
   onNewChat: () => void;
@@ -40,7 +41,7 @@ export function Sidebar(props: SidebarProps) {
         <div className="brand-mark">J</div>
         <div className="brand-copy">
           <strong>{props.assistantName}</strong>
-          <span>v{props.appVersion || "0.5.0"}</span>
+          <span>v{props.appVersion || "0.6.0"}</span>
         </div>
       </div>
 
@@ -59,6 +60,10 @@ export function Sidebar(props: SidebarProps) {
         <button className={props.screen === "tools" ? "active" : ""} onClick={() => props.onScreenChange("tools")}>
           <span className="nav-icon">⌁</span> Tools
           <span className="nav-count">{props.toolCount}</span>
+        </button>
+        <button className={props.screen === "computer" ? "active" : ""} onClick={() => props.onScreenChange("computer")}>
+          <span className="nav-icon">▣</span> Computer
+          <span className="nav-count">{props.computerCount}</span>
         </button>
         <button className={props.screen === "settings" ? "active" : ""} onClick={() => props.onScreenChange("settings")}>
           <span className="nav-icon">⚙</span> Settings

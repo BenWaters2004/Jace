@@ -131,3 +131,48 @@ class ToolAuditLog(Base):
     approval_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ComputerWorkspace(Base):
+    """User-approved local directory boundary for Phase 6 computer tools."""
+
+    __tablename__ = "computer_workspaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    root_path: Mapped[str] = mapped_column(String(1200), nullable=False, unique=True)
+    read_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    write_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    commands: Mapped[list["ComputerCommandPreset"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ComputerCommandPreset.label",
+    )
+
+
+class ComputerCommandPreset(Base):
+    """Exact, user-created command that Jace may request to run in one workspace."""
+
+    __tablename__ = "computer_command_presets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("computer_workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    executable: Mapped[str] = mapped_column(String(800), nullable=False)
+    arguments_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    relative_cwd: Mapped[str] = mapped_column(String(800), nullable=False, default=".")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    workspace: Mapped["ComputerWorkspace"] = relationship(back_populates="commands")

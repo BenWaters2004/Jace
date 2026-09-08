@@ -1,10 +1,10 @@
 export type ChatRole = "user" | "assistant";
-export type Screen = "chat" | "memory" | "tools" | "settings";
+export type Screen = "chat" | "memory" | "tools" | "computer" | "settings";
 export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal" | "temporary" | "other";
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";
 export type ToolPermissionMode = "allow" | "ask" | "deny";
-export type ToolRisk = "read" | "write";
+export type ToolRisk = "read" | "write" | "execute";
 export type ToolActivityStatus = "requested" | "awaiting_approval" | "completed" | "denied" | "failed";
 export type ToolApprovalDecision = "allow_once" | "allow_always" | "deny_once" | "deny_always";
 
@@ -187,10 +187,29 @@ export interface StreamMetrics {
   tokens_per_second: number | null;
 }
 
+
+export interface PerformanceDiagnostics {
+  preprocess_ms: number;
+  memory_retrieval_used: boolean;
+  memory_retrieval_ms: number;
+  memory_count: number;
+  tool_routing_ms: number;
+  tool_names: string[];
+  history_messages: number;
+  history_chars: number;
+}
+
 export interface StreamContextEvent {
   type: "context";
   memory_count: number;
+  memory_retrieval_used: boolean;
+  memory_retrieval_ms: number;
   tool_count: number;
+  tool_names: string[];
+  tool_routing_ms: number;
+  history_messages: number;
+  history_chars: number;
+  preprocess_ms: number;
   reasoning_mode: ReasoningMode;
 }
 
@@ -237,6 +256,7 @@ export interface StreamDoneEvent {
   metrics: StreamMetrics;
   model_turns?: number;
   tool_calls?: number;
+  diagnostics?: PerformanceDiagnostics;
 }
 
 export interface StreamErrorEvent {
@@ -317,4 +337,70 @@ export interface ToolActivity {
   status: ToolActivityStatus;
   arguments: Record<string, unknown>;
   summary?: string;
+}
+
+
+export interface ComputerCommandPreset {
+  id: string;
+  workspace_id: string;
+  label: string;
+  executable: string;
+  arguments: string[];
+  relative_cwd: string;
+  timeout_seconds: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComputerWorkspace {
+  id: string;
+  label: string;
+  root_path: string;
+  read_enabled: boolean;
+  write_enabled: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  commands: ComputerCommandPreset[];
+}
+
+export interface ComputerWorkspaceListResponse {
+  enabled: boolean;
+  workspaces: ComputerWorkspace[];
+}
+
+export interface ComputerStatus {
+  enabled: boolean;
+  workspace_count: number;
+  active_workspace_count: number;
+  command_preset_count: number;
+  sensitive_files_allowed: boolean;
+}
+
+export interface ComputerWorkspaceCreateRequest {
+  label: string;
+  root_path: string;
+  read_enabled: boolean;
+  write_enabled: boolean;
+}
+
+export interface ComputerWorkspaceUpdateRequest {
+  label?: string;
+  root_path?: string;
+  read_enabled?: boolean;
+  write_enabled?: boolean;
+  is_active?: boolean;
+}
+
+export interface ComputerCommandCreateRequest {
+  label: string;
+  executable: string;
+  arguments: string[];
+  relative_cwd: string;
+  timeout_seconds: number;
+}
+
+export interface ComputerCommandUpdateRequest extends Partial<ComputerCommandCreateRequest> {
+  is_active?: boolean;
 }
