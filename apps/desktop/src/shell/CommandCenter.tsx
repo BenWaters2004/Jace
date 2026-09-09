@@ -78,7 +78,7 @@ export function CommandCenter(props: {
         />
 
         <div className="command-center-column">
-          <JaceCore name={props.assistantName} state={props.state} model={props.model} runtimeConnected={props.runtimeConnected} amplitude={props.voiceAmplitude} onExpand={() => setFocus(focus === "core" ? "none" : "core")} />
+          <JaceCore name={props.assistantName} state={props.state} model={props.model} runtimeConnected={props.runtimeConnected} amplitude={props.voiceAmplitude} activities={props.toolActivity} onExpand={() => setFocus(focus === "core" ? "none" : "core")} />
           <AgentOffice activities={props.toolActivity} onExpand={() => setFocus(focus === "office" ? "none" : "office")} />
         </div>
 

@@ -1,199 +1,678 @@
-/*
- * Phase 10A reliability/core visual hotfix.
- * Imported after the global stylesheet by JaceCore.tsx, so these rules safely
- * override the older decorative trace animation without replacing styles.css.
- */
+/* --------------------------------------------------------------------------
+   Jace Neural Core — rich, state-reactive visual system.
+   Imported by JaceCore.tsx AFTER styles.css, so these rules are authoritative
+   for everything inside .jace-core-stage.
+   -------------------------------------------------------------------------- */
 
-.core-network {
+.jace-core-stage {
+  --jc-accent: #13ab88;          /* primary energy signature */
+  --jc-accent-soft: #1fd0a6;
+  --jc-cyan: #6ce7ff;
+  --jc-amber: #e6b455;
+  --jc-red: #e0616e;
+  --jc-ink: #041210;
+  --ring-speed-o: 26s;
+  --ring-speed-m: 18s;
+  --ring-speed-i: 12s;
+  --shuttle-dur: 4.6s;
+  --flow: shuttle-out;
+  --orbit-speed: 1;
+
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 47%, rgba(19, 171, 136, .20), transparent 34%),
+    radial-gradient(circle at 50% 47%, rgba(108, 231, 255, .08), transparent 52%),
+    radial-gradient(circle at 50% 120%, rgba(9, 30, 26, .8), transparent 60%),
+    linear-gradient(180deg, #05100e, #030b0a 60%, #02090a);
+}
+
+/* Centre-anchored helper for full-bleed layers */
+.core-vignette,
+.core-grid,
+.core-particles,
+.core-mesh,
+.core-spokes,
+.core-orbits,
+.core-emitters,
+.core-datastream {
   position: absolute;
   inset: 0;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
   pointer-events: none;
 }
 
-.network-wire,
-.network-flow {
-  fill: none;
-  vector-effect: non-scaling-stroke;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.core-vignette {
+  background: radial-gradient(circle at 50% 48%, transparent 38%, rgba(2, 8, 8, .55) 78%, rgba(1, 5, 5, .9) 100%);
+  z-index: 5;
+  mix-blend-mode: multiply;
 }
 
-.network-wire {
-  stroke: rgba(89, 202, 232, 0.15);
+.core-grid {
+  z-index: 0;
+  opacity: .34;
+  background-image:
+    linear-gradient(rgba(31, 208, 166, .06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 208, 166, .06) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(circle, #000 30%, transparent 82%);
+  animation: jc-grid-breathe 9s ease-in-out infinite;
+}
+
+/* ---------- Background particle / node field ---------- */
+.core-particles { z-index: 1; }
+.core-particle {
+  position: absolute;
+  width: var(--psize, 2px);
+  height: var(--psize, 2px);
+  border-radius: 50%;
+  background: rgba(120, 240, 210, .55);
+  box-shadow: 0 0 6px rgba(31, 208, 166, .55);
+  opacity: .0;
+  animation: jc-particle-drift var(--pdur, 9s) ease-in-out var(--pd, 0s) infinite;
+}
+.core-particle.p-1 { background: rgba(108, 231, 255, .5); box-shadow: 0 0 6px rgba(108, 231, 255, .5); }
+.core-particle.p-3 { background: rgba(150, 255, 225, .6); }
+.core-particle.p-5 { background: rgba(80, 200, 175, .45); }
+
+/* ---------- Network mesh with travelling pulses ---------- */
+.core-mesh { z-index: 2; width: 100%; height: 100%; overflow: visible; }
+.mesh-link {
+  stroke: rgba(31, 208, 166, .18);
   stroke-width: 1;
-}
-
-.network-flow {
-  stroke: rgba(118, 235, 255, 0.9);
-  stroke-width: 1.7;
-  stroke-dasharray: 1 17;
-  stroke-dashoffset: 0;
-  opacity: 0.38;
-  filter:
-    drop-shadow(0 0 3px rgba(108, 231, 255, 0.85))
-    drop-shadow(0 0 8px rgba(67, 207, 255, 0.35));
-  animation: jace-core-network-flow 4.5s linear infinite;
-}
-
-.network-junctions circle {
-  fill: rgba(110, 230, 255, 0.52);
-  stroke: rgba(151, 242, 255, 0.55);
-  stroke-width: 1;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 6px rgba(85, 224, 255, 0.7));
-  animation: jace-network-junction-pulse 2.6s ease-in-out infinite;
+}
+.mesh-link.faint { stroke: rgba(108, 231, 255, .09); }
+.mesh-node {
+  fill: rgba(120, 240, 210, .5);
+  filter: drop-shadow(0 0 4px rgba(31, 208, 166, .7));
+  animation: jc-node-blink 3.2s ease-in-out infinite;
+}
+.mesh-pulse {
+  fill: var(--jc-accent-soft);
+  filter: drop-shadow(0 0 5px var(--jc-accent));
+  opacity: 0;
+  animation: jc-mesh-pulse var(--shuttle-dur) linear infinite;
 }
 
-.state-thinking .network-flow {
-  animation-duration: 1.35s;
-  opacity: 0.92;
+/* ---------- Radial spokes: inward / outward energy + tool propagation ---------- */
+.core-spokes { z-index: 3; }
+.core-spoke {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: var(--slen, 68%);
+  transform: translate(-50%, -100%) rotate(var(--a, 0deg));
+  transform-origin: bottom center;
 }
-
-.state-working .network-flow {
-  animation-duration: 0.9s;
-  opacity: 1;
+.spoke-line {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(31, 208, 166, .5), rgba(31, 208, 166, 0) 88%);
+  opacity: .3;
 }
-
-.state-listening .network-flow,
-.state-speaking .network-flow,
-.state-transcribing .network-flow {
-  animation-duration: 1.8s;
-  opacity: 0.72;
+.spoke-shuttle {
+  position: absolute;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--jc-accent-soft);
+  box-shadow: 0 0 8px var(--jc-accent), 0 0 14px rgba(31, 208, 166, .5);
+  opacity: 0;
+  animation: var(--flow, shuttle-out) var(--shuttle-dur) linear var(--sd, 0s) infinite;
 }
-
-.state-idle .network-flow {
-  animation-duration: 5.5s;
-  opacity: 0.28;
+.spoke-burst {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--jc-accent-soft);
+  opacity: 0;
+  animation: jc-spoke-burst 1.5s ease-out infinite;
 }
+.core-spoke.active .spoke-line { opacity: .85; background: linear-gradient(to top, var(--jc-accent-soft), transparent 82%); }
+.core-spoke.active .spoke-shuttle { animation-duration: 1.15s; background: #d7fff2; }
+.core-spoke.status-awaiting_approval { --jc-accent-soft: var(--jc-amber); }
+.core-spoke.status-failed,
+.core-spoke.status-denied { --jc-accent-soft: var(--jc-red); }
+.core-spoke.status-completed .spoke-burst { border-color: var(--jc-cyan); }
 
-.state-offline .network-flow {
+/* ---------- Concentric orbit layers ---------- */
+.core-orbits { z-index: 3; }
+.core-orbit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border: 1px solid rgba(31, 208, 166, .16);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: jc-spin calc(var(--o-dur, 24s) / var(--orbit-speed, 1)) linear infinite;
+}
+.core-orbit.orbit-1 { width: 118px; height: 118px; --o-dur: 15s; border-style: solid; border-color: rgba(31, 208, 166, .28); }
+.core-orbit.orbit-2 { width: 176px; height: 158px; --o-dur: 22s; animation-direction: reverse; border-style: dashed; }
+.core-orbit.orbit-3 { width: 236px; height: 214px; --o-dur: 30s; border-color: rgba(108, 231, 255, .14); }
+.core-orbit.orbit-4 { width: 300px; height: 262px; --o-dur: 42s; animation-direction: reverse; border-style: dotted; border-color: rgba(31, 208, 166, .12); }
+.core-orbit.orbit-5 { width: 366px; height: 312px; --o-dur: 56s; border-color: rgba(108, 231, 255, .08); }
+.orbit-sat {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(var(--sat, 0deg));
+}
+.orbit-sat::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--jc-accent-soft);
+  box-shadow: 0 0 8px var(--jc-accent), 0 0 16px rgba(31, 208, 166, .45);
+}
+.core-orbit.orbit-3 .orbit-sat::after,
+.core-orbit.orbit-5 .orbit-sat::after { background: var(--jc-cyan); box-shadow: 0 0 8px var(--jc-cyan); }
+
+/* ---------- Emitted shock rings (outward projection) ---------- */
+.core-emitters { z-index: 3; }
+.emit-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 120px;
+  height: 120px;
+  margin-left: -60px;
+  margin-top: -60px;
+  border-radius: 50%;
+  border: 1.5px solid var(--jc-accent-soft);
+  opacity: 0;
+  animation: jc-emit 2.4s ease-out infinite;
   animation-play-state: paused;
-  opacity: 0.08;
+}
+.emit-ring.e2 { animation-delay: .8s; }
+.emit-ring.e3 { animation-delay: 1.6s; }
+
+/* ---------- Core rings ---------- */
+.core-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(var(--ring-scale, 1));
+  border: 1px solid rgba(31, 208, 166, .22);
+}
+.ring-outer {
+  width: 250px;
+  height: 250px;
+  border-style: dashed;
+  border-color: rgba(31, 208, 166, .2);
+  animation: jc-spin var(--ring-speed-o) linear infinite;
+}
+.ring-mid {
+  width: 184px;
+  height: 184px;
+  border-color: rgba(31, 208, 166, .4);
+  animation: jc-spin-rev var(--ring-speed-m) linear infinite;
+}
+.ring-inner {
+  width: 122px;
+  height: 122px;
+  border-color: rgba(120, 244, 214, .6);
+  box-shadow: 0 0 46px rgba(19, 171, 136, .28), inset 0 0 30px rgba(19, 171, 136, .16);
+  animation: jc-spin var(--ring-speed-i) linear infinite, jc-breathe 4.6s ease-in-out infinite;
 }
 
-.state-waiting_permission .network-flow {
-  stroke: rgba(232, 190, 101, 0.92);
-  animation-duration: 2.6s;
-}
-
-.state-waiting_permission .network-junctions circle {
-  fill: rgba(232, 190, 101, 0.62);
-  stroke: rgba(244, 213, 143, 0.75);
-}
-
-.core-board-layer {
-  z-index: 1;
-}
-
-.core-node-stack,
-.core-ring,
-.core-orbit,
-.core-pulse {
-  z-index: 2;
-}
-
-.core-center,
-.core-caption-block,
 .core-scanline {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(31, 208, 166, .7), rgba(120, 244, 214, .9), rgba(31, 208, 166, .7), transparent);
+  filter: drop-shadow(0 0 6px rgba(31, 208, 166, .6));
+  transform: none;
+  opacity: 0;
   z-index: 3;
+  animation: jc-scan 6s ease-in-out infinite;
 }
 
-.board-ambient {
-  --drift-x: 0px;
-  --drift-y: 0px;
-  animation: jace-core-ambient-drift 5s ease-in-out infinite;
-  will-change: transform, opacity;
+/* ---------- Cycling JACE data strings ---------- */
+.core-datastream { z-index: 4; opacity: 0; transition: opacity .25s ease; }
+.core-datastream.on { opacity: 1; }
+.data-line {
+  position: absolute;
+  color: rgba(150, 255, 228, .82);
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .12em;
+  text-shadow: 0 0 8px rgba(31, 208, 166, .5);
+  white-space: nowrap;
+  animation: jc-data-flicker .5s steps(2) infinite;
+}
+.data-line.dl-0 { left: 10%; top: 24%; }
+.data-line.dl-1 { right: 9%; top: 32%; animation-delay: .12s; color: rgba(108, 231, 255, .8); }
+.data-line.dl-2 { left: 13%; bottom: 26%; animation-delay: .24s; }
+.data-line.dl-3 { right: 11%; bottom: 21%; animation-delay: .36s; color: rgba(108, 231, 255, .8); }
+.data-line.dl-4 { left: 50%; top: 12%; transform: translateX(-50%); animation-delay: .06s; }
+
+/* ---------- Centre ---------- */
+.core-center {
+  position: relative;
+  z-index: 4;
+  width: auto;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.core-center-frame {
+  width: auto;
+  height: auto;
+  min-width: 176px;
+  min-height: 74px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(120, 244, 214, .4);
+  border-radius: 12px;
+  background: rgba(2, 12, 11, .9);
+  box-shadow: 0 0 54px rgba(19, 171, 136, .22), inset 0 0 34px rgba(19, 171, 136, .1);
+  backdrop-filter: blur(2px);
+}
+.core-display { display: grid; justify-items: center; }
+.core-glyph {
+  color: #ecfff8;
+  font: 800 22px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .3em;
+  text-indent: .3em;
+  text-shadow: 0 0 18px rgba(120, 244, 214, .5);
+}
+.core-state {
+  color: #58a394;
+  font: 700 10px/1 ui-monospace, monospace;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+}
+.core-waveform {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 40px;
+}
+.core-waveform span {
+  width: 4px;
+  min-height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d6fff4, #1fd0a6 55%, #0f8f74);
+  box-shadow: 0 0 9px rgba(31, 208, 166, .4);
+  animation: jc-wave 1s ease-in-out infinite;
+}
+.wave-speaking span { animation-duration: .8s; background: linear-gradient(180deg, #dffaff, #6ce7ff 55%, #2bb6d8); }
+.wave-listening span { animation-duration: 1.15s; }
+.wave-transcribing span { animation-duration: .5s; }
+
+.core-caption-block {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: 4;
+  max-width: 190px;
+  padding: 10px 13px;
+  border: 1px solid rgba(31, 208, 166, .16);
+  border-radius: 10px;
+  background: rgba(4, 15, 14, .68);
+  backdrop-filter: blur(3px);
+}
+.core-caption-label {
+  display: block;
+  color: #4f8879;
+  font: 700 10px/1 ui-monospace, monospace;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.core-caption-block strong { display: block; margin-top: 5px; color: #e6fff8; font-size: 14px; }
+.core-caption-block small { display: block; margin-top: 6px; color: #83b3a8; font-size: 11px; line-height: 1.4; }
+
+/* ==========================================================================
+   STATE CHOREOGRAPHY — each state is a genuinely different behaviour.
+   ========================================================================== */
+
+/* --- IDLE: slow breath, sparse ambient telemetry --- */
+.mode-idle {
+  --ring-speed-o: 40s;
+  --ring-speed-m: 30s;
+  --ring-speed-i: 22s;
+  --shuttle-dur: 7s;
+  --orbit-speed: .55;
+}
+.mode-idle .spoke-shuttle { opacity: 0; animation-name: jc-shuttle-out-faint; }
+.mode-idle .core-particle { animation-duration: calc(var(--pdur, 9s) * 1.4); }
+.mode-idle .mesh-pulse { animation-duration: 8s; opacity: 0; }
+
+/* --- LISTENING: inward energy flow, intake vortex --- */
+.mode-listening {
+  --flow: shuttle-in;
+  --shuttle-dur: 2.1s;
+  --ring-speed-m: 9s;
+  --ring-speed-i: 7s;
+  --orbit-speed: 1.5;
+}
+.mode-listening .spoke-line { background: linear-gradient(to top, rgba(108, 231, 255, 0), rgba(108, 231, 255, .6) 90%); opacity: .5; }
+.mode-listening .spoke-shuttle { background: #d8f7ff; box-shadow: 0 0 9px var(--jc-cyan), 0 0 16px rgba(108, 231, 255, .6); }
+.mode-listening .mesh-pulse { animation-direction: reverse; animation-duration: 2s; }
+.mode-listening .core-particles { animation: jc-field-inhale 2.6s ease-in-out infinite; }
+.mode-listening .ring-mid,
+.mode-listening .ring-inner { border-color: rgba(108, 231, 255, .55); }
+.mode-listening .ring-inner {
+  --ring-scale: calc(.9 + (var(--voice-level, 0) * .16));
+  transform: translate(-50%, -50%) scale(var(--ring-scale, 1));
+  box-shadow:
+    0 0 calc(40px + (var(--voice-level, 0) * 60px)) rgba(108, 231, 255, calc(.2 + (var(--voice-level, 0) * .3))),
+    inset 0 0 28px rgba(108, 231, 255, .18);
+}
+.mode-listening .core-center-frame { border-color: rgba(108, 231, 255, .5); }
+.mode-listening .core-glyph { color: #dcf7ff; }
+
+/* --- TRANSCRIBING: glitch decode, ticking scrubber, chromatic slices --- */
+.mode-transcribing {
+  --ring-speed-o: 3s;
+  --orbit-speed: 0;
+  --shuttle-dur: 3s;
+}
+.mode-transcribing .ring-outer { animation: jc-spin 3.6s steps(28) infinite; border-style: solid; border-color: rgba(108, 231, 255, .45); border-top-color: rgba(120, 244, 214, .9); }
+.mode-transcribing .ring-mid { animation: jc-jitter .18s steps(2) infinite; }
+.mode-transcribing .ring-inner { animation: jc-jitter .12s steps(2) infinite reverse; }
+.mode-transcribing .core-scanline { opacity: .9; animation: jc-scan 1.1s linear infinite; }
+.mode-transcribing .spoke-shuttle { animation-name: jc-shuttle-out-faint; }
+.mode-transcribing .core-center-frame {
+  animation: jc-chroma .3s steps(2) infinite;
+  border-color: rgba(108, 231, 255, .55);
+}
+.mode-transcribing .core-glyph { color: #a9ecff; letter-spacing: .22em; }
+.mode-transcribing .core-particle { animation-play-state: paused; opacity: .25; }
+
+/* --- THINKING: fast branching, churning data, counter-rotation --- */
+.mode-thinking {
+  --ring-speed-o: 6s;
+  --ring-speed-m: 3.4s;
+  --ring-speed-i: 2.2s;
+  --shuttle-dur: 1.5s;
+  --orbit-speed: 2.4;
+}
+.mode-thinking .spoke-shuttle { animation-timing-function: cubic-bezier(.5, 0, .5, 1); }
+.mode-thinking .core-spoke .spoke-line { animation: jc-branch-flicker .4s steps(2) infinite; }
+.mode-thinking .core-spoke:nth-child(2n) .spoke-line { animation-delay: .13s; }
+.mode-thinking .core-spoke:nth-child(3n) .spoke-line { animation-delay: .26s; }
+.mode-thinking .mesh-node { animation-duration: .9s; }
+.mode-thinking .mesh-pulse { animation-duration: 1.4s; }
+.mode-thinking .ring-inner { box-shadow: 0 0 60px rgba(19, 171, 136, .4), inset 0 0 34px rgba(31, 208, 166, .22); }
+.mode-thinking .core-center-frame { box-shadow: 0 0 70px rgba(31, 208, 166, .3), inset 0 0 40px rgba(31, 208, 166, .14); }
+.mode-thinking .core-glyph { animation: jc-glyph-flicker 1.6s linear infinite; }
+
+/* --- SPEAKING: outward projection, rhythmic shock rings --- */
+.mode-speaking {
+  --flow: shuttle-out;
+  --shuttle-dur: 1.3s;
+  --ring-speed-i: 9s;
+  --orbit-speed: 1.2;
+}
+.mode-speaking .emit-ring { animation-play-state: running; border-color: rgba(108, 231, 255, .6); }
+.mode-speaking .core-particles { animation: jc-field-exhale 1.3s ease-out infinite; }
+.mode-speaking .spoke-line { background: linear-gradient(to top, rgba(108, 231, 255, .55), transparent 85%); opacity: .6; }
+.mode-speaking .spoke-shuttle { background: #dffaff; box-shadow: 0 0 9px var(--jc-cyan), 0 0 18px rgba(108, 231, 255, .6); }
+.mode-speaking .ring-inner {
+  --ring-scale: calc(1 + (var(--voice-level, 0) * .12));
+  transform: translate(-50%, -50%) scale(var(--ring-scale, 1));
+  border-color: rgba(108, 231, 255, .6);
+  box-shadow:
+    0 0 calc(44px + (var(--voice-level, 0) * 66px)) rgba(108, 231, 255, calc(.22 + (var(--voice-level, 0) * .3))),
+    inset 0 0 30px rgba(108, 231, 255, .16);
+}
+.mode-speaking .core-center-frame {
+  border-color: rgba(108, 231, 255, .55);
+  transform: scale(calc(1 + (var(--voice-level, 0) * .03)));
 }
 
-.ambient-1 {
-  --drift-x: 54px;
-  --drift-y: -20px;
-  animation-delay: -0.25s;
+/* --- WORKING: tool dispatch, bursts propagating outward, heavy traffic --- */
+.mode-working {
+  --shuttle-dur: 1.9s;
+  --ring-speed-o: 9s;
+  --ring-speed-m: 6s;
+  --orbit-speed: 3;
+}
+.mode-working .emit-ring { animation-play-state: running; animation-duration: 3.2s; border-color: rgba(31, 208, 166, .55); }
+.mode-working .ring-outer { border-style: solid; border-color: rgba(31, 208, 166, .3); border-top-color: transparent; border-bottom-color: transparent; }
+.mode-working .core-orbit { border-color: rgba(31, 208, 166, .26); }
+.mode-working .mesh-pulse { animation-duration: 1.8s; fill: #d7fff2; }
+.mode-working .mesh-link { stroke: rgba(31, 208, 166, .3); }
+.mode-working .core-glyph { color: #d7fff2; }
+.mode-working .spoke-shuttle { background: #eafff9; }
+
+/* --- WAITING FOR PERMISSION: amber, held / frozen, slow warning halo --- */
+.mode-waiting_permission {
+  --jc-accent: var(--jc-amber);
+  --jc-accent-soft: var(--jc-amber);
+  --orbit-speed: .05;
+}
+.jace-core-stage.mode-waiting_permission {
+  background:
+    radial-gradient(circle at 50% 47%, rgba(230, 180, 85, .2), transparent 34%),
+    radial-gradient(circle at 50% 120%, rgba(28, 22, 8, .82), transparent 60%),
+    linear-gradient(180deg, #0f0d07, #0a0806 60%, #060504);
+}
+.mode-waiting_permission .ring-outer,
+.mode-waiting_permission .ring-mid,
+.mode-waiting_permission .ring-inner { animation-play-state: paused; border-color: rgba(230, 180, 85, .5); }
+.mode-waiting_permission .ring-inner {
+  animation: jc-hold-pulse 2.4s ease-in-out infinite;
+  animation-play-state: running;
+  box-shadow: 0 0 50px rgba(230, 180, 85, .3), inset 0 0 28px rgba(230, 180, 85, .16);
+}
+.mode-waiting_permission .spoke-shuttle,
+.mode-waiting_permission .mesh-pulse { animation-play-state: paused; opacity: .35; }
+.mode-waiting_permission .core-particle { animation-play-state: paused; opacity: .3; }
+.mode-waiting_permission .core-center-frame { border-color: rgba(230, 180, 85, .6); box-shadow: 0 0 54px rgba(230, 180, 85, .24), inset 0 0 30px rgba(230, 180, 85, .12); }
+.mode-waiting_permission .core-glyph,
+.mode-waiting_permission .core-caption-block strong { color: #ffdfa1; }
+.mode-waiting_permission .core-state,
+.mode-waiting_permission .core-caption-label,
+.mode-waiting_permission .core-caption-block small { color: #cfa869; }
+.mode-waiting_permission .emit-ring {
+  animation: jc-emit 3.6s ease-out infinite;
+  animation-play-state: running;
+  border-color: rgba(230, 180, 85, .55);
 }
 
-.ambient-2 {
-  --drift-x: -48px;
-  --drift-y: 26px;
-  animation-delay: -1.05s;
+/* --- WARNING: urgent red pulse --- */
+.mode-warning {
+  --jc-accent: var(--jc-red);
+  --jc-accent-soft: var(--jc-red);
+}
+.jace-core-stage.mode-warning {
+  background:
+    radial-gradient(circle at 50% 47%, rgba(224, 97, 110, .22), transparent 34%),
+    radial-gradient(circle at 50% 120%, rgba(28, 10, 12, .82), transparent 60%),
+    linear-gradient(180deg, #0f0708, #0a0506 60%, #060404);
+}
+.mode-warning .ring-inner {
+  animation: jc-hold-pulse 1.1s ease-in-out infinite;
+  border-color: rgba(224, 97, 110, .6);
+  box-shadow: 0 0 54px rgba(224, 97, 110, .35), inset 0 0 28px rgba(224, 97, 110, .18);
+}
+.mode-warning .ring-outer,
+.mode-warning .ring-mid { border-color: rgba(224, 97, 110, .45); }
+.mode-warning .emit-ring { animation-play-state: running; animation-duration: 1.6s; border-color: rgba(224, 97, 110, .6); }
+.mode-warning .core-glyph,
+.mode-warning .core-caption-block strong { color: #ffd0d5; }
+.mode-warning .core-state,
+.mode-warning .core-caption-label,
+.mode-warning .core-caption-block small { color: #e0949c; }
+
+/* --- OFFLINE: near-frozen, drained --- */
+.mode-offline {
+  filter: saturate(.28) brightness(.72);
+}
+.mode-offline .core-particle,
+.mode-offline .spoke-shuttle,
+.mode-offline .mesh-pulse,
+.mode-offline .mesh-node,
+.mode-offline .core-orbit,
+.mode-offline .emit-ring { animation-play-state: paused; }
+.mode-offline .ring-outer,
+.mode-offline .ring-mid { animation-duration: 120s; opacity: .5; }
+.mode-offline .ring-inner { animation: none; opacity: .5; box-shadow: none; }
+.mode-offline .core-glyph { color: #7f948f; }
+
+/* ==========================================================================
+   KEYFRAMES
+   ========================================================================== */
+@keyframes jc-spin { to { transform: translate(-50%, -50%) scale(var(--ring-scale, 1)) rotate(360deg); } }
+@keyframes jc-spin-rev { to { transform: translate(-50%, -50%) scale(var(--ring-scale, 1)) rotate(-360deg); } }
+@keyframes jc-breathe {
+  0%, 100% { box-shadow: 0 0 40px rgba(19, 171, 136, .22), inset 0 0 26px rgba(19, 171, 136, .12); }
+  50% { box-shadow: 0 0 62px rgba(19, 171, 136, .4), inset 0 0 34px rgba(19, 171, 136, .2); }
+}
+@keyframes jc-grid-breathe { 0%, 100% { opacity: .26; } 50% { opacity: .44; } }
+
+@keyframes jc-particle-drift {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.7); }
+  20% { opacity: .85; }
+  50% { transform: translate3d(calc(var(--psize, 2px) * 6), calc(var(--psize, 2px) * -7), 0) scale(1.15); }
+  80% { opacity: .5; }
+  100% { opacity: 0; transform: translate3d(0, calc(var(--psize, 2px) * -12), 0) scale(.7); }
+}
+@keyframes jc-field-inhale { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(.8); opacity: 1; } }
+@keyframes jc-field-exhale { 0% { transform: scale(.86); opacity: 1; } 100% { transform: scale(1.22); opacity: 0; } }
+
+@keyframes jc-node-blink { 0%, 100% { opacity: .3; r: 2; } 50% { opacity: 1; } }
+@keyframes jc-mesh-pulse {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translate(var(--mx, 0), var(--my, 0)); opacity: 0; }
 }
 
-.ambient-3 {
-  --drift-x: 72px;
-  --drift-y: -12px;
-  animation-delay: -1.8s;
+@keyframes shuttle-out {
+  0% { top: 98%; opacity: 0; }
+  14% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { top: -3%; opacity: 0; }
+}
+@keyframes shuttle-in {
+  0% { top: -3%; opacity: 0; }
+  14% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { top: 98%; opacity: 0; }
+}
+@keyframes jc-shuttle-out-faint {
+  0% { top: 92%; opacity: 0; }
+  50% { opacity: .4; }
+  100% { top: 6%; opacity: 0; }
+}
+@keyframes jc-spoke-burst {
+  0% { transform: scale(.4); opacity: 0; }
+  20% { opacity: .9; }
+  100% { transform: scale(3.4); opacity: 0; }
+}
+@keyframes jc-branch-flicker { 0%, 100% { opacity: .25; } 50% { opacity: .9; } }
+
+@keyframes jc-emit {
+  0% { transform: scale(.3); opacity: 0; }
+  16% { opacity: .8; }
+  100% { transform: scale(2.9); opacity: 0; }
+}
+@keyframes jc-scan {
+  0%, 100% { top: -4%; opacity: 0; }
+  10% { opacity: .85; }
+  50% { top: 104%; opacity: .5; }
+  60% { opacity: 0; }
+}
+@keyframes jc-jitter {
+  0% { transform: translate(-50%, -50%) rotate(0deg); }
+  50% { transform: translate(-51%, -49%) rotate(2deg); }
+  100% { transform: translate(-49%, -50%) rotate(-2deg); }
+}
+@keyframes jc-chroma {
+  0%, 100% { box-shadow: 0 0 40px rgba(108, 231, 255, .2), 2px 0 0 rgba(224, 97, 110, .35), -2px 0 0 rgba(108, 231, 255, .35); }
+  50% { box-shadow: 0 0 40px rgba(108, 231, 255, .2), -2px 0 0 rgba(224, 97, 110, .35), 2px 0 0 rgba(108, 231, 255, .35); }
+}
+@keyframes jc-glyph-flicker { 0%, 100% { opacity: 1; } 12% { opacity: .5; } 16% { opacity: 1; } 55% { opacity: .8; } 58% { opacity: 1; } }
+@keyframes jc-data-flicker { 0% { opacity: .35; } 100% { opacity: 1; } }
+@keyframes jc-wave { 0%, 100% { transform: scaleY(.4); opacity: .7; } 45% { transform: scaleY(1); opacity: 1; } }
+@keyframes jc-hold-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(.98); opacity: .7; }
+  50% { transform: translate(-50%, -50%) scale(1.05); opacity: 1; }
 }
 
-.ambient-4 {
-  --drift-x: -66px;
-  --drift-y: -24px;
-  animation-delay: -2.55s;
+/* ==========================================================================
+   FULLSCREEN / FOCUS PRESENTATION — stronger core presence
+   ========================================================================== */
+.focus-core .jace-core-panel {
+  border-color: rgba(31, 208, 166, .34);
+  box-shadow: 0 0 0 1px rgba(31, 208, 166, .12), inset 0 0 120px rgba(3, 12, 11, .7);
 }
-
-.ambient-5 {
-  --drift-x: -42px;
-  --drift-y: 38px;
-  animation-delay: -3.3s;
+.focus-core .jace-core-stage {
+  background:
+    radial-gradient(circle at 50% 46%, rgba(19, 171, 136, .26), transparent 40%),
+    radial-gradient(circle at 50% 46%, rgba(108, 231, 255, .1), transparent 62%),
+    radial-gradient(circle at 50% 130%, rgba(6, 22, 19, .9), transparent 66%),
+    linear-gradient(180deg, #04100e, #020a09 62%, #010706);
 }
-
-.ambient-6 {
-  --drift-x: 46px;
-  --drift-y: -36px;
-  animation-delay: -4.05s;
+.focus-core .core-center-frame {
+  min-width: 300px;
+  min-height: 120px;
+  transform: scale(1.15);
+  border-color: rgba(120, 244, 214, .55);
 }
-
-.state-thinking .board-ambient {
-  animation-duration: 2.5s;
+.focus-core .core-glyph { font-size: 40px; }
+.focus-core .core-state { font-size: 13px; letter-spacing: .34em; }
+.focus-core .ring-outer { width: min(70vh, 620px); height: min(70vh, 620px); }
+.focus-core .ring-mid { width: min(52vh, 460px); height: min(52vh, 460px); }
+.focus-core .ring-inner { width: min(36vh, 320px); height: min(36vh, 320px); }
+.focus-core .core-orbit.orbit-5 { width: min(84vh, 760px); height: min(72vh, 640px); }
+.focus-core .core-orbit.orbit-4 { width: min(70vh, 620px); height: min(60vh, 520px); }
+.focus-core .core-orbit.orbit-3 { width: min(56vh, 500px); height: min(48vh, 420px); }
+.focus-core .core-caption-block {
+  right: 32px;
+  bottom: 30px;
+  max-width: 260px;
+  padding: 16px 20px;
 }
+.focus-core .core-caption-block strong { font-size: 20px; }
+.focus-core .core-caption-block small { font-size: 13px; }
+.focus-core .core-waveform { height: 90px; }
+.focus-core .core-waveform span { width: 6px; }
+.focus-core .data-line { font-size: 12px; }
+.focus-core .core-vignette { background: radial-gradient(circle at 50% 47%, transparent 44%, rgba(1, 6, 5, .6) 82%, rgba(0, 3, 3, .95) 100%); }
 
-.state-working .board-ambient {
-  animation-duration: 1.8s;
-}
-
-.state-offline .board-ambient {
-  animation-play-state: paused;
-  opacity: 0.08;
-}
-
-@keyframes jace-core-network-flow {
-  to {
-    stroke-dashoffset: -100;
-  }
-}
-
-@keyframes jace-network-junction-pulse {
-  0%,
-  100% {
-    opacity: 0.3;
-  }
-
-  50% {
-    opacity: 1;
-  }
-}
-
-@keyframes jace-core-ambient-drift {
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: translate3d(0, 0, 0) scale(0.88);
-  }
-
-  50% {
-    opacity: 0.9;
-    transform:
-      translate3d(var(--drift-x), var(--drift-y), 0)
-      scale(1.12);
-  }
-}
-
+/* ==========================================================================
+   REDUCED MOTION
+   ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
-  .network-flow,
-  .network-junctions circle,
-  .board-ambient {
-    animation: none !important;
+  .jace-core-stage *,
+  .jace-core-stage *::after,
+  .jace-core-stage *::before {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition: none !important;
   }
+  .core-datastream.on { opacity: 1; }
+  .core-particle { opacity: .5; }
+  .spoke-shuttle,
+  .mesh-pulse { opacity: .6; }
 }
