@@ -24,8 +24,39 @@ class SpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+_stt_warmup_task: asyncio.Task | None = None
+
+
+async def _warm_stt_runtime() -> None:
+    """Load Faster-Whisper off the request path.
+
+    The desktop asks for /voice/status during startup. That is a good moment to
+    begin loading the local STT model in a worker thread, so the first actual
+    push-to-talk request does not also pay the model-loading cost.
+
+    _get_whisper_model is currently the service's internal loader; using it
+    here is intentional until VoiceService exposes a public warm-up method.
+    """
+
+    try:
+        await asyncio.to_thread(voice_service._get_whisper_model)  # noqa: SLF001
+        logger.info("Jace STT runtime warmed successfully.")
+    except Exception as exc:
+        # Warm-up is best effort. The normal transcription endpoint will still
+        # return the authoritative error if STT is unavailable when requested.
+        logger.warning("Jace STT warm-up did not complete: %s", exc)
+
+
+def _ensure_stt_warmup() -> None:
+    global _stt_warmup_task
+
+    if _stt_warmup_task is None or _stt_warmup_task.done():
+        _stt_warmup_task = asyncio.create_task(_warm_stt_runtime())
+
+
 @router.get("/status")
 async def get_status():
+    _ensure_stt_warmup()
     return voice_service.status()
 
 
@@ -35,6 +66,7 @@ async def get_status():
 # second source of truth.
 @router.get("/settings")
 async def get_settings():
+    _ensure_stt_warmup()
     return voice_service.status()
 
 
@@ -56,7 +88,10 @@ async def transcribe_voice(file: UploadFile = File(...)):
         raise HTTPException(status_code=422, detail="The microphone upload was empty.")
 
     if len(audio_bytes) > MAX_AUDIO_BYTES:
-        raise HTTPException(status_code=413, detail="The microphone recording is too large to transcribe.")
+        raise HTTPException(
+            status_code=413,
+            detail="The microphone recording is too large to transcribe.",
+        )
 
     try:
         result = await asyncio.to_thread(
@@ -83,13 +118,19 @@ async def transcribe_voice(file: UploadFile = File(...)):
                     "Hold Home, speak, then release Home and try again."
                 ),
             ) from exc
-        raise HTTPException(status_code=500, detail=f"Audio transcription failed: {message}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f"Audio transcription failed: {message}",
+        ) from exc
 
 
 @router.post("/synthesize")
 async def synthesize_voice(request: SpeechRequest):
     try:
-        wav_bytes = await asyncio.to_thread(voice_service.synthesize_wav, request.text)
+        wav_bytes = await asyncio.to_thread(
+            voice_service.synthesize_wav,
+            request.text,
+        )
         return Response(
             content=wav_bytes,
             media_type="audio/wav",
@@ -101,7 +142,10 @@ async def synthesize_voice(request: SpeechRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Unexpected local voice synthesis failure")
-        raise HTTPException(status_code=500, detail=f"Speech synthesis failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f"Speech synthesis failed: {exc}",
+        ) from exc
 
 
 # British-spelling compatibility route for any early Phase 10B client builds.

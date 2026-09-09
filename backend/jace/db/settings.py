@@ -78,13 +78,52 @@ def style_instruction(response_style: str) -> str:
     }.get(response_style, "Use a balanced level of detail.")
 
 
-def build_profile_prompt(profile: AssistantSettings, conversation_prompt: str | None = None) -> str:
-    base = (conversation_prompt or profile.system_prompt or DEFAULT_SYSTEM_PROMPT).strip()
-    identity = (
-        f"\n\nASSISTANT PROFILE\n"
+def build_profile_prompt(
+    profile: AssistantSettings,
+    conversation_prompt: str | None = None,
+) -> str:
+    """Build the authoritative system prompt for every Jace turn.
+
+    DEFAULT_SYSTEM_PROMPT is deliberately always present. Previously the
+    personality in prompts.py was only copied into SQLite when the profile was
+    first created/reset. Existing profiles and conversations could therefore
+    keep an older prompt forever, making later personality edits appear to do
+    nothing.
+
+    A stored profile/conversation prompt is now treated as an optional
+    customization layer rather than a replacement for Jace's core identity.
+    The canonical personality from prompts.py is appended after custom text so
+    stale or generic stored prompts cannot silently replace Jace's identity.
+    """
+
+    stored_prompt = (conversation_prompt or profile.system_prompt or "").strip()
+    canonical_prompt = DEFAULT_SYSTEM_PROMPT.strip()
+
+    sections: list[str] = []
+
+    if stored_prompt and stored_prompt != canonical_prompt:
+        sections.append(
+            "JACE CUSTOM INSTRUCTIONS\n"
+            "These are additional user-configured instructions. They may refine "
+            "behaviour, but they do not replace the core Jace personality, safety, "
+            "permission, or operating rules that follow.\n"
+            f"{stored_prompt}\n"
+            "END JACE CUSTOM INSTRUCTIONS"
+        )
+
+    # Keep the canonical prompt late in the system message so it remains the
+    # authoritative identity even when an old database prompt still exists.
+    sections.append(canonical_prompt)
+
+    sections.append(
+        "ASSISTANT PROFILE\n"
         f"Your name is {profile.assistant_name}.\n"
         f"The user's display name is {profile.user_name}.\n"
         f"{style_instruction(profile.response_style)}\n"
+        "The JACE — PERSONALITY section above is your persistent identity and "
+        "tone for both typed and spoken responses. Do not drop into a generic "
+        "assistant persona merely because the request is factual or simple.\n"
         "END ASSISTANT PROFILE"
     )
-    return base + identity
+
+    return "\n\n".join(section for section in sections if section.strip())
