@@ -6,7 +6,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError
-from jace.ai.prompts import TOOL_AGENT_SYSTEM_PROMPT, VOICE_RESPONSE_STYLE
+from jace.ai.prompts import (
+    PERSONALITY_ANCHOR,
+    VOICE_RESPONSE_STYLE,
+    build_tool_context,
+)
 from jace.attachments.processors import prepare_attachments
 from jace.attachments.service import assign_attachments_to_message, get_attachments
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
@@ -135,7 +139,14 @@ async def send_streaming_chat(request: PersistentChatRequest):
         memory_top_k = profile.memory_top_k
         memory_min_similarity = profile.memory_min_similarity
         auto_extract = bool(profile.memory_auto_extract and memory_allowed)
-        profile_prompt = build_profile_prompt(profile, conversation_system_prompt)
+        # include_anchor=False: the personality anchor is appended below, after
+        # memory/tool/voice context, so tool policy is never the final thing the
+        # model reads before it answers.
+        profile_prompt = build_profile_prompt(
+            profile,
+            conversation_system_prompt,
+            include_anchor=False,
+        )
         current_attachment_ids = [item.id for item in attachments]
 
     async def persist_assistant(
@@ -267,14 +278,28 @@ async def send_streaming_chat(request: PersistentChatRequest):
             )
 
             memory_context = build_memory_context(memory_hits) if memory_allowed else ""
-            tool_context = TOOL_AGENT_SYSTEM_PROMPT if (routed_tools or current_attachment_ids) else ""
 
-            effective_system_prompt = (
-                profile_prompt
-                + memory_context
-                + memory_action_context
-                + tool_context
-                + ("\n\n" + VOICE_RESPONSE_STYLE if request.voice_mode else "")
+            # Only the tool policy relevant to the routed tools is included. The
+            # previous monolithic block cost ~2,400 tokens on every tool-enabled
+            # turn, which crowded out both history and Jace's personality inside
+            # a 4k context window.
+            tool_context = build_tool_context(
+                routed_tools,
+                has_attachments=bool(current_attachment_ids),
+            )
+
+            prompt_sections = [
+                profile_prompt,
+                memory_context,
+                memory_action_context,
+                tool_context,
+                VOICE_RESPONSE_STYLE if request.voice_mode else "",
+                # Always last: recency-weighted identity reminder.
+                PERSONALITY_ANCHOR,
+            ]
+
+            effective_system_prompt = "\n\n".join(
+                section.strip() for section in prompt_sections if section and section.strip()
             )
 
             async for event in stream_agent(

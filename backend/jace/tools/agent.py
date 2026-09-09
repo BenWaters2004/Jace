@@ -563,10 +563,21 @@ async def stream_agent(
 ):
     """Streaming multi-turn agent loop with guarded final-answer recovery.
 
-    Plain chat streams immediately. Tool-enabled model turns are buffered until
-    we know whether the model requested a tool, preventing internal planning text
-    from leaking into the user-visible answer. A clearly incomplete final turn
-    is automatically retried once before it is persisted as complete.
+    Plain chat streams immediately.
+
+    Tool-enabled turns previously buffered the *entire* model turn before
+    emitting anything, so any request that routed a tool showed nothing until
+    generation had completely finished — and voice output could not start until
+    then either. Ollama emits ``tool_calls`` at the very start of a turn, so a
+    short decision window is enough: content is held back only until
+    ``settings.tool_stream_buffer_chars`` characters have arrived with no tool
+    call, after which the held text is released and the rest streams live.
+
+    Set ``JACE_TOOL_STREAM_BUFFER_CHARS`` to 0 to stream tool turns immediately,
+    or to -1 to restore the old buffer-the-whole-turn behaviour.
+
+    A clearly incomplete final turn is still automatically retried once before it
+    is persisted as complete.
     """
     ensure_tools_registered()
     agent_messages = [dict(message) for message in messages]
@@ -588,13 +599,21 @@ async def stream_agent(
     empty_response_retries = 0
     incomplete_response_retries = 0
     active_system_prompt = system_prompt
-    buffer_until_tool_decision = bool(tools)
+
+    decision_window = int(settings.tool_stream_buffer_chars)
+    # A turn with no tools cannot produce a tool call, so it always streams live.
+    hold_for_tool_decision = bool(tools) and decision_window != 0
 
     for _step in range(settings.max_tool_steps):
         content_parts: list[str] = []
         thinking_parts: list[str] = []
         raw_tool_calls: list[dict[str, Any]] = []
         final_chunk: dict[str, Any] | None = None
+
+        # `released` means tokens for this turn are already visible to the user.
+        released = not hold_for_tool_decision
+        held_parts: list[str] = []
+        held_chars = 0
 
         async for chunk in stream_chat(
             model=model,
@@ -610,17 +629,34 @@ async def stream_agent(
             if thinking:
                 thinking_parts.append(thinking)
 
-            content = message.get("content") or ""
-            if content:
-                content_parts.append(content)
-                if not buffer_until_tool_decision:
-                    yield {"type": "token", "content": content}
-
             calls = message.get("tool_calls") or []
-            if isinstance(calls, list):
+            if isinstance(calls, list) and calls:
                 raw_tool_calls.extend(
                     call for call in calls if isinstance(call, dict)
                 )
+                # The turn is a tool-planning turn after all. Drop any narration
+                # still inside the decision window instead of showing it.
+                if not released:
+                    held_parts = []
+                    held_chars = 0
+
+            content = message.get("content") or ""
+            if content:
+                content_parts.append(content)
+
+                if released:
+                    yield {"type": "token", "content": content}
+                elif not raw_tool_calls:
+                    held_parts.append(content)
+                    held_chars += len(content)
+
+                    if decision_window > 0 and held_chars >= decision_window:
+                        # Enough prose with no tool call: this is an answer.
+                        released = True
+                        for held in held_parts:
+                            yield {"type": "token", "content": held}
+                        held_parts = []
+                        held_chars = 0
 
             if chunk.get("done"):
                 final_chunk = chunk
@@ -666,7 +702,7 @@ async def stream_agent(
             if incomplete and incomplete_response_retries < 1:
                 incomplete_response_retries += 1
 
-                if buffer_until_tool_decision and usage.tool_calls == 0:
+                if not released and usage.tool_calls == 0:
                     # The model answered prematurely instead of using the tools
                     # routed for this request. Discard the fragment and retry the
                     # decision turn with stronger instructions.
@@ -681,7 +717,7 @@ async def stream_agent(
                     )
                     continue
 
-                if buffer_until_tool_decision and usage.tool_calls > 0:
+                if not released and usage.tool_calls > 0:
                     # Tool results already exist. Regenerate the final answer once
                     # with tools removed so another planning cycle cannot replace
                     # the answer with another fragment/tool call.
@@ -703,7 +739,7 @@ async def stream_agent(
                             "content": content_text,
                         }
 
-                elif not buffer_until_tool_decision:
+                elif released:
                     # Plain-chat tokens are already visible. Ask for a natural
                     # continuation and stream only the continuation.
                     agent_messages.append(assistant_message)
@@ -738,9 +774,10 @@ async def stream_agent(
 
             agent_messages.append({"role": "assistant", "content": content_text})
 
-            # Tool-enabled turns were buffered until the tool decision was known.
-            # Release only the final/repaired answer, never the discarded fragment.
-            if buffer_until_tool_decision:
+            # Short answers can finish inside the decision window, and the repair
+            # path replaces content_parts wholesale. Release the final/repaired
+            # answer here, never a discarded planning fragment.
+            if not released:
                 for content in content_parts:
                     yield {"type": "token", "content": content}
 

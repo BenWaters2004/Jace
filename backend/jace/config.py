@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     embedding_keep_alive: str = "20m"
     preload_default_model: bool = True
     preload_timeout_seconds: float = 120.0
-    ollama_num_ctx: int = 4096
+
+    # 4096 was too tight once the personality, tool policy, memory context and
+    # 20 messages of history were all in the prompt: Ollama silently truncated,
+    # and the personality was among the first things to go. 8192 leaves real
+    # headroom on a 4B model. Lower it again if VRAM becomes a problem.
+    ollama_num_ctx: int = 8192
 
     # Bound prompt growth. Full history remains persisted in SQLite.
     history_max_messages: int = 20
@@ -55,6 +60,14 @@ class Settings(BaseSettings):
     tool_approval_timeout_seconds: float = 300.0
     tool_result_max_chars: int = 8_000
     tool_audit_preview_chars: int = 1_500
+
+    # How much assistant text is held back on a tool-enabled turn while we wait
+    # to see whether the model is calling a tool instead of answering. Ollama
+    # emits tool_calls at the very start of a turn, so a small window is enough
+    # to keep planning narration hidden while still streaming answers live.
+    #   0  -> never hold back (fastest, tiny risk of showing planning text)
+    #  -1  -> hold the entire turn (previous behaviour)
+    tool_stream_buffer_chars: int = 160
 
     # Phase 5 internet access.
     web_enabled: bool = True
@@ -147,6 +160,16 @@ class Settings(BaseSettings):
     voice_recording_max_bytes: int = 20_000_000
     voice_kokoro_model_path: Path = VOICE_KOKORO_DIRECTORY / "kokoro-v1.0.onnx"
     voice_kokoro_voices_path: Path = VOICE_KOKORO_DIRECTORY / "voices-v1.0.bin"
+
+    # Push-to-talk transcription latency. beam_size=5 roughly doubles decode time
+    # for no meaningful accuracy gain on short clean utterances, and per-segment
+    # conditioning is pointless for a single push-to-talk clip.
+    voice_stt_beam_size: int = 1
+    voice_stt_vad_filter: bool = True
+    voice_stt_vad_min_silence_ms: int = 300
+    voice_stt_condition_on_previous_text: bool = False
+    # Warm Kokoro at startup so the first spoken reply does not pay model load.
+    voice_warm_tts_on_status: bool = True
 
     # Phase 9 interactive GUI control. This is intentionally Windows-first.
     interactive_control_enabled: bool = True

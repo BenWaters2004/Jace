@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from jace.config import settings as env_settings
 from jace.voice.service import (
     MAX_AUDIO_BYTES,
     VoiceDecodeError,
@@ -24,39 +25,46 @@ class SpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
-_stt_warmup_task: asyncio.Task | None = None
+_warmup_task: asyncio.Task | None = None
 
 
-async def _warm_stt_runtime() -> None:
-    """Load Faster-Whisper off the request path.
+async def _warm_voice_runtime() -> None:
+    """Load the local STT and TTS runtimes off the request path.
 
-    The desktop asks for /voice/status during startup. That is a good moment to
-    begin loading the local STT model in a worker thread, so the first actual
-    push-to-talk request does not also pay the model-loading cost.
-
-    _get_whisper_model is currently the service's internal loader; using it
-    here is intentional until VoiceService exposes a public warm-up method.
+    The desktop asks for /voice/status during startup, which is a good moment to
+    load both models in worker threads. Previously only Whisper was warmed, so
+    the first spoken reply still paid the full Kokoro model-load cost, which is
+    a large part of the delay before Jace first speaks.
     """
 
     try:
-        await asyncio.to_thread(voice_service._get_whisper_model)  # noqa: SLF001
+        await asyncio.to_thread(voice_service.warm_stt)
         logger.info("Jace STT runtime warmed successfully.")
     except Exception as exc:
         # Warm-up is best effort. The normal transcription endpoint will still
         # return the authoritative error if STT is unavailable when requested.
         logger.warning("Jace STT warm-up did not complete: %s", exc)
 
+    if not env_settings.voice_warm_tts_on_status:
+        return
 
-def _ensure_stt_warmup() -> None:
-    global _stt_warmup_task
+    try:
+        await asyncio.to_thread(voice_service.warm_tts)
+        logger.info("Jace TTS runtime warmed successfully.")
+    except Exception as exc:
+        logger.warning("Jace TTS warm-up did not complete: %s", exc)
 
-    if _stt_warmup_task is None or _stt_warmup_task.done():
-        _stt_warmup_task = asyncio.create_task(_warm_stt_runtime())
+
+def _ensure_warmup() -> None:
+    global _warmup_task
+
+    if _warmup_task is None or _warmup_task.done():
+        _warmup_task = asyncio.create_task(_warm_voice_runtime())
 
 
 @router.get("/status")
 async def get_status():
-    _ensure_stt_warmup()
+    _ensure_warmup()
     return voice_service.status()
 
 
@@ -66,7 +74,7 @@ async def get_status():
 # second source of truth.
 @router.get("/settings")
 async def get_settings():
-    _ensure_stt_warmup()
+    _ensure_warmup()
     return voice_service.status()
 
 

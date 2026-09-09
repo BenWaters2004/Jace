@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from jace.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -477,11 +479,27 @@ class VoiceService:
 
     @staticmethod
     def _run_whisper_transcription(model: Any, path: Path) -> tuple[list[Any], Any]:
-        segments, info = model.transcribe(
-            str(path),
-            beam_size=5,
-            vad_filter=True,
-        )
+        # Push-to-talk clips are short, single-speaker and already noise
+        # suppressed by the browser capture chain. Greedy decoding is roughly
+        # twice as fast as beam_size=5 with no practical accuracy loss here,
+        # and previous-text conditioning only adds work for a one-shot clip.
+        transcribe_kwargs: dict[str, Any] = {
+            "beam_size": max(1, int(settings.voice_stt_beam_size)),
+            "condition_on_previous_text": bool(
+                settings.voice_stt_condition_on_previous_text
+            ),
+            "without_timestamps": True,
+        }
+
+        if settings.voice_stt_vad_filter:
+            transcribe_kwargs["vad_filter"] = True
+            transcribe_kwargs["vad_parameters"] = {
+                "min_silence_duration_ms": max(
+                    100, int(settings.voice_stt_vad_min_silence_ms)
+                ),
+            }
+
+        segments, info = model.transcribe(str(path), **transcribe_kwargs)
         # Faster-Whisper does most inference lazily while this generator is
         # consumed, so CUDA DLL failures can appear here rather than when the
         # WhisperModel object is constructed.
@@ -718,6 +736,34 @@ class VoiceService:
         if len(data) <= 44:
             raise VoiceError("Kokoro returned an empty WAV file.")
         return data
+
+    # ------------------------------------------------------------------
+    # Warm-up
+    # ------------------------------------------------------------------
+
+    def warm_stt(self) -> None:
+        """Load the faster-whisper model. Safe to call repeatedly."""
+        self._get_whisper_model()
+
+    def warm_tts(self) -> None:
+        """Load Kokoro and run one tiny synthesis.
+
+        Constructing the ONNX session is only part of the first-call cost: the
+        first `create()` also builds the phoniser state. Doing both here keeps
+        the first real spoken reply from stalling for several seconds.
+        """
+        kokoro = self._get_kokoro()
+
+        try:
+            with self._tts_inference_lock:
+                kokoro.create(
+                    "Ready.",
+                    voice=self.tts_voice,
+                    speed=self.tts_speed,
+                    lang=self.tts_language,
+                )
+        except Exception as exc:
+            logger.warning("Kokoro warm-up synthesis did not complete: %s", exc)
 
 
 voice_service = VoiceService()
