@@ -1,6 +1,12 @@
 """Public interface for Jace's local voice subsystem."""
 
 from jace.voice.service import (
+    DEFAULT_KOKORO_LANGUAGE,
+    DEFAULT_KOKORO_MODEL,
+    DEFAULT_KOKORO_SPEED,
+    DEFAULT_KOKORO_VOICE,
+    DEFAULT_KOKORO_VOICES,
+    KOKORO_ROOT,
     MAX_AUDIO_BYTES,
     MIN_AUDIO_BYTES,
     WELCOME_LINE,
@@ -20,6 +26,12 @@ from jace.voice.service import (
 )
 
 __all__ = [
+    "DEFAULT_KOKORO_LANGUAGE",
+    "DEFAULT_KOKORO_MODEL",
+    "DEFAULT_KOKORO_SPEED",
+    "DEFAULT_KOKORO_VOICE",
+    "DEFAULT_KOKORO_VOICES",
+    "KOKORO_ROOT",
     "MAX_AUDIO_BYTES",
     "MIN_AUDIO_BYTES",
     "WELCOME_LINE",

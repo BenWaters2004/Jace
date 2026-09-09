@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import io
 import logging
@@ -16,19 +17,22 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_ROOT = PROJECT_ROOT / "data"
+VOICE_ROOT = DATA_ROOT / "voice"
+KOKORO_ROOT = VOICE_ROOT / "kokoro"
 
 MIN_AUDIO_BYTES = 1_000
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 WELCOME_LINE = "All systems online, sir. What are we working on today?"
 
+DEFAULT_KOKORO_MODEL = KOKORO_ROOT / "kokoro-v1.0.onnx"
+DEFAULT_KOKORO_VOICES = KOKORO_ROOT / "voices-v1.0.bin"
+DEFAULT_KOKORO_VOICE = "bm_george"
+DEFAULT_KOKORO_LANGUAGE = "en-gb"
+DEFAULT_KOKORO_SPEED = 1.0
+
 
 class VoiceRuntimeError(RuntimeError):
-    """Compatibility base error for the local Jace voice runtime.
-
-    Earlier Phase 10B modules imported VoiceRuntimeError directly.  Keep that
-    public name as the root of the current voice exception hierarchy so older
-    imports and exception handlers continue to work.
-    """
+    """Compatibility base error for Jace's local voice runtime."""
 
 
 class VoiceError(VoiceRuntimeError):
@@ -64,12 +68,55 @@ class TranscriptionResult:
 
 
 def _package_available(name: str) -> bool:
-    return importlib.util.find_spec(name) is not None
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _configured_path(*env_names: str, default: Path) -> Path:
+    for env_name in env_names:
+        raw = (os.getenv(env_name) or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+    return default.resolve()
+
+
+def _safe_float_env(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using %.2f", name, raw, default)
+        return default
+    if not minimum <= value <= maximum:
+        logger.warning(
+            "Ignoring out-of-range %s=%r; expected %.2f..%.2f; using %.2f",
+            name,
+            raw,
+            minimum,
+            maximum,
+            default,
+        )
+        return default
+    return value
 
 
 def _safe_suffix(filename: str | None, content_type: str | None) -> str:
     name_suffix = Path(filename or "").suffix.lower()
-    if name_suffix in {".webm", ".ogg", ".oga", ".wav", ".mp3", ".m4a", ".mp4", ".flac", ".aac"}:
+    if name_suffix in {
+        ".webm",
+        ".ogg",
+        ".oga",
+        ".wav",
+        ".mp3",
+        ".m4a",
+        ".mp4",
+        ".flac",
+        ".aac",
+    }:
         return name_suffix
 
     mime = (content_type or "").lower()
@@ -118,15 +165,13 @@ def _validate_container_signature(data: bytes, suffix: str) -> None:
 
 
 def _preflight_decode(path: Path) -> None:
-    """Verify that PyAV can find and decode at least one audio frame.
+    """Verify PyAV can find and decode at least one audio frame.
 
-    faster-whisper uses PyAV internally. Doing this explicitly gives the user a
-    clean Jace error instead of leaking FFmpeg's Errno 1094995529.
+    faster-whisper uses PyAV internally. Performing this check ourselves turns
+    FFmpeg's opaque Errno 1094995529 into a useful Jace recording error.
     """
 
     if not _package_available("av"):
-        # faster-whisper will surface its own dependency error. Do not make PyAV
-        # an additional hard dependency if a different decoder is configured.
         return
 
     try:
@@ -164,40 +209,19 @@ def _preflight_decode(path: Path) -> None:
         raise VoiceDecodeError(f"The microphone recording could not be decoded: {message}") from exc
 
 
-def _find_piper_model() -> Path | None:
-    configured = (
-        os.getenv("JACE_VOICE_PIPER_MODEL")
-        or os.getenv("JACE_PIPER_MODEL")
-        or ""
-    ).strip()
-    if configured:
-        candidate = Path(configured).expanduser()
-        if candidate.exists() and candidate.suffix.lower() == ".onnx":
-            return candidate.resolve()
-
-    search_roots = [
-        DATA_ROOT / "voice",
-        DATA_ROOT / "voice_models",
-        DATA_ROOT / "models" / "voice",
-        PROJECT_ROOT / "backend" / "models" / "voice",
-    ]
-
-    for root in search_roots:
-        if not root.exists():
-            continue
-        models = sorted(root.rglob("*.onnx"))
-        if models:
-            return models[0].resolve()
-    return None
-
-
 class VoiceService:
     def __init__(self) -> None:
         self._whisper_model: Any | None = None
         self._whisper_lock = threading.Lock()
-        self._piper_voice: Any | None = None
-        self._piper_model_path: Path | None = None
-        self._piper_lock = threading.Lock()
+
+        self._kokoro: Any | None = None
+        self._kokoro_loaded_from: tuple[Path, Path] | None = None
+        self._kokoro_lock = threading.Lock()
+        self._tts_inference_lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Configuration
+    # ------------------------------------------------------------------
 
     @property
     def whisper_model_name(self) -> str:
@@ -207,26 +231,114 @@ class VoiceService:
             or "base.en"
         ).strip()
 
+    @property
+    def kokoro_model_path(self) -> Path:
+        return _configured_path(
+            "JACE_VOICE_KOKORO_MODEL",
+            "JACE_KOKORO_MODEL",
+            default=DEFAULT_KOKORO_MODEL,
+        )
+
+    @property
+    def kokoro_voices_path(self) -> Path:
+        return _configured_path(
+            "JACE_VOICE_KOKORO_VOICES",
+            "JACE_KOKORO_VOICES",
+            default=DEFAULT_KOKORO_VOICES,
+        )
+
+    @property
+    def tts_voice(self) -> str:
+        return (
+            os.getenv("JACE_VOICE_TTS_VOICE")
+            or os.getenv("JACE_KOKORO_VOICE")
+            or DEFAULT_KOKORO_VOICE
+        ).strip()
+
+    @property
+    def tts_language(self) -> str:
+        return (
+            os.getenv("JACE_VOICE_TTS_LANG")
+            or os.getenv("JACE_KOKORO_LANGUAGE")
+            or DEFAULT_KOKORO_LANGUAGE
+        ).strip().lower()
+
+    @property
+    def tts_speed(self) -> float:
+        return _safe_float_env(
+            "JACE_VOICE_TTS_SPEED",
+            DEFAULT_KOKORO_SPEED,
+            minimum=0.5,
+            maximum=2.0,
+        )
+
+    # ------------------------------------------------------------------
+    # Status / diagnostics
+    # ------------------------------------------------------------------
+
+    def _tts_readiness(self) -> tuple[bool, str | None]:
+        if not _package_available("kokoro_onnx"):
+            return (
+                False,
+                "The kokoro-onnx Python package is not installed in Jace's backend environment.",
+            )
+
+        try:
+            importlib.import_module("kokoro_onnx")
+        except Exception as exc:
+            return (
+                False,
+                "The kokoro-onnx package is installed but could not be imported: "
+                f"{exc}",
+            )
+
+        model_path = self.kokoro_model_path
+        voices_path = self.kokoro_voices_path
+
+        if not model_path.is_file():
+            return False, f"Kokoro model file is missing: {model_path}"
+        if model_path.stat().st_size < 10 * 1024 * 1024:
+            return False, f"Kokoro model file looks incomplete: {model_path}"
+
+        if not voices_path.is_file():
+            return False, f"Kokoro voices file is missing: {voices_path}"
+        if voices_path.stat().st_size < 1 * 1024 * 1024:
+            return False, f"Kokoro voices file looks incomplete: {voices_path}"
+
+        return True, None
+
     def status(self) -> dict[str, Any]:
         whisper_available = _package_available("faster_whisper")
-        piper_model = _find_piper_model()
-        piper_available = _package_available("piper") and piper_model is not None
+        tts_available, tts_reason = self._tts_readiness()
 
         return {
             "enabled": True,
             "platform_supported": True,
             "transcription_available": whisper_available,
-            "synthesis_available": piper_available,
-            # Compatibility aliases used by earlier Phase 10B clients.
+            "synthesis_available": tts_available,
+            # Compatibility aliases used by Phase 10B clients.
             "stt_available": whisper_available,
-            "tts_available": piper_available,
+            "tts_available": tts_available,
             "whisper_model": self.whisper_model_name if whisper_available else None,
-            "piper_model": str(piper_model) if piper_model else None,
+            "tts_engine": "kokoro-onnx",
+            "kokoro_model": str(self.kokoro_model_path),
+            "kokoro_voices": str(self.kokoro_voices_path),
+            "kokoro_voice": self.tts_voice,
+            "kokoro_language": self.tts_language,
+            "kokoro_speed": self.tts_speed,
+            "tts_reason": tts_reason,
+            # Keep this legacy field so old UI builds do not fail while making
+            # it explicit that Piper is no longer Jace's TTS engine.
+            "piper_model": None,
             "push_to_talk_key": "Home",
             "welcome_line": WELCOME_LINE,
             "min_audio_bytes": MIN_AUDIO_BYTES,
             "max_audio_bytes": MAX_AUDIO_BYTES,
         }
+
+    # ------------------------------------------------------------------
+    # Speech-to-text
+    # ------------------------------------------------------------------
 
     def _get_whisper_model(self) -> Any:
         if self._whisper_model is not None:
@@ -253,12 +365,11 @@ class VoiceService:
                     compute_type=compute_type,
                 )
             except Exception:
-                # A CPU/int8 fallback keeps voice usable when an environment says
-                # auto/CUDA but the current Windows machine cannot initialise it.
                 if device == "cpu" and compute_type == "int8":
                     raise
                 logger.exception(
-                    "Could not initialise faster-whisper with device=%s compute_type=%s; falling back to cpu/int8",
+                    "Could not initialise faster-whisper with device=%s compute_type=%s; "
+                    "falling back to cpu/int8",
                     device,
                     compute_type,
                 )
@@ -334,7 +445,8 @@ class VoiceService:
 
             if not text:
                 raise VoiceDecodeError(
-                    "Jace could not detect speech in that recording. Hold Home while you speak, then release it."
+                    "Jace could not detect speech in that recording. "
+                    "Hold Home while you speak, then release it."
                 )
 
             language = getattr(info, "language", None)
@@ -354,48 +466,93 @@ class VoiceService:
                 try:
                     temp_path.unlink(missing_ok=True)
                 except Exception:
-                    logger.warning("Could not remove temporary voice file %s", temp_path, exc_info=True)
+                    logger.warning(
+                        "Could not remove temporary voice file %s",
+                        temp_path,
+                        exc_info=True,
+                    )
 
-    def _get_piper_voice(self) -> Any:
-        model_path = _find_piper_model()
-        if model_path is None:
-            raise VoiceUnavailableError(
-                "Local speech synthesis is unavailable because no Piper .onnx voice model was found."
-            )
+    # ------------------------------------------------------------------
+    # Text-to-speech: Kokoro ONNX
+    # ------------------------------------------------------------------
 
-        if not _package_available("piper"):
-            raise VoiceUnavailableError(
-                "Local speech synthesis is unavailable because Piper is not installed."
-            )
+    def _get_kokoro(self) -> Any:
+        ready, reason = self._tts_readiness()
+        if not ready:
+            raise VoiceUnavailableError(reason or "Local Kokoro speech synthesis is unavailable.")
 
-        if self._piper_voice is not None and self._piper_model_path == model_path:
-            return self._piper_voice
+        model_path = self.kokoro_model_path
+        voices_path = self.kokoro_voices_path
+        source = (model_path, voices_path)
 
-        with self._piper_lock:
-            if self._piper_voice is not None and self._piper_model_path == model_path:
-                return self._piper_voice
+        if self._kokoro is not None and self._kokoro_loaded_from == source:
+            return self._kokoro
 
-            from piper.voice import PiperVoice  # type: ignore
+        with self._kokoro_lock:
+            if self._kokoro is not None and self._kokoro_loaded_from == source:
+                return self._kokoro
 
-            config_path = model_path.with_suffix(model_path.suffix + ".json")
-            if not config_path.exists():
-                # Piper's normal companion file is voice.onnx.json. Some older
-                # installs use voice.json; support both.
-                alternate = model_path.with_suffix(".json")
-                config_path = alternate if alternate.exists() else config_path
+            try:
+                from kokoro_onnx import Kokoro  # type: ignore
 
-            if not config_path.exists():
-                raise VoiceUnavailableError(
-                    f"Piper voice configuration was not found next to {model_path.name}."
+                logger.info(
+                    "Loading Kokoro TTS: model=%s voices=%s voice=%s language=%s",
+                    model_path,
+                    voices_path,
+                    self.tts_voice,
+                    self.tts_language,
                 )
+                runtime = Kokoro(str(model_path), str(voices_path))
 
-            self._piper_voice = PiperVoice.load(
-                str(model_path),
-                config_path=str(config_path),
-            )
-            self._piper_model_path = model_path
+                get_voices = getattr(runtime, "get_voices", None)
+                if callable(get_voices):
+                    available_voices = set(get_voices())
+                    if self.tts_voice not in available_voices:
+                        raise VoiceUnavailableError(
+                            f"Configured Kokoro voice '{self.tts_voice}' is not present in "
+                            f"{voices_path.name}."
+                        )
 
-        return self._piper_voice
+                self._kokoro = runtime
+                self._kokoro_loaded_from = source
+            except VoiceUnavailableError:
+                raise
+            except Exception as exc:
+                logger.exception("Could not initialise Kokoro ONNX")
+                raise VoiceUnavailableError(
+                    "Kokoro is installed and its model files exist, but the runtime could not initialise: "
+                    f"{exc}"
+                ) from exc
+
+        return self._kokoro
+
+    @staticmethod
+    def _samples_to_wav(samples: Any, sample_rate: int) -> bytes:
+        try:
+            import numpy as np  # type: ignore
+        except ImportError as exc:
+            raise VoiceUnavailableError(
+                "Kokoro requires NumPy, but NumPy is not installed in Jace's backend environment."
+            ) from exc
+
+        audio = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if audio.size == 0:
+            raise VoiceError("Kokoro returned no audio samples.")
+
+        if not np.isfinite(audio).all():
+            audio = np.nan_to_num(audio, nan=0.0, posinf=1.0, neginf=-1.0)
+
+        audio = np.clip(audio, -1.0, 1.0)
+        pcm16 = (audio * 32767.0).astype("<i2", copy=False)
+
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(int(sample_rate))
+            wav_file.writeframes(pcm16.tobytes())
+
+        return buffer.getvalue()
 
     def synthesize_wav(self, text: str) -> bytes:
         value = text.strip()
@@ -404,26 +561,38 @@ class VoiceService:
         if len(value) > 20_000:
             raise VoiceError("The requested speech is too long for one local voice response.")
 
-        voice = self._get_piper_voice()
-        buffer = io.BytesIO()
+        kokoro = self._get_kokoro()
 
         try:
-            with wave.open(buffer, "wb") as wav_file:
-                voice.synthesize_wav(value, wav_file)
+            # Keep inference serial. It avoids competing local ONNX sessions when
+            # a welcome line and an assistant reply arrive at nearly the same time.
+            with self._tts_inference_lock:
+                samples, sample_rate = kokoro.create(
+                    value,
+                    voice=self.tts_voice,
+                    speed=self.tts_speed,
+                    lang=self.tts_language,
+                )
+        except VoiceError:
+            raise
         except Exception as exc:
-            logger.exception("Piper speech synthesis failed")
-            raise VoiceError(f"Speech synthesis failed: {exc}") from exc
+            logger.exception("Kokoro speech synthesis failed")
+            raise VoiceError(f"Kokoro speech synthesis failed: {exc}") from exc
 
-        data = buffer.getvalue()
-        if not data:
-            raise VoiceError("Speech synthesis returned an empty WAV file.")
+        data = self._samples_to_wav(samples, int(sample_rate))
+        if len(data) <= 44:
+            raise VoiceError("Kokoro returned an empty WAV file.")
         return data
 
 
 voice_service = VoiceService()
 
 
+# ----------------------------------------------------------------------
 # Module-level compatibility helpers for earlier Phase 10B imports.
+# ----------------------------------------------------------------------
+
+
 def get_voice_status() -> dict[str, Any]:
     return voice_service.status()
 

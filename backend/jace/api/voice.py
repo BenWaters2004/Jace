@@ -29,6 +29,15 @@ async def get_status():
     return voice_service.status()
 
 
+# Compatibility route used by the Phase 10B desktop client during startup.
+# Voice settings currently come from the same local runtime configuration as
+# the status payload, so expose that payload here rather than maintaining a
+# second source of truth.
+@router.get("/settings")
+async def get_settings():
+    return voice_service.status()
+
+
 @router.post("/transcribe")
 async def transcribe_voice(file: UploadFile = File(...)):
     try:

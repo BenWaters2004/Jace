@@ -70,8 +70,16 @@ async function getErrorMessage(response: Response): Promise<string> {
   return `${response.status} ${response.statusText}`;
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<T> {
+  const url = `${API_BASE_URL}${path}`;
+  const method = options?.method ?? "GET";
+
+  console.debug("[Jace API]", method, url);
+
+  const response = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -79,7 +87,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     },
   });
 
-  if (!response.ok) throw new Error(await getErrorMessage(response));
+  if (!response.ok) {
+    const detail = await getErrorMessage(response);
+
+    throw new Error(
+      `${method} ${url} returned ${response.status}: ${detail}`,
+    );
+  }
+
   return response.json() as Promise<T>;
 }
 
