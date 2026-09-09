@@ -140,7 +140,112 @@ const MIN_AUDIO_BYTES = 1_000;
 const RECORDER_TIMESLICE_MS = 250;
 const FINAL_FLUSH_DELAY_MS = 75;
 
+// Streamed TTS tuning. Jace begins speaking once a useful sentence-sized
+// chunk has arrived rather than waiting for the complete model response.
+const MIN_STREAM_CHUNK_CHARS = 24;
+const MAX_STREAM_BUFFER_CHARS = 220;
+
+// Updating React state at full audio-frame rate would unnecessarily re-render
+// the whole desktop shell. ~22 FPS is smooth enough for the core visualisation.
+const AMPLITUDE_UPDATE_INTERVAL_MS = 45;
+
+interface SpeechQueueItem {
+  text: string;
+  generation: number;
+}
+
 let welcomeSpokenThisLaunch = false;
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function cleanSpeechText(text: string): string {
+  return text
+    .replace(/```[a-zA-Z0-9_-]*\s*/g, "")
+    .replace(/```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/[*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Pull complete speakable chunks from a streamed model buffer.
+ *
+ * Normal sentence punctuation is preferred. If the model produces a very long
+ * clause without punctuation, a whitespace/comma boundary is used so the user
+ * still hears a response promptly.
+ */
+function pullSpeechChunks(
+  input: string,
+  flushRemainder = false,
+): { chunks: string[]; remainder: string } {
+  const chunks: string[] = [];
+  let remainder = input;
+  let cursor = 0;
+  const boundary = /[.!?]+["')\\]]?(?=\\s|$)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = boundary.exec(input)) !== null) {
+    const end = match.index + match[0].length;
+    const candidate = input.slice(cursor, end).trim();
+
+    if (candidate.length >= MIN_STREAM_CHUNK_CHARS) {
+      chunks.push(candidate);
+      cursor = end;
+    }
+  }
+
+  remainder = input.slice(cursor);
+
+  while (remainder.trim().length > MAX_STREAM_BUFFER_CHARS) {
+    const searchWindow = remainder.slice(0, MAX_STREAM_BUFFER_CHARS + 1);
+    const commaBoundary = Math.max(
+      searchWindow.lastIndexOf(", "),
+      searchWindow.lastIndexOf("; "),
+      searchWindow.lastIndexOf(": "),
+    );
+    const whitespaceBoundary = searchWindow.lastIndexOf(" ");
+
+    const splitAt =
+      commaBoundary >= MIN_STREAM_CHUNK_CHARS
+        ? commaBoundary + 1
+        : whitespaceBoundary >= MIN_STREAM_CHUNK_CHARS
+          ? whitespaceBoundary
+          : MAX_STREAM_BUFFER_CHARS;
+
+    const candidate = remainder.slice(0, splitAt).trim();
+    if (candidate) chunks.push(candidate);
+    remainder = remainder.slice(splitAt).trimStart();
+  }
+
+  if (flushRemainder) {
+    const tail = remainder.trim();
+    if (tail) chunks.push(tail);
+    remainder = "";
+  }
+
+  return { chunks, remainder };
+}
+
+function createAudioContext(): AudioContext | null {
+  if (typeof AudioContext === "undefined") return null;
+
+  try {
+    return new AudioContext();
+  } catch {
+    return null;
+  }
+}
 
 function preferredAudioMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "";
@@ -283,6 +388,7 @@ export function useVoiceController(
   const [status, setStatus] = useState<VoiceStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState("");
+  const [amplitude, setAmplitude] = useState(0);
 
   const phaseRef = useRef<VoicePhase>("idle");
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -295,9 +401,21 @@ export function useVoiceController(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const audioCompletionRef = useRef<(() => void) | null>(null);
+  const speechFetchAbortRef = useRef<AbortController | null>(null);
+
+  const meterContextRef = useRef<AudioContext | null>(null);
+  const meterSourceRef = useRef<AudioNode | null>(null);
+  const meterAnalyserRef = useRef<AnalyserNode | null>(null);
+  const meterAnimationRef = useRef<number | null>(null);
+  const lastAmplitudeEmitRef = useRef(0);
 
   const responseBufferRef = useRef("");
   const responseShouldSpeakRef = useRef(false);
+  const responseGenerationRef = useRef(0);
+
+  const speechGenerationRef = useRef(0);
+  const speechQueueRef = useRef<SpeechQueueItem[]>([]);
+  const speechWorkerRunningRef = useRef(false);
 
   const mountedRef = useRef(true);
 
@@ -332,7 +450,118 @@ export function useVoiceController(
     }
   }, [setPhase]);
 
-  const stopSpeaking = useCallback(() => {
+  const stopAmplitudeMeter = useCallback(() => {
+    if (meterAnimationRef.current !== null) {
+      cancelAnimationFrame(meterAnimationRef.current);
+      meterAnimationRef.current = null;
+    }
+
+    try {
+      meterSourceRef.current?.disconnect();
+    } catch {
+      // Best-effort graph cleanup.
+    }
+
+    try {
+      meterAnalyserRef.current?.disconnect();
+    } catch {
+      // Best-effort graph cleanup.
+    }
+
+    meterSourceRef.current = null;
+    meterAnalyserRef.current = null;
+
+    const context = meterContextRef.current;
+    meterContextRef.current = null;
+
+    if (context && context.state !== "closed") {
+      void context.close().catch(() => {
+        // AudioContext cleanup is non-critical.
+      });
+    }
+
+    lastAmplitudeEmitRef.current = 0;
+
+    if (mountedRef.current) {
+      setAmplitude(0);
+    }
+  }, []);
+
+  const startAmplitudeMeter = useCallback(
+    (
+      context: AudioContext,
+      source: AudioNode,
+      analyser: AnalyserNode,
+      connectToOutput: boolean,
+      gainMultiplier: number,
+    ) => {
+      stopAmplitudeMeter();
+
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.72;
+
+      source.connect(analyser);
+
+      if (connectToOutput) {
+        analyser.connect(context.destination);
+      }
+
+      meterContextRef.current = context;
+      meterSourceRef.current = source;
+      meterAnalyserRef.current = analyser;
+
+      const samples = new Uint8Array(analyser.fftSize);
+      let smoothed = 0;
+      let lastUpdateAt = 0;
+
+      const tick = (time: number) => {
+        if (
+          !mountedRef.current ||
+          meterAnalyserRef.current !== analyser ||
+          meterContextRef.current !== context
+        ) {
+          return;
+        }
+
+        analyser.getByteTimeDomainData(samples);
+
+        let sumSquares = 0;
+        for (const sample of samples) {
+          const centred = (sample - 128) / 128;
+          sumSquares += centred * centred;
+        }
+
+        const rms = Math.sqrt(sumSquares / samples.length);
+        const target = clamp01((rms - 0.006) * gainMultiplier);
+
+        // Faster attack, slower release prevents a visually jittery core.
+        smoothed =
+          target > smoothed
+            ? smoothed * 0.42 + target * 0.58
+            : smoothed * 0.82 + target * 0.18;
+
+        if (time - lastUpdateAt >= AMPLITUDE_UPDATE_INTERVAL_MS) {
+          lastUpdateAt = time;
+
+          const emitted = smoothed < 0.015 ? 0 : smoothed;
+          if (Math.abs(emitted - lastAmplitudeEmitRef.current) >= 0.012) {
+            lastAmplitudeEmitRef.current = emitted;
+            setAmplitude(emitted);
+          }
+        }
+
+        meterAnimationRef.current = requestAnimationFrame(tick);
+      };
+
+      meterAnimationRef.current = requestAnimationFrame(tick);
+    },
+    [stopAmplitudeMeter],
+  );
+
+  const stopCurrentAudio = useCallback(() => {
+    speechFetchAbortRef.current?.abort();
+    speechFetchAbortRef.current = null;
+
     const audio = audioRef.current;
 
     if (audio) {
@@ -355,10 +584,24 @@ export function useVoiceController(
       audioUrlRef.current = null;
     }
 
+    stopAmplitudeMeter();
+
     if (mountedRef.current && phaseRef.current === "speaking") {
       setPhase("idle");
     }
-  }, [setPhase]);
+  }, [setPhase, stopAmplitudeMeter]);
+
+  const stopSpeaking = useCallback(() => {
+    // Incrementing the generation invalidates queued/in-flight speech without
+    // affecting the text/model stream itself.
+    speechGenerationRef.current += 1;
+    responseGenerationRef.current = speechGenerationRef.current;
+    responseShouldSpeakRef.current = false;
+    responseBufferRef.current = "";
+    speechQueueRef.current = [];
+
+    stopCurrentAudio();
+  }, [stopCurrentAudio]);
 
   const refreshStatus = useCallback(async (): Promise<VoiceStatusResponse | null> => {
     try {
@@ -392,42 +635,78 @@ export function useVoiceController(
     }
   }, []);
 
-  const speak = useCallback(
-    async (text: string): Promise<void> => {
-      const value = text.trim();
-      if (!value) return;
+  const synthesizeAndPlay = useCallback(
+    async (text: string, generation: number): Promise<void> => {
+      const value = cleanSpeechText(text);
+      if (!value || generation !== speechGenerationRef.current) return;
 
-      stopSpeaking();
+      const fetchController = new AbortController();
+      speechFetchAbortRef.current = fetchController;
+
+      const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: value }),
+        signal: fetchController.signal,
+      });
+
+      if (speechFetchAbortRef.current === fetchController) {
+        speechFetchAbortRef.current = null;
+      }
+
+      if (generation !== speechGenerationRef.current) return;
+
+      if (!response.ok) {
+        throw new Error(
+          await responseError(response, "Speech synthesis failed"),
+        );
+      }
+
+      const blob = await response.blob();
+      if (generation !== speechGenerationRef.current) return;
+
+      if (!blob.size) {
+        throw new Error("Speech synthesis returned an empty audio file.");
+      }
+
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+
+      audioRef.current = audio;
+      audioUrlRef.current = url;
+
+      if (mountedRef.current) {
+        setError(null);
+      }
+
+      // Route TTS playback through an analyser so JaceCore receives the real
+      // waveform level of Kokoro's generated speech.
+      let playbackUsesAudioContext = false;
+      const context = createAudioContext();
+
+      if (context) {
+        try {
+          if (context.state === "suspended") {
+            await context.resume();
+          }
+
+          const source = context.createMediaElementSource(audio);
+          const analyser = context.createAnalyser();
+
+          startAmplitudeMeter(context, source, analyser, true, 4.4);
+          playbackUsesAudioContext = true;
+        } catch (meterError) {
+          console.debug("[Jace Voice] TTS analyser unavailable", meterError);
+
+          if (context.state !== "closed") {
+            void context.close().catch(() => {});
+          }
+        }
+      }
+
+      setPhase("speaking");
 
       try {
-        const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: value }),
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            await responseError(response, "Speech synthesis failed"),
-          );
-        }
-
-        const blob = await response.blob();
-        if (!blob.size) {
-          throw new Error("Speech synthesis returned an empty audio file.");
-        }
-
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-
-        audioRef.current = audio;
-        audioUrlRef.current = url;
-
-        if (mountedRef.current) {
-          setError(null);
-        }
-        setPhase("speaking");
-
         await new Promise<void>((resolve, reject) => {
           let settled = false;
 
@@ -472,7 +751,7 @@ export function useVoiceController(
             );
           });
         });
-
+      } finally {
         if (audioRef.current === audio) {
           audioRef.current = null;
         }
@@ -482,11 +761,99 @@ export function useVoiceController(
           audioUrlRef.current = null;
         }
 
-        if (phaseRef.current === "speaking") {
+        // If Web Audio was unavailable the element played directly and there
+        // is no meter to clean up.
+        if (playbackUsesAudioContext) {
+          stopAmplitudeMeter();
+        }
+
+        if (
+          generation === speechGenerationRef.current &&
+          phaseRef.current === "speaking"
+        ) {
           setPhase("idle");
         }
+      }
+    },
+    [setPhase, startAmplitudeMeter, stopAmplitudeMeter],
+  );
+
+  const runSpeechQueue = useCallback(async () => {
+    if (speechWorkerRunningRef.current) return;
+
+    speechWorkerRunningRef.current = true;
+
+    try {
+      while (mountedRef.current) {
+        const item = speechQueueRef.current.shift();
+        if (!item) break;
+
+        if (item.generation !== speechGenerationRef.current) {
+          continue;
+        }
+
+        try {
+          await synthesizeAndPlay(item.text, item.generation);
+        } catch (speechError) {
+          if (
+            item.generation !== speechGenerationRef.current ||
+            isAbortError(speechError)
+          ) {
+            continue;
+          }
+
+          speechQueueRef.current = [];
+
+          const message =
+            speechError instanceof Error
+              ? speechError.message
+              : "Jace could not speak the response.";
+
+          reportError(message);
+          break;
+        }
+      }
+    } finally {
+      speechWorkerRunningRef.current = false;
+    }
+  }, [reportError, synthesizeAndPlay]);
+
+  const queueSpeechChunks = useCallback(
+    (chunks: string[], generation: number) => {
+      for (const chunk of chunks) {
+        const cleaned = cleanSpeechText(chunk);
+        if (!cleaned) continue;
+
+        speechQueueRef.current.push({
+          text: cleaned,
+          generation,
+        });
+      }
+
+      if (speechQueueRef.current.length > 0) {
+        void runSpeechQueue();
+      }
+    },
+    [runSpeechQueue],
+  );
+
+  const speak = useCallback(
+    async (text: string): Promise<void> => {
+      const value = cleanSpeechText(text);
+      if (!value) return;
+
+      stopSpeaking();
+      const generation = speechGenerationRef.current;
+
+      try {
+        await synthesizeAndPlay(value, generation);
       } catch (speakError) {
-        stopSpeaking();
+        if (
+          generation !== speechGenerationRef.current ||
+          isAbortError(speakError)
+        ) {
+          return;
+        }
 
         const message =
           speakError instanceof Error
@@ -497,55 +864,83 @@ export function useVoiceController(
         throw speakError;
       }
     },
-    [reportError, setPhase, stopSpeaking],
+    [reportError, stopSpeaking, synthesizeAndPlay],
   );
 
-  // App.tsx starts one of these for every streamed assistant response.
-  // For the reliability-first version we buffer the response and synthesize it
-  // once the stream is complete. Sentence-level streaming can be added next.
+  /**
+   * Begin a streamed assistant response.
+   *
+   * Previous speech is interrupted immediately. If this turn should be spoken,
+   * ingestResponseToken() will begin queueing sentence-sized TTS chunks as soon
+   * as they are complete.
+   */
   const beginResponse = useCallback(
     (shouldSpeak: boolean) => {
+      stopSpeaking();
+
+      const generation = speechGenerationRef.current;
+
+      responseGenerationRef.current = generation;
       responseBufferRef.current = "";
       responseShouldSpeakRef.current = shouldSpeak;
-
-      // Never allow a previous answer to speak over a newly-started response.
-      stopSpeaking();
     },
     [stopSpeaking],
   );
 
-  const ingestResponseToken = useCallback((token: string) => {
-    if (!responseShouldSpeakRef.current) return;
-    responseBufferRef.current += token;
-  }, []);
+  const ingestResponseToken = useCallback(
+    (token: string) => {
+      if (!responseShouldSpeakRef.current || !token) return;
+
+      const generation = responseGenerationRef.current;
+      if (generation !== speechGenerationRef.current) return;
+
+      responseBufferRef.current += token;
+
+      const { chunks, remainder } = pullSpeechChunks(
+        responseBufferRef.current,
+        false,
+      );
+
+      responseBufferRef.current = remainder;
+
+      if (chunks.length) {
+        queueSpeechChunks(chunks, generation);
+      }
+    },
+    [queueSpeechChunks],
+  );
 
   const finishResponse = useCallback(() => {
     const shouldSpeak = responseShouldSpeakRef.current;
-    const text = responseBufferRef.current.trim();
+    const generation = responseGenerationRef.current;
 
     responseShouldSpeakRef.current = false;
+
+    if (!shouldSpeak || generation !== speechGenerationRef.current) {
+      responseBufferRef.current = "";
+      return;
+    }
+
+    const { chunks } = pullSpeechChunks(responseBufferRef.current, true);
     responseBufferRef.current = "";
 
-    if (!shouldSpeak || !text) return;
-
-    void speak(text).catch(() => {
-      // speak() already routes the useful error into Jace's UI.
-    });
-  }, [speak]);
+    if (chunks.length) {
+      queueSpeechChunks(chunks, generation);
+    }
+  }, [queueSpeechChunks]);
 
   const speakSystem = useCallback(
     (text: string) => {
-      const value = text.trim();
+      const value = cleanSpeechText(text);
       if (!value) return;
 
-      // A permission prompt/system line has priority over an unfinished normal
-      // response. The model stream may continue, but that response will no
-      // longer auto-speak until the next beginResponse().
+      // Permission prompts and system announcements take priority over normal
+      // assistant narration.
       responseShouldSpeakRef.current = false;
       responseBufferRef.current = "";
 
       void speak(value).catch(() => {
-        // speak() already reports the error.
+        // speak() already routes useful errors into Jace's UI.
       });
     },
     [speak],
@@ -655,6 +1050,32 @@ export function useVoiceController(
         video: false,
       });
 
+      // Keep the stream reachable immediately so any later setup failure still
+      // releases the microphone correctly.
+      streamRef.current = stream;
+
+      // Feed the live microphone level into JaceCore. Failure to create a Web
+      // Audio analyser must never prevent recording/transcription.
+      try {
+        const context = createAudioContext();
+
+        if (context) {
+          if (context.state === "suspended") {
+            await context.resume();
+          }
+
+          const source = context.createMediaStreamSource(stream);
+          const analyser = context.createAnalyser();
+
+          // Microphone RMS is normally lower than decoded TTS audio, so use a
+          // slightly stronger normalisation multiplier.
+          startAmplitudeMeter(context, source, analyser, false, 8.2);
+        }
+      } catch (meterError) {
+        console.debug("[Jace Voice] microphone analyser unavailable", meterError);
+        stopAmplitudeMeter();
+      }
+
       const mimeType = preferredAudioMimeType();
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
@@ -695,6 +1116,7 @@ export function useVoiceController(
 
       setPhase("listening");
     } catch (recordError) {
+      stopAmplitudeMeter();
       releaseStream(streamRef.current);
       streamRef.current = null;
       recorderRef.current = null;
@@ -708,7 +1130,13 @@ export function useVoiceController(
 
       reportError(message);
     }
-  }, [reportError, setPhase, stopSpeaking]);
+  }, [
+    reportError,
+    setPhase,
+    startAmplitudeMeter,
+    stopAmplitudeMeter,
+    stopSpeaking,
+  ]);
 
   const stopRecording = useCallback(async (): Promise<string | null> => {
     if (stoppingRef.current) return stoppingRef.current;
@@ -717,6 +1145,7 @@ export function useVoiceController(
     const startedAt = recordingStartedAtRef.current;
 
     if (!recorder || recorder.state === "inactive") {
+      stopAmplitudeMeter();
       releaseStream(streamRef.current);
       streamRef.current = null;
       recorderRef.current = null;
@@ -786,6 +1215,7 @@ export function useVoiceController(
 
         recorderRef.current = null;
         recordingStartedAtRef.current = null;
+        stopAmplitudeMeter();
         releaseStream(streamRef.current);
         streamRef.current = null;
 
@@ -814,6 +1244,7 @@ export function useVoiceController(
       } catch (stopError) {
         recorderRef.current = null;
         recordingStartedAtRef.current = null;
+        stopAmplitudeMeter();
         releaseStream(streamRef.current);
         streamRef.current = null;
         chunksRef.current = [];
@@ -832,7 +1263,13 @@ export function useVoiceController(
 
     stoppingRef.current = task;
     return task;
-  }, [deliverTranscript, reportError, setPhase, transcribeBlob]);
+  }, [
+    deliverTranscript,
+    reportError,
+    setPhase,
+    stopAmplitudeMeter,
+    transcribeBlob,
+  ]);
 
   const toggleRecording = useCallback(async () => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -860,12 +1297,13 @@ export function useVoiceController(
     recordingStartedAtRef.current = null;
     chunksRef.current = [];
 
+    stopAmplitudeMeter();
     releaseStream(streamRef.current);
     streamRef.current = null;
 
     stopSpeaking();
     setPhase("idle");
-  }, [setPhase, stopSpeaking]);
+  }, [setPhase, stopAmplitudeMeter, stopSpeaking]);
 
   // Physical Home key = push-to-talk.
   useEffect(() => {
@@ -975,6 +1413,10 @@ export function useVoiceController(
       homeHeldRef.current = false;
       responseShouldSpeakRef.current = false;
       responseBufferRef.current = "";
+      speechQueueRef.current = [];
+      speechGenerationRef.current += 1;
+      speechFetchAbortRef.current?.abort();
+      speechFetchAbortRef.current = null;
 
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") {
@@ -985,6 +1427,7 @@ export function useVoiceController(
         }
       }
 
+      stopAmplitudeMeter();
       releaseStream(streamRef.current);
       streamRef.current = null;
       recorderRef.current = null;
@@ -1007,7 +1450,7 @@ export function useVoiceController(
         audioUrlRef.current = null;
       }
     };
-  }, [refreshStatus]);
+  }, [refreshStatus, stopAmplitudeMeter]);
 
   const supported =
     typeof navigator !== "undefined" &&
@@ -1062,8 +1505,8 @@ export function useVoiceController(
     canRecord,
     canSpeak,
 
-    // Phase 10B visual telemetry hook. Real Web Audio amplitude comes next.
-    amplitude: 0,
+    // Real microphone/TTS RMS level, normalised to 0..1 for JaceCore.
+    amplitude,
 
     pushToTalkKey: PUSH_TO_TALK_KEY,
 
