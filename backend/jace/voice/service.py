@@ -213,6 +213,8 @@ class VoiceService:
     def __init__(self) -> None:
         self._whisper_model: Any | None = None
         self._whisper_lock = threading.Lock()
+        self._whisper_loaded_device: str | None = None
+        self._whisper_loaded_compute_type: str | None = None
 
         self._kokoro: Any | None = None
         self._kokoro_loaded_from: tuple[Path, Path] | None = None
@@ -230,6 +232,29 @@ class VoiceService:
             or os.getenv("JACE_WHISPER_MODEL")
             or "base.en"
         ).strip()
+
+    @property
+    def stt_device(self) -> str:
+        # Reliability first on Windows.  Faster-Whisper/CTranslate2 can create
+        # an ``auto``/CUDA model successfully and only fail on the first
+        # transcription when CUDA runtime DLLs such as cublas64_12.dll are not
+        # on PATH.  CPU/int8 needs no CUDA installation and is fast enough for
+        # Jace's short push-to-talk requests, so it is the safe default.
+        value = (os.getenv("JACE_VOICE_STT_DEVICE") or "cpu").strip().lower()
+        if value not in {"cpu", "cuda", "auto"}:
+            logger.warning(
+                "Ignoring invalid JACE_VOICE_STT_DEVICE=%r; using cpu",
+                value,
+            )
+            return "cpu"
+        return value
+
+    @property
+    def stt_compute_type(self) -> str:
+        configured = (os.getenv("JACE_VOICE_STT_COMPUTE_TYPE") or "").strip()
+        if configured:
+            return configured
+        return "float16" if self.stt_device == "cuda" else "int8"
 
     @property
     def kokoro_model_path(self) -> Path:
@@ -320,6 +345,10 @@ class VoiceService:
             "stt_available": whisper_available,
             "tts_available": tts_available,
             "whisper_model": self.whisper_model_name if whisper_available else None,
+            "stt_device": self.stt_device,
+            "stt_compute_type": self.stt_compute_type,
+            "stt_runtime_device": self._whisper_loaded_device,
+            "stt_runtime_compute_type": self._whisper_loaded_compute_type,
             "tts_engine": "kokoro-onnx",
             "kokoro_model": str(self.kokoro_model_path),
             "kokoro_voices": str(self.kokoro_voices_path),
@@ -340,6 +369,64 @@ class VoiceService:
     # Speech-to-text
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_cuda_runtime_error(exc: BaseException) -> bool:
+        message = str(exc).lower()
+        markers = (
+            "cublas64_12.dll",
+            "cublaslt64_12.dll",
+            "cudnn64_9.dll",
+            "cudnn64_8.dll",
+            "libcublas.so",
+            "libcudnn.so",
+            "cuda runtime",
+            "cuda driver",
+            "cuda error",
+        )
+        return any(marker in message for marker in markers)
+
+    def _load_whisper_model(self, *, device: str, compute_type: str) -> Any:
+        from faster_whisper import WhisperModel  # type: ignore
+
+        logger.info(
+            "Loading faster-whisper STT: model=%s device=%s compute_type=%s",
+            self.whisper_model_name,
+            device,
+            compute_type,
+        )
+        model = WhisperModel(
+            self.whisper_model_name,
+            device=device,
+            compute_type=compute_type,
+        )
+        self._whisper_model = model
+        self._whisper_loaded_device = device
+        self._whisper_loaded_compute_type = compute_type
+        return model
+
+    def _load_cpu_whisper_model(self) -> Any:
+        if not _package_available("faster_whisper"):
+            raise VoiceUnavailableError(
+                "Local transcription is unavailable because faster-whisper is not installed."
+            )
+
+        with self._whisper_lock:
+            if (
+                self._whisper_model is not None
+                and self._whisper_loaded_device == "cpu"
+                and self._whisper_loaded_compute_type == "int8"
+            ):
+                return self._whisper_model
+
+            # Drop the unusable CUDA/auto model before constructing the CPU
+            # runtime.  The old object will be collected once no transcription
+            # call still references it.
+            self._whisper_model = None
+            self._whisper_loaded_device = None
+            self._whisper_loaded_compute_type = None
+
+            return self._load_whisper_model(device="cpu", compute_type="int8")
+
     def _get_whisper_model(self) -> Any:
         if self._whisper_model is not None:
             return self._whisper_model
@@ -353,33 +440,52 @@ class VoiceService:
             if self._whisper_model is not None:
                 return self._whisper_model
 
-            from faster_whisper import WhisperModel  # type: ignore
-
-            device = (os.getenv("JACE_VOICE_STT_DEVICE") or "auto").strip()
-            compute_type = (os.getenv("JACE_VOICE_STT_COMPUTE_TYPE") or "int8").strip()
+            device = self.stt_device
+            compute_type = self.stt_compute_type
 
             try:
-                self._whisper_model = WhisperModel(
-                    self.whisper_model_name,
+                return self._load_whisper_model(
                     device=device,
                     compute_type=compute_type,
                 )
-            except Exception:
+            except Exception as exc:
                 if device == "cpu" and compute_type == "int8":
-                    raise
-                logger.exception(
+                    raise VoiceUnavailableError(
+                        f"Could not initialise local speech recognition on CPU: {exc}"
+                    ) from exc
+
+                logger.warning(
                     "Could not initialise faster-whisper with device=%s compute_type=%s; "
-                    "falling back to cpu/int8",
+                    "falling back to cpu/int8: %s",
                     device,
                     compute_type,
-                )
-                self._whisper_model = WhisperModel(
-                    self.whisper_model_name,
-                    device="cpu",
-                    compute_type="int8",
+                    exc,
                 )
 
-        return self._whisper_model
+                self._whisper_model = None
+                self._whisper_loaded_device = None
+                self._whisper_loaded_compute_type = None
+                try:
+                    return self._load_whisper_model(
+                        device="cpu",
+                        compute_type="int8",
+                    )
+                except Exception as cpu_exc:
+                    raise VoiceUnavailableError(
+                        f"Could not initialise local speech recognition on CPU: {cpu_exc}"
+                    ) from cpu_exc
+
+    @staticmethod
+    def _run_whisper_transcription(model: Any, path: Path) -> tuple[list[Any], Any]:
+        segments, info = model.transcribe(
+            str(path),
+            beam_size=5,
+            vad_filter=True,
+        )
+        # Faster-Whisper does most inference lazily while this generator is
+        # consumed, so CUDA DLL failures can appear here rather than when the
+        # WhisperModel object is constructed.
+        return list(segments), info
 
     def transcribe_bytes(
         self,
@@ -421,21 +527,50 @@ class VoiceService:
             model = self._get_whisper_model()
 
             try:
-                segments, info = model.transcribe(
-                    str(temp_path),
-                    beam_size=5,
-                    vad_filter=True,
-                )
-                segment_list = list(segments)
+                segment_list, info = self._run_whisper_transcription(model, temp_path)
             except Exception as exc:
-                message = str(exc)
-                logger.exception("Audio transcription failed for %s", temp_path)
-                if "1094995529" in message or "Invalid data found when processing input" in message:
-                    raise VoiceDecodeError(
-                        "The microphone recording was incomplete or corrupt and could not be decoded. "
-                        "Hold Home, speak, then release Home and try again."
-                    ) from exc
-                raise VoiceError(f"Audio transcription failed: {message}") from exc
+                # ``device=auto``/CUDA can initialise successfully even when
+                # the CUDA 12 runtime DLLs are absent.  CTranslate2 then fails
+                # lazily while the segments generator is consumed.  Retry the
+                # exact same recording once on CPU/int8 instead of surfacing a
+                # cublas/cudnn DLL error to the user.
+                if self._is_cuda_runtime_error(exc) and self._whisper_loaded_device != "cpu":
+                    logger.warning(
+                        "CUDA STT runtime is unavailable (%s). Retrying this recording on cpu/int8.",
+                        exc,
+                    )
+                    try:
+                        cpu_model = self._load_cpu_whisper_model()
+                        segment_list, info = self._run_whisper_transcription(
+                            cpu_model,
+                            temp_path,
+                        )
+                    except Exception as cpu_exc:
+                        message = str(cpu_exc)
+                        logger.exception(
+                            "CPU fallback transcription failed for %s",
+                            temp_path,
+                        )
+                        if (
+                            "1094995529" in message
+                            or "Invalid data found when processing input" in message
+                        ):
+                            raise VoiceDecodeError(
+                                "The microphone recording was incomplete or corrupt and could not be decoded. "
+                                "Hold Home, speak, then release Home and try again."
+                            ) from cpu_exc
+                        raise VoiceError(
+                            f"Audio transcription failed after CPU fallback: {message}"
+                        ) from cpu_exc
+                else:
+                    message = str(exc)
+                    logger.exception("Audio transcription failed for %s", temp_path)
+                    if "1094995529" in message or "Invalid data found when processing input" in message:
+                        raise VoiceDecodeError(
+                            "The microphone recording was incomplete or corrupt and could not be decoded. "
+                            "Hold Home, speak, then release Home and try again."
+                        ) from exc
+                    raise VoiceError(f"Audio transcription failed: {message}") from exc
 
             text = " ".join(
                 str(segment.text).strip()
