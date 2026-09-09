@@ -1,35 +1,46 @@
 /* --------------------------------------------------------------------------
-   Phase 10B.3 — Jace Visual Presence
+   Phase 10B.3.1 — PCB Neural Core
 
-   This file is intentionally self-contained. JaceCore.tsx imports it directly,
-   so you do not need to merge a large patch into the existing styles.css.
+   Design goals:
+   - dark green PCB/solder-mask background
+   - circuit traces stay green instead of becoming rainbow lines
+   - only the travelling data packets are multicoloured
+   - packets have visible comet-like tails
+   - central processor has one fixed footprint in every runtime state
+   - circuit routes physically meet that processor in normal + fullscreen mode
    -------------------------------------------------------------------------- */
 
 .neural-core-panel {
-  --neural-cyan: #66e8ff;
-  --neural-cyan-hot: #9bf4ff;
-  --neural-blue: #42aaff;
-  --neural-violet: #b46cff;
-  --neural-amber: #ffc96c;
-  --neural-mint: #69ffd5;
-  --neural-danger: #ff7182;
-  --neural-deep: #02090e;
-  --neural-board: #06141b;
-  --neural-line: rgba(99, 225, 255, .24);
-  --neural-muted: #6a9eaa;
+  --pcb-black: #010906;
+  --pcb-deep: #02120c;
+  --pcb-dark: #031a11;
+  --pcb-mid: #06251a;
+  --pcb-green: #0b3a29;
+  --pcb-trace: #237655;
+  --pcb-trace-hot: #3ea77a;
+  --pcb-via: #5bb88d;
+  --pcb-text: #92cdb4;
+
+  --packet-cyan: #68efff;
+  --packet-blue: #4aa7ff;
+  --packet-violet: #bd73ff;
+  --packet-amber: #ffd06a;
+  --packet-mint: #78ffd2;
+  --packet-danger: #ff7182;
+
   isolation: isolate;
   background:
-    radial-gradient(circle at 50% 45%, rgba(21, 137, 174, .16), transparent 34%),
-    linear-gradient(145deg, rgba(4, 16, 22, .98), rgba(1, 8, 12, .98));
-  border-color: rgba(96, 221, 255, .24);
+    radial-gradient(circle at 50% 48%, rgba(46, 116, 77, .18), transparent 40%),
+    linear-gradient(145deg, rgba(2, 20, 13, .99), rgba(1, 12, 8, .99));
+  border-color: rgba(72, 154, 111, .28);
 }
 
 .neural-core-topline {
   position: relative;
   z-index: 20;
   flex: 0 0 auto;
-  background: linear-gradient(90deg, rgba(3, 13, 18, .98), rgba(5, 18, 24, .94));
-  border-bottom-color: rgba(103, 223, 255, .14);
+  background: linear-gradient(90deg, rgba(2, 18, 12, .99), rgba(3, 25, 17, .96));
+  border-bottom-color: rgba(69, 159, 113, .18);
 }
 
 .neural-core-top-actions {
@@ -43,23 +54,23 @@
   align-items: center;
   min-height: 22px;
   padding: 0 8px;
-  border: 1px solid rgba(91, 181, 202, .18);
-  border-radius: 4px;
-  background: rgba(5, 22, 29, .72);
-  color: #6d9ba7;
+  border: 1px solid rgba(70, 150, 109, .22);
+  border-radius: 3px;
+  background: rgba(2, 24, 16, .74);
+  color: #79ae96;
   font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   letter-spacing: .12em;
 }
 
 .neural-link-badge.online {
-  color: #78e9ff;
-  border-color: rgba(105, 226, 255, .28);
-  box-shadow: inset 0 0 12px rgba(86, 215, 255, .04);
+  color: #8cf0bc;
+  border-color: rgba(94, 217, 153, .34);
+  box-shadow: inset 0 0 12px rgba(77, 210, 145, .05);
 }
 
 .neural-link-badge.fallback {
-  color: #e4bd6f;
-  border-color: rgba(231, 183, 91, .24);
+  color: #e3be70;
+  border-color: rgba(230, 184, 91, .28);
 }
 
 .neural-core-stage {
@@ -69,162 +80,206 @@
   flex: 1;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 49%, rgba(76, 226, 255, .12), transparent 21%),
-    radial-gradient(circle at 50% 50%, rgba(23, 109, 143, .10), transparent 42%),
-    linear-gradient(180deg, #031015, #020b10 56%, #02080c);
+    radial-gradient(circle at 50% 49%, rgba(58, 150, 101, .13), transparent 27%),
+    radial-gradient(circle at 50% 50%, rgba(26, 91, 59, .14), transparent 56%),
+    linear-gradient(180deg, #041c12, #02150e 56%, #01110b);
   contain: paint;
 }
 
+.neural-board-substrate,
+.neural-board-weave,
 .neural-board-noise,
-.neural-board-grid,
 .neural-board-vignette,
 .neural-core-glow,
-.neural-core-halo,
 .neural-scan-line,
 .neural-state-burst {
   position: absolute;
   pointer-events: none;
 }
 
-.neural-board-noise {
+/* PCB solder-mask texture. */
+.neural-board-substrate {
   inset: 0;
-  z-index: 1;
-  opacity: .20;
-  mix-blend-mode: screen;
-  background-image:
-    radial-gradient(circle at 14% 18%, rgba(255,255,255,.20) 0 1px, transparent 1.2px),
-    radial-gradient(circle at 74% 68%, rgba(255,255,255,.14) 0 1px, transparent 1.2px),
-    radial-gradient(circle at 43% 34%, rgba(94,224,255,.20) 0 .8px, transparent 1px),
-    radial-gradient(circle at 89% 22%, rgba(94,224,255,.18) 0 .7px, transparent .9px);
-  background-size: 51px 47px, 67px 61px, 39px 43px, 73px 69px;
-  animation: neural-noise-drift 11s linear infinite;
+  z-index: 0;
+  opacity: .78;
+  background:
+    radial-gradient(circle at 19% 21%, rgba(38, 103, 69, .13), transparent 20%),
+    radial-gradient(circle at 76% 70%, rgba(29, 89, 59, .14), transparent 25%),
+    linear-gradient(118deg, transparent 0 46%, rgba(255,255,255,.012) 46.2% 46.6%, transparent 46.8%),
+    linear-gradient(20deg, rgba(0,0,0,.13), transparent 30% 70%, rgba(0,0,0,.12));
 }
 
-.neural-board-grid {
+.neural-board-weave {
   inset: 0;
   z-index: 1;
-  opacity: .34;
+  opacity: .22;
   background-image:
-    linear-gradient(rgba(94, 216, 245, .045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(94, 216, 245, .045) 1px, transparent 1px),
-    linear-gradient(rgba(94, 216, 245, .017) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(94, 216, 245, .017) 1px, transparent 1px);
-  background-size: 30px 30px, 30px 30px, 6px 6px, 6px 6px;
-  mask-image: radial-gradient(ellipse at center, black 15%, rgba(0,0,0,.94) 58%, transparent 100%);
+    linear-gradient(rgba(117, 195, 154, .035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(117, 195, 154, .035) 1px, transparent 1px),
+    linear-gradient(rgba(0, 0, 0, .075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, .075) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px, 6px 6px, 6px 6px;
+  mask-image: radial-gradient(ellipse at center, black 20%, rgba(0,0,0,.96) 72%, transparent 100%);
+}
+
+.neural-board-noise {
+  inset: 0;
+  z-index: 2;
+  opacity: .17;
+  mix-blend-mode: screen;
+  background-image:
+    radial-gradient(circle at 14% 18%, rgba(166, 244, 205, .20) 0 .8px, transparent 1px),
+    radial-gradient(circle at 74% 68%, rgba(100, 192, 145, .18) 0 .8px, transparent 1px),
+    radial-gradient(circle at 43% 34%, rgba(122, 224, 172, .17) 0 .7px, transparent .9px),
+    radial-gradient(circle at 89% 22%, rgba(109, 205, 156, .17) 0 .7px, transparent .9px);
+  background-size: 51px 47px, 67px 61px, 39px 43px, 73px 69px;
+  animation: neural-noise-drift 13s linear infinite;
 }
 
 .neural-board-vignette {
   inset: 0;
   z-index: 15;
   box-shadow:
-    inset 0 0 54px rgba(0, 0, 0, .46),
-    inset 0 0 120px rgba(0, 0, 0, .32);
+    inset 0 0 64px rgba(0, 0, 0, .50),
+    inset 0 0 145px rgba(0, 0, 0, .34);
 }
 
 .neural-circuit-svg {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 4;
   width: 100%;
   height: 100%;
   overflow: visible;
 }
 
+/* The board lines are deliberately one PCB-green family. */
 .neural-static-copper path {
   fill: none;
-  stroke: rgba(83, 154, 172, .16);
-  stroke-width: 1.3;
+  stroke: rgba(53, 132, 94, .34);
+  stroke-width: 1.15;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
   vector-effect: non-scaling-stroke;
+}
+
+.neural-static-copper path:nth-child(3n) {
+  stroke: rgba(71, 151, 109, .23);
+}
+
+.neural-static-copper path:nth-child(5n) {
+  stroke-width: 1.55;
+  opacity: .68;
 }
 
 .neural-chip rect {
-  fill: rgba(3, 14, 18, .82);
-  stroke: rgba(82, 171, 194, .24);
-  stroke-width: 1.2;
+  fill: rgba(1, 11, 7, .88);
+  stroke: rgba(75, 157, 113, .42);
+  stroke-width: 1.15;
   vector-effect: non-scaling-stroke;
 }
 
+.neural-chip .neural-chip-inner {
+  fill: rgba(3, 20, 13, .92);
+  stroke: rgba(56, 117, 84, .30);
+}
+
 .neural-chip line {
-  stroke: rgba(98, 188, 207, .19);
+  stroke: rgba(94, 185, 137, .36);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
-.neural-chip:nth-child(3n + 1) rect {
-  stroke: rgba(87, 220, 255, .34);
+.neural-solder-pad rect {
+  fill: rgba(91, 172, 129, .12);
+  stroke: rgba(99, 184, 141, .28);
+  stroke-width: .85;
+  vector-effect: non-scaling-stroke;
 }
 
 .neural-trace-shadow,
 .neural-trace-line {
   fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
   vector-effect: non-scaling-stroke;
 }
 
 .neural-trace-shadow {
-  stroke-width: 5;
-  opacity: .10;
-  filter: blur(1.5px);
+  stroke: rgba(40, 133, 91, .50);
+  stroke-width: 4.7;
+  opacity: .07;
+  filter: blur(1.6px);
 }
 
 .neural-trace-line {
-  stroke-width: 1.15;
-  opacity: .68;
+  stroke: rgba(57, 157, 111, .66);
+  stroke-width: 1.2;
+  opacity: .78;
 }
 
-.trace-cyan .neural-trace-line,
-.trace-cyan .neural-trace-shadow { stroke: var(--neural-cyan); }
-.trace-blue .neural-trace-line,
-.trace-blue .neural-trace-shadow { stroke: var(--neural-blue); }
-.trace-violet .neural-trace-line,
-.trace-violet .neural-trace-shadow { stroke: var(--neural-violet); }
-.trace-amber .neural-trace-line,
-.trace-amber .neural-trace-shadow { stroke: var(--neural-amber); }
-.trace-mint .neural-trace-line,
-.trace-mint .neural-trace-shadow { stroke: var(--neural-mint); }
+.neural-trace:nth-child(3n + 1) .neural-trace-line {
+  stroke: rgba(66, 169, 120, .72);
+}
+
+.neural-trace:nth-child(4n + 2) .neural-trace-line {
+  stroke: rgba(48, 140, 99, .72);
+}
 
 .neural-end-node-halo {
-  fill: rgba(91, 226, 255, .035);
-  stroke: rgba(98, 226, 255, .12);
+  fill: rgba(62, 154, 107, .05);
+  stroke: rgba(85, 185, 137, .25);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .neural-end-node {
-  fill: #86efff;
-  opacity: .48;
+  fill: #74c79e;
+  opacity: .68;
 }
 
 .neural-node-label {
-  fill: rgba(100, 164, 177, .52);
+  fill: rgba(122, 190, 158, .60);
   font: 700 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   letter-spacing: .15em;
 }
 
+/* Packet colours only. The copper/trace underneath remains green. */
+.packet-cyan .neural-data-pulse,
+.packet-cyan .neural-data-tail { fill: var(--packet-cyan); }
+.packet-blue .neural-data-pulse,
+.packet-blue .neural-data-tail { fill: var(--packet-blue); }
+.packet-violet .neural-data-pulse,
+.packet-violet .neural-data-tail { fill: var(--packet-violet); }
+.packet-amber .neural-data-pulse,
+.packet-amber .neural-data-tail { fill: var(--packet-amber); }
+.packet-mint .neural-data-pulse,
+.packet-mint .neural-data-tail { fill: var(--packet-mint); }
+
 .neural-data-pulse {
-  opacity: .9;
+  opacity: .98;
 }
 
-.trace-cyan .neural-data-pulse { fill: var(--neural-cyan-hot); }
-.trace-blue .neural-data-pulse { fill: #72c9ff; }
-.trace-violet .neural-data-pulse { fill: #d191ff; }
-.trace-amber .neural-data-pulse { fill: #ffe49b; }
-.trace-mint .neural-data-pulse { fill: #9fffe4; }
-
-.pulse-secondary {
-  opacity: .52;
+.neural-data-tail {
+  transform-origin: center;
 }
 
-.neural-board-points circle {
-  fill: rgba(94, 210, 235, .18);
+.neural-via-ring {
+  fill: rgba(1, 12, 8, .72);
+  stroke: rgba(76, 166, 119, .33);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.neural-via {
+  fill: rgba(107, 194, 149, .46);
 }
 
 .neural-corner {
   position: absolute;
-  z-index: 6;
-  width: 28px;
-  height: 28px;
+  z-index: 7;
+  width: 30px;
+  height: 30px;
   pointer-events: none;
 }
 
@@ -232,11 +287,11 @@
 .neural-corner::after {
   content: "";
   position: absolute;
-  background: rgba(110, 228, 255, .33);
+  background: rgba(99, 192, 143, .42);
 }
 
-.neural-corner::before { width: 28px; height: 1px; }
-.neural-corner::after { width: 1px; height: 28px; }
+.neural-corner::before { width: 30px; height: 1px; }
+.neural-corner::after { width: 1px; height: 30px; }
 .corner-tl { left: 12px; top: 10px; }
 .corner-tr { right: 12px; top: 10px; transform: scaleX(-1); }
 .corner-bl { left: 12px; bottom: 10px; transform: scaleY(-1); }
@@ -250,9 +305,9 @@
   gap: 3px;
   width: 112px;
   padding: 9px 10px;
-  border-left: 1px solid rgba(104, 219, 244, .23);
-  background: linear-gradient(90deg, rgba(4, 17, 23, .55), transparent);
-  color: #689aa7;
+  border-left: 1px solid rgba(83, 176, 128, .28);
+  background: linear-gradient(90deg, rgba(2, 21, 14, .62), transparent);
+  color: #6fa68d;
   font: 700 8px/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   letter-spacing: .11em;
   pointer-events: none;
@@ -260,18 +315,18 @@
 
 .neural-hud > span {
   margin-bottom: 3px;
-  color: #77dff1;
+  color: #88d2aa;
   font-size: 8.5px;
 }
 
 .neural-hud small {
-  color: rgba(105, 150, 161, .70);
+  color: rgba(108, 155, 133, .76);
   font-size: 7px;
   letter-spacing: .08em;
 }
 
 .neural-hud strong {
-  color: #c3f7ff;
+  color: #c8f0db;
   font-size: 10px;
   letter-spacing: .16em;
 }
@@ -287,66 +342,56 @@
   top: 18px;
   width: 128px;
   border-left: 0;
-  border-right: 1px solid rgba(104, 219, 244, .23);
-  background: linear-gradient(270deg, rgba(4, 17, 23, .55), transparent);
+  border-right: 1px solid rgba(83, 176, 128, .28);
+  background: linear-gradient(270deg, rgba(2, 21, 14, .62), transparent);
   text-align: right;
 }
 
 .neural-core-glow {
-  z-index: 4;
+  z-index: 5;
   left: 50%;
   top: 50%;
   width: 46%;
-  aspect-ratio: 1.7;
+  height: 34%;
   transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(82, 225, 255, .19), rgba(53, 172, 225, .07) 36%, transparent 70%);
-  filter: blur(20px);
-  opacity: .72;
+  border-radius: 18%;
+  background: radial-gradient(ellipse, rgba(94, 239, 183, .15), rgba(39, 135, 91, .06) 42%, transparent 74%);
+  filter: blur(24px);
+  opacity: .62;
 }
 
-.neural-core-halo {
-  z-index: 4;
-  left: 50%;
-  top: 50%;
-  width: min(55%, 420px);
-  aspect-ratio: 1;
-  border: 1px solid rgba(105, 230, 255, .08);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-}
+/* --------------------------------------------------------------------------
+   Fixed central processor footprint
 
-.halo-one {
-  border-style: dashed;
-  animation: neural-orbit-spin 23s linear infinite;
-}
+   38% of the 1000-wide SVG = 380 units, matching x=310..690.
+   28.846% of the 520-high SVG = 150 units, matching y=185..335.
 
-.halo-two {
-  width: min(43%, 330px);
-  border-color: rgba(88, 175, 255, .08);
-  animation: neural-orbit-spin-reverse 17s linear infinite;
-}
+   Do not override width/height per runtime state or in fullscreen. That is what
+   keeps every trace connected to the processor pins.
+   -------------------------------------------------------------------------- */
 
 .neural-hub-shell {
   position: absolute;
   z-index: 12;
   left: 50%;
   top: 50%;
-  width: clamp(250px, 39%, 430px);
-  min-height: 126px;
+  width: 38%;
+  height: 28.8461538%;
+  min-width: 0;
+  min-height: 0;
   transform: translate(-50%, -50%);
   display: grid;
-  grid-template-rows: auto minmax(74px, 1fr) auto;
-  border: 1px solid rgba(112, 232, 255, .52);
-  border-radius: 5px;
+  grid-template-rows: minmax(20px, 18%) minmax(0, 64%) minmax(20px, 18%);
+  border: 1px solid rgba(119, 219, 174, .56);
+  border-radius: 3px;
   background:
-    linear-gradient(180deg, rgba(6, 30, 38, .90), rgba(2, 14, 19, .94)),
-    #031016;
+    linear-gradient(180deg, rgba(3, 28, 18, .94), rgba(1, 16, 10, .97)),
+    #02140d;
   box-shadow:
-    0 0 0 1px rgba(3, 8, 12, .82),
-    0 0 0 4px rgba(67, 192, 225, .05),
-    0 0 30px rgba(63, 215, 255, .10),
-    inset 0 0 28px rgba(66, 208, 239, .045);
+    0 0 0 1px rgba(0, 7, 4, .88),
+    0 0 0 4px rgba(55, 151, 105, .055),
+    0 0 30px rgba(50, 171, 116, .11),
+    inset 0 0 30px rgba(70, 188, 132, .045);
   overflow: visible;
 }
 
@@ -357,8 +402,8 @@
   left: 14px;
   right: 14px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(111, 229, 255, .48), transparent);
-  opacity: .7;
+  background: linear-gradient(90deg, transparent, rgba(118, 224, 175, .52), transparent);
+  opacity: .72;
 }
 
 .neural-hub-shell::before { top: -5px; }
@@ -367,82 +412,86 @@
 .neural-hub-pin {
   position: absolute;
   display: block;
-  background: repeating-linear-gradient(90deg, rgba(99, 222, 248, .70) 0 4px, transparent 4px 8px);
-  opacity: .58;
+  opacity: .72;
 }
 
 .pin-top,
 .pin-bottom {
-  left: 16px;
-  right: 16px;
-  height: 4px;
+  left: 12px;
+  right: 12px;
+  height: 5px;
+  background: repeating-linear-gradient(90deg, rgba(91, 183, 137, .80) 0 4px, transparent 4px 8px);
 }
+
 .pin-top { top: -8px; }
 .pin-bottom { bottom: -8px; }
 
 .pin-left,
 .pin-right {
-  top: 14px;
-  bottom: 14px;
-  width: 4px;
-  background: repeating-linear-gradient(180deg, rgba(99, 222, 248, .70) 0 4px, transparent 4px 8px);
+  top: 12px;
+  bottom: 12px;
+  width: 5px;
+  background: repeating-linear-gradient(180deg, rgba(91, 183, 137, .80) 0 4px, transparent 4px 8px);
 }
+
 .pin-left { left: -8px; }
 .pin-right { right: -8px; }
 
 .neural-hub-header,
 .neural-hub-footer {
-  min-height: 25px;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 11px;
-  color: #5f99a7;
-  font: 700 7px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 0 10px;
+  color: #66977f;
+  font: 700 clamp(5.5px, .65vw, 8px)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   letter-spacing: .14em;
   text-transform: uppercase;
+  overflow: hidden;
 }
 
 .neural-hub-header {
-  border-bottom: 1px solid rgba(101, 211, 235, .10);
+  border-bottom: 1px solid rgba(87, 174, 131, .14);
 }
 
 .neural-hub-footer {
-  border-top: 1px solid rgba(101, 211, 235, .10);
+  border-top: 1px solid rgba(87, 174, 131, .14);
 }
 
 .neural-hub-header span:last-child {
-  color: #74dff0;
+  color: #8adbb1;
 }
 
 .neural-hub-content {
-  min-height: 74px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: 7px;
+  padding: 5px 10px;
   text-align: center;
+  overflow: hidden;
 }
 
 .neural-main-word {
-  max-width: 100%;
+  max-width: 92%;
   overflow: hidden;
-  color: #baf7ff;
-  font: 800 clamp(18px, 2.25vw, 34px)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .22em;
+  color: #c9ffe7;
+  font: 800 clamp(13px, 2vw, 32px)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .20em;
   text-transform: uppercase;
   text-shadow:
-    0 0 7px rgba(125, 239, 255, .38),
-    0 0 22px rgba(71, 211, 255, .18);
+    0 0 7px rgba(132, 255, 198, .33),
+    0 0 22px rgba(66, 210, 144, .16);
   white-space: nowrap;
 }
 
 .state-word-thinking {
-  font-size: clamp(14px, 1.75vw, 25px);
-  letter-spacing: .13em;
+  font-size: clamp(9px, 1.45vw, 24px);
+  letter-spacing: .10em;
   animation: neural-data-jitter .22s steps(2, end) infinite;
 }
 
@@ -451,15 +500,15 @@
 }
 
 .state-word-working {
-  color: #a7efff;
+  color: #c3f6dd;
   animation: neural-working-breathe 1.05s ease-in-out infinite;
 }
 
 .state-word-waiting_permission {
   color: #ffe0a0;
   text-shadow: 0 0 15px rgba(255, 197, 94, .24);
-  font-size: clamp(14px, 1.8vw, 24px);
-  letter-spacing: .12em;
+  font-size: clamp(9px, 1.35vw, 22px);
+  letter-spacing: .10em;
 }
 
 .state-word-warning {
@@ -468,68 +517,70 @@
 }
 
 .state-word-offline {
-  color: #78929a;
+  color: #78928a;
   text-shadow: none;
 }
 
 .audio-word {
   margin-top: -2px;
-  font-size: clamp(11px, 1vw, 15px);
-  letter-spacing: .18em;
-  color: #75bfd0;
+  font-size: clamp(8px, .95vw, 14px);
+  letter-spacing: .16em;
+  color: #83bca1;
   text-shadow: none;
 }
 
 .neural-state-line {
   width: min(90%, 310px);
   display: grid;
-  grid-template-columns: auto minmax(16px, 1fr) auto;
+  grid-template-columns: auto minmax(14px, 1fr) minmax(0, auto);
   align-items: center;
-  gap: 7px;
-  color: #6baab8;
-  font: 700 7.5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .09em;
+  gap: 6px;
+  color: #70ad8e;
+  font: 700 clamp(5.5px, .62vw, 7.5px)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .08em;
   text-transform: uppercase;
 }
 
 .neural-state-line i {
   height: 1px;
-  background: linear-gradient(90deg, rgba(95, 226, 255, .62), rgba(95, 226, 255, .10));
+  background: linear-gradient(90deg, rgba(100, 210, 153, .62), rgba(100, 210, 153, .10));
 }
 
 .neural-state-line small {
   overflow: hidden;
-  color: #4d7781;
-  font-size: 6.8px;
+  color: #537a67;
+  font-size: inherit;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .neural-waveform {
-  height: 43px;
+  max-height: 42%;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  overflow: hidden;
 }
 
 .neural-waveform span {
   width: 2px;
-  min-height: 5px;
+  min-height: 4px;
+  max-height: 42px;
   border-radius: 2px;
-  background: linear-gradient(180deg, #baf8ff, #4bdcff 55%, #398cff);
-  box-shadow: 0 0 7px rgba(91, 224, 255, .30);
+  background: linear-gradient(180deg, #dcfff0, #68efb4 55%, #30a574);
+  box-shadow: 0 0 7px rgba(104, 239, 180, .26);
   transform-origin: center;
   transition: height 45ms linear, opacity 60ms linear;
   animation: neural-wave-idle .72s ease-in-out infinite alternate;
 }
 
 .wave-listening span {
-  background: linear-gradient(180deg, #b9fbff, #5de8ff 55%, #4aa1ff);
+  background: linear-gradient(180deg, #dfffee, #70f5bc 52%, #38a6b8);
 }
 
 .wave-speaking span {
-  background: linear-gradient(180deg, #e1fbff, #5adfff 48%, #8e6cff 100%);
+  background: linear-gradient(180deg, #effff8, #69e8bf 48%, #55aaff 100%);
 }
 
 .neural-scan-line {
@@ -539,17 +590,17 @@
   height: 1px;
   top: -2px;
   opacity: 0;
-  background: linear-gradient(90deg, transparent 5%, rgba(112, 232, 255, .08), rgba(141, 243, 255, .72), rgba(112, 232, 255, .08), transparent 95%);
-  box-shadow: 0 0 14px rgba(95, 225, 255, .20);
+  background: linear-gradient(90deg, transparent 5%, rgba(111, 220, 163, .08), rgba(154, 255, 207, .70), rgba(111, 220, 163, .08), transparent 95%);
+  box-shadow: 0 0 14px rgba(89, 216, 154, .18);
 }
 
 .neural-state-burst {
-  z-index: 5;
+  z-index: 6;
   left: 50%;
   top: 50%;
   width: 90px;
   height: 90px;
-  border: 1px solid rgba(101, 227, 255, .18);
+  border: 1px solid rgba(101, 227, 164, .16);
   border-radius: 50%;
   opacity: 0;
   transform: translate(-50%, -50%);
@@ -561,9 +612,9 @@
   min-height: 25px;
   gap: 10px;
   padding: 0 10px;
-  background: rgba(2, 10, 14, .92);
-  border-top: 1px solid rgba(91, 205, 231, .10);
-  color: #587f89;
+  background: rgba(1, 13, 8, .94);
+  border-top: 1px solid rgba(72, 154, 110, .14);
+  color: #5d8570;
   font-size: 7.5px;
   letter-spacing: .08em;
 }
@@ -578,28 +629,31 @@
 
 /* --------------------------------------------------------------------------
    Runtime state personalities
+
+   Notice that none of these rules change .neural-hub-shell width or height.
+   The processor stays physically fixed while light/glow/activity changes.
    -------------------------------------------------------------------------- */
 
-.state-idle .neural-data-pulse {
-  opacity: .34;
+.state-idle .neural-data-pulse,
+.state-idle .neural-data-tail {
+  opacity: .48;
 }
 
 .state-idle .neural-core-glow {
-  opacity: .46;
-  animation: neural-idle-breathe 4.2s ease-in-out infinite;
+  opacity: .42;
+  animation: neural-idle-breathe 4.4s ease-in-out infinite;
 }
 
 .state-idle .neural-hub-shell {
-  animation: neural-hub-idle 4.4s ease-in-out infinite;
+  animation: neural-hub-idle 4.5s ease-in-out infinite;
 }
 
 .state-listening .neural-core-glow {
-  opacity: calc(.62 + (var(--voice-level, 0) * .34));
-  transform: translate(-50%, -50%) scale(calc(1 + (var(--voice-level, 0) * .10)));
+  opacity: calc(.54 + (var(--voice-level, 0) * .34));
 }
 
 .state-listening .neural-trace-line {
-  opacity: .80;
+  opacity: .88;
 }
 
 .state-listening .neural-data-pulse {
@@ -607,15 +661,15 @@
 }
 
 .state-listening .neural-hub-shell {
-  border-color: rgba(111, 241, 255, calc(.62 + (var(--voice-level, 0) * .28)));
+  border-color: rgba(118, 238, 181, calc(.58 + (var(--voice-level, 0) * .30)));
   box-shadow:
-    0 0 0 1px rgba(3, 8, 12, .82),
-    0 0 calc(26px + (var(--voice-level, 0) * 44px)) rgba(83, 225, 255, calc(.10 + (var(--voice-level, 0) * .18)),
-    inset 0 0 calc(24px + (var(--voice-level, 0) * 20px)) rgba(74, 217, 250, .07);
+    0 0 0 1px rgba(0, 7, 4, .88),
+    0 0 calc(22px + (var(--voice-level, 0) * 38px)) rgba(79, 223, 151, calc(.08 + (var(--voice-level, 0) * .16)),
+    inset 0 0 calc(22px + (var(--voice-level, 0) * 18px)) rgba(83, 218, 153, .065);
 }
 
 .state-listening .neural-state-burst {
-  opacity: calc(.08 + (var(--voice-level, 0) * .28));
+  opacity: calc(.07 + (var(--voice-level, 0) * .24));
   animation: neural-inward-burst .92s ease-out infinite;
 }
 
@@ -636,9 +690,7 @@
 }
 
 .state-thinking .neural-trace-line {
-  opacity: .82;
-  stroke-dasharray: 2 4 10 5;
-  animation: neural-dash-fast .58s linear infinite;
+  opacity: .90;
 }
 
 .state-thinking .neural-data-pulse {
@@ -654,24 +706,20 @@
 }
 
 .state-thinking .neural-core-glow {
-  opacity: .88;
+  opacity: .82;
   animation: neural-thinking-energy .76s ease-in-out infinite;
 }
 
-.state-thinking .halo-one { animation-duration: 6.8s; }
-.state-thinking .halo-two { animation-duration: 4.7s; }
-
 .state-thinking .neural-hub-shell {
   box-shadow:
-    0 0 0 1px rgba(3, 8, 12, .82),
-    0 0 44px rgba(67, 222, 255, .17),
-    0 0 90px rgba(113, 89, 255, .06),
-    inset 0 0 32px rgba(73, 219, 248, .07);
+    0 0 0 1px rgba(0, 7, 4, .88),
+    0 0 38px rgba(74, 216, 146, .16),
+    0 0 82px rgba(83, 186, 255, .035),
+    inset 0 0 30px rgba(73, 194, 136, .065);
 }
 
 .state-speaking .neural-core-glow {
-  opacity: calc(.72 + (var(--voice-level, 0) * .28));
-  transform: translate(-50%, -50%) scale(calc(1 + (var(--voice-level, 0) * .14)));
+  opacity: calc(.62 + (var(--voice-level, 0) * .30));
 }
 
 .state-speaking .neural-data-pulse {
@@ -679,30 +727,25 @@
 }
 
 .state-speaking .neural-trace-line {
-  opacity: .86;
+  opacity: .91;
 }
 
 .state-speaking .neural-state-burst {
-  opacity: calc(.10 + (var(--voice-level, 0) * .30));
+  opacity: calc(.09 + (var(--voice-level, 0) * .28));
   animation: neural-outward-burst .86s ease-out infinite;
 }
 
 .state-speaking .burst-b { animation-delay: .43s; }
 
+/* Pulse with light only — no size/shape animation on the processor itself. */
 .state-speaking .neural-hub-shell {
-  border-color: rgba(111, 233, 255, .72);
-  box-shadow:
-    0 0 0 1px rgba(3, 8, 12, .82),
-    0 0 calc(30px + (var(--voice-level, 0) * 52px)) rgba(72, 212, 255, calc(.12 + (var(--voice-level, 0) * .18)),
-    0 0 70px rgba(137, 95, 255, .08),
-    inset 0 0 28px rgba(62, 202, 246, .08);
+  animation: neural-speaking-light-pulse .62s ease-in-out infinite;
+  border-color: rgba(121, 235, 184, .76);
 }
 
 .state-working .neural-trace-line {
-  opacity: .94;
+  opacity: .95;
   stroke-width: 1.35;
-  stroke-dasharray: 8 4;
-  animation: neural-dash-out .72s linear infinite;
 }
 
 .state-working .neural-data-pulse {
@@ -710,40 +753,37 @@
 }
 
 .state-working .neural-core-glow {
-  opacity: .83;
+  opacity: .78;
   animation: neural-working-energy 1.1s ease-in-out infinite;
 }
 
 .state-working .neural-hub-shell {
-  border-color: rgba(99, 223, 255, .72);
+  border-color: rgba(109, 219, 164, .72);
 }
 
 .state-waiting_permission .neural-core-stage {
   background:
-    radial-gradient(circle at 50% 49%, rgba(255, 184, 78, .12), transparent 22%),
-    linear-gradient(180deg, #100d08, #080b0d 56%, #07090b);
+    radial-gradient(circle at 50% 49%, rgba(194, 145, 57, .07), transparent 27%),
+    radial-gradient(circle at 50% 50%, rgba(31, 93, 61, .13), transparent 58%),
+    linear-gradient(180deg, #041c12, #02150e 56%, #01110b);
 }
 
 .state-waiting_permission .neural-trace-line,
 .state-waiting_permission .neural-end-node {
-  opacity: .20;
-}
-
-.state-waiting_permission .trace-amber .neural-trace-line {
-  opacity: .72;
+  opacity: .34;
 }
 
 .state-waiting_permission .neural-core-glow {
-  background: radial-gradient(ellipse, rgba(255, 194, 84, .23), rgba(207, 131, 31, .06) 38%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(255, 194, 84, .19), rgba(72, 120, 70, .04) 44%, transparent 74%);
   animation: neural-permission-pulse 1.45s ease-in-out infinite;
 }
 
 .state-waiting_permission .neural-hub-shell {
-  border-color: rgba(255, 202, 109, .72);
+  border-color: rgba(255, 202, 109, .70);
   box-shadow:
-    0 0 0 1px rgba(3, 8, 12, .82),
-    0 0 42px rgba(255, 186, 70, .13),
-    inset 0 0 28px rgba(255, 185, 68, .06);
+    0 0 0 1px rgba(0, 7, 4, .88),
+    0 0 38px rgba(255, 186, 70, .11),
+    inset 0 0 26px rgba(255, 185, 68, .05);
 }
 
 .state-waiting_permission .neural-hud > span,
@@ -754,12 +794,13 @@
 
 .state-warning .neural-core-stage {
   background:
-    radial-gradient(circle at 50% 49%, rgba(255, 75, 95, .11), transparent 23%),
-    linear-gradient(180deg, #10080b, #080a0d 56%, #07090b);
+    radial-gradient(circle at 50% 49%, rgba(177, 54, 67, .07), transparent 27%),
+    radial-gradient(circle at 50% 50%, rgba(31, 93, 61, .12), transparent 58%),
+    linear-gradient(180deg, #041c12, #02150e 56%, #01110b);
 }
 
 .state-warning .neural-core-glow {
-  background: radial-gradient(ellipse, rgba(255, 84, 105, .20), rgba(185, 51, 70, .05) 38%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(255, 84, 105, .17), rgba(62, 110, 70, .04) 44%, transparent 74%);
   animation: neural-warning-pulse .7s ease-in-out infinite;
 }
 
@@ -768,51 +809,61 @@
 }
 
 .state-offline .neural-core-stage {
-  filter: saturate(.35) brightness(.72);
+  filter: saturate(.42) brightness(.72);
 }
 
 .state-offline .neural-circuit-svg,
 .state-offline .neural-board-noise {
-  opacity: .42;
+  opacity: .44;
 }
 
 /* --------------------------------------------------------------------------
-   Stronger fullscreen presentation
+   Fullscreen presentation
+
+   The core footprint deliberately remains 38% x 28.846%. Because the SVG and
+   hub share the same percentages, every circuit still lands on the hub edge.
+   Fullscreen becomes stronger by exposing more board detail, not by replacing
+   the geometry with a differently-sized processor.
    -------------------------------------------------------------------------- */
 
 .focus-core .neural-core-panel {
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow:
-    inset 0 0 60px rgba(0,0,0,.22),
-    0 0 0 1px rgba(105, 226, 255, .035),
-    0 0 70px rgba(45, 190, 230, .07);
+    inset 0 0 72px rgba(0,0,0,.22),
+    0 0 0 1px rgba(92, 183, 137, .05),
+    0 0 76px rgba(42, 141, 94, .08);
 }
 
 .focus-core .neural-core-stage {
   min-height: calc(100vh - 148px);
 }
 
-.focus-core .neural-hub-shell {
-  width: clamp(420px, 39vw, 660px);
-  min-height: 190px;
-  grid-template-rows: 34px minmax(118px, 1fr) 32px;
-  border-width: 1.5px;
+.focus-core .neural-static-copper path {
+  opacity: .92;
+}
+
+.focus-core .neural-trace-line {
+  stroke-width: 1.45;
+}
+
+.focus-core .neural-trace-shadow {
+  stroke-width: 6;
 }
 
 .focus-core .neural-main-word {
-  font-size: clamp(32px, 4vw, 58px);
+  font-size: clamp(24px, 3.25vw, 54px);
 }
 
 .focus-core .state-word-thinking {
-  font-size: clamp(24px, 3vw, 42px);
+  font-size: clamp(18px, 2.4vw, 38px);
 }
 
 .focus-core .state-word-waiting_permission {
-  font-size: clamp(24px, 2.7vw, 40px);
+  font-size: clamp(18px, 2.25vw, 36px);
 }
 
 .focus-core .neural-hud {
-  width: 150px;
+  width: 156px;
   padding: 12px 13px;
   font-size: 9px;
 }
@@ -820,35 +871,32 @@
 .focus-core .neural-hud > span { font-size: 10px; }
 .focus-core .neural-hud small { font-size: 8px; }
 .focus-core .neural-node-label { font-size: 10px; }
-.focus-core .neural-core-halo { width: min(54vw, 720px); }
-.focus-core .halo-two { width: min(43vw, 590px); }
-.focus-core .neural-waveform { height: 68px; gap: 3px; }
-.focus-core .neural-waveform span { width: 3px; }
-.focus-core .audio-word { font-size: 17px; }
+.focus-core .neural-waveform { gap: 3px; }
+.focus-core .neural-waveform span { width: 3px; max-height: 58px; }
+.focus-core .audio-word { font-size: 16px; }
 .focus-core .neural-state-line { font-size: 9px; }
-.focus-core .neural-state-line small { font-size: 8px; }
+.focus-core .neural-hub-header,
+.focus-core .neural-hub-footer { font-size: clamp(7px, .7vw, 10px); }
 
 /* --------------------------------------------------------------------------
-   Responsive protection for the normal command-center column
+   Responsive protection
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1280px) {
   .neural-hud { display: none; }
-  .neural-hub-shell { width: clamp(235px, 48%, 360px); }
-  .neural-main-word { font-size: clamp(16px, 2vw, 26px); }
   .neural-node-label { display: none; }
+  .neural-hub-header,
+  .neural-hub-footer { letter-spacing: .09em; padding-inline: 7px; }
+  .neural-state-line small { display: none; }
+  .neural-state-line { grid-template-columns: auto 1fr; }
 }
 
 @media (max-height: 780px) {
   .neural-hud { display: none; }
-  .neural-hub-shell {
-    min-height: 108px;
-    grid-template-rows: 21px minmax(64px, 1fr) 21px;
-  }
-  .neural-hub-header,
-  .neural-hub-footer { min-height: 21px; font-size: 6px; }
-  .neural-hub-content { min-height: 62px; padding: 6px 9px; }
   .neural-core-footer { min-height: 22px; }
+  .neural-hub-header,
+  .neural-hub-footer { font-size: 5.5px; }
+  .neural-hub-content { gap: 4px; padding: 3px 7px; }
 }
 
 /* --------------------------------------------------------------------------
@@ -861,22 +909,29 @@
   100% { transform: translate3d(0, 0, 0); }
 }
 
-@keyframes neural-orbit-spin {
-  to { transform: translate(-50%, -50%) rotate(360deg); }
-}
-
-@keyframes neural-orbit-spin-reverse {
-  to { transform: translate(-50%, -50%) rotate(-360deg); }
-}
-
 @keyframes neural-idle-breathe {
-  0%, 100% { transform: translate(-50%, -50%) scale(.96); opacity: .42; }
-  50% { transform: translate(-50%, -50%) scale(1.04); opacity: .62; }
+  0%, 100% { opacity: .38; filter: blur(24px); }
+  50% { opacity: .56; filter: blur(26px); }
 }
 
 @keyframes neural-hub-idle {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(3,8,12,.82), 0 0 24px rgba(63,215,255,.07), inset 0 0 28px rgba(66,208,239,.04); }
-  50% { box-shadow: 0 0 0 1px rgba(3,8,12,.82), 0 0 38px rgba(63,215,255,.12), inset 0 0 32px rgba(66,208,239,.06); }
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 22px rgba(55,170,112,.07), inset 0 0 28px rgba(72,180,128,.04);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 34px rgba(60,188,124,.12), inset 0 0 31px rgba(76,193,136,.06);
+  }
+}
+
+@keyframes neural-speaking-light-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 24px rgba(69,207,139,.10), inset 0 0 24px rgba(82,211,151,.06);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 calc(34px + (var(--voice-level, 0) * 35px)) rgba(73,224,151,.22), inset 0 0 30px rgba(94,223,163,.10);
+    filter: brightness(calc(1.02 + (var(--voice-level, 0) * .10)));
+  }
 }
 
 @keyframes neural-wave-idle {
@@ -886,12 +941,12 @@
 
 @keyframes neural-inward-burst {
   0% { transform: translate(-50%, -50%) scale(1.65); opacity: 0; }
-  35% { opacity: .28; }
+  35% { opacity: .24; }
   100% { transform: translate(-50%, -50%) scale(.65); opacity: 0; }
 }
 
 @keyframes neural-outward-burst {
-  0% { transform: translate(-50%, -50%) scale(.62); opacity: .32; }
+  0% { transform: translate(-50%, -50%) scale(.62); opacity: .27; }
   100% { transform: translate(-50%, -50%) scale(1.78); opacity: 0; }
 }
 
@@ -906,22 +961,14 @@
   to { stroke-dashoffset: 20; }
 }
 
-@keyframes neural-dash-out {
-  to { stroke-dashoffset: -24; }
-}
-
-@keyframes neural-dash-fast {
-  to { stroke-dashoffset: -28; }
-}
-
 @keyframes neural-transcribe-pulse {
-  0%, 100% { opacity: .54; transform: translate(-50%, -50%) scale(.96); }
-  50% { opacity: .82; transform: translate(-50%, -50%) scale(1.06); }
+  0%, 100% { opacity: .48; filter: blur(24px); }
+  50% { opacity: .76; filter: blur(27px); }
 }
 
 @keyframes neural-thinking-energy {
-  0%, 100% { opacity: .72; transform: translate(-50%, -50%) scale(.96); filter: blur(20px) hue-rotate(0deg); }
-  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); filter: blur(21px) hue-rotate(12deg); }
+  0%, 100% { opacity: .66; filter: blur(23px); }
+  50% { opacity: .92; filter: blur(27px); }
 }
 
 @keyframes neural-data-jitter {
@@ -933,15 +980,15 @@
 }
 
 @keyframes neural-decode-flicker {
-  0%, 100% { opacity: .72; letter-spacing: .19em; }
-  45% { opacity: 1; letter-spacing: .24em; }
+  0%, 100% { opacity: .72; letter-spacing: .17em; }
+  45% { opacity: 1; letter-spacing: .22em; }
   51% { opacity: .62; }
   60% { opacity: 1; }
 }
 
 @keyframes neural-point-flicker {
-  0%, 45% { opacity: .12; }
-  46%, 100% { opacity: .72; }
+  0%, 45% { opacity: .14; }
+  46%, 100% { opacity: .74; }
 }
 
 @keyframes neural-working-breathe {
@@ -950,18 +997,18 @@
 }
 
 @keyframes neural-working-energy {
-  0%, 100% { transform: translate(-50%, -50%) scale(.98); opacity: .65; }
-  50% { transform: translate(-50%, -50%) scale(1.07); opacity: .96; }
+  0%, 100% { opacity: .60; filter: blur(24px); }
+  50% { opacity: .88; filter: blur(27px); }
 }
 
 @keyframes neural-permission-pulse {
-  0%, 100% { opacity: .50; transform: translate(-50%, -50%) scale(.95); }
-  50% { opacity: .90; transform: translate(-50%, -50%) scale(1.06); }
+  0%, 100% { opacity: .46; filter: blur(24px); }
+  50% { opacity: .84; filter: blur(27px); }
 }
 
 @keyframes neural-warning-pulse {
-  0%, 100% { opacity: .44; transform: translate(-50%, -50%) scale(.96); }
-  50% { opacity: .95; transform: translate(-50%, -50%) scale(1.10); }
+  0%, 100% { opacity: .42; filter: blur(24px); }
+  50% { opacity: .88; filter: blur(27px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
