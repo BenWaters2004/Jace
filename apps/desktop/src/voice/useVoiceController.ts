@@ -12,17 +12,19 @@ export type VoicePhase =
   | "speaking"
   | "error";
 
-// Backwards-friendly aliases for Phase 10B callers.
 export type VoiceControllerState = VoicePhase;
 export type VoiceState = VoicePhase;
 
 export interface VoiceStatusResponse {
   enabled: boolean;
   platform_supported?: boolean;
-  transcription_available: boolean;
-  synthesis_available: boolean;
+  transcription_available?: boolean;
+  synthesis_available?: boolean;
   stt_available?: boolean;
   tts_available?: boolean;
+  stt_dependency_available?: boolean;
+  tts_dependency_available?: boolean;
+  tts_model_files_available?: boolean;
   whisper_model?: string | null;
   piper_model?: string | null;
   push_to_talk_key?: string;
@@ -39,6 +41,27 @@ export interface VoiceTranscriptionResponse {
   filename?: string | null;
 }
 
+interface VoiceSettingsLike {
+  enabled?: boolean;
+  auto_speak?: boolean;
+  verbal_approvals?: boolean;
+  microphone_mode?: string;
+  tts_voice?: string;
+  tts_speed?: number;
+  tts_language?: string;
+}
+
+interface VoiceStatusLike {
+  enabled?: boolean;
+  stt_dependency_available?: boolean;
+  tts_dependency_available?: boolean;
+  tts_model_files_available?: boolean;
+  transcription_available?: boolean;
+  synthesis_available?: boolean;
+  stt_available?: boolean;
+  tts_available?: boolean;
+}
+
 export interface UseVoiceControllerOptions {
   enabled?: boolean;
   online?: boolean;
@@ -48,6 +71,10 @@ export interface UseVoiceControllerOptions {
   enableHomePushToTalk?: boolean;
   speakWelcome?: boolean;
   welcomeLine?: string;
+
+  // Current Phase 10B App.tsx passes these objects directly.
+  settings?: VoiceSettingsLike | null;
+  status?: VoiceStatusLike | null;
 
   onTranscript?: (text: string) => void | Promise<void>;
   onFinalTranscript?: (text: string) => void | Promise<void>;
@@ -59,26 +86,30 @@ export interface UseVoiceControllerOptions {
   onStateChange?: (state: VoicePhase) => void;
   onListeningChange?: (listening: boolean) => void;
   onSpeakingChange?: (speaking: boolean) => void;
-
-  // Phase 10B evolved quickly. Keep unknown options accepted so this hook can
-  // replace earlier variants without forcing unrelated App.tsx edits.
-  [key: string]: any;
 }
 
 export interface VoiceController {
   phase: VoicePhase;
   state: VoicePhase;
   voiceState: VoicePhase;
+
   status: VoiceStatusResponse | null;
   error: string | null;
   lastTranscript: string;
+
   isRecording: boolean;
   isListening: boolean;
   isTranscribing: boolean;
   isSpeaking: boolean;
+
   supported: boolean;
   available: boolean;
+  canRecord: boolean;
+  canSpeak: boolean;
+  amplitude: number;
+
   pushToTalkKey: string;
+
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<string | null>;
   startListening: () => Promise<void>;
@@ -89,13 +120,19 @@ export interface VoiceController {
   endPushToTalk: () => Promise<string | null>;
   toggleRecording: () => Promise<void>;
   toggleListening: () => Promise<void>;
+
   speak: (text: string) => Promise<void>;
   speakText: (text: string) => Promise<void>;
+  speakSystem: (text: string) => void;
+
+  beginResponse: (shouldSpeak: boolean) => void;
+  ingestResponseToken: (token: string) => void;
+  finishResponse: () => void;
+
   stopSpeaking: () => void;
   cancel: () => void;
   clearError: () => void;
   refreshStatus: () => Promise<VoiceStatusResponse | null>;
-  [key: string]: any;
 }
 
 const MIN_RECORDING_MS = 350;
@@ -162,32 +199,78 @@ function looksLikeExpectedContainer(blob: Blob): Promise<boolean> {
       );
     }
 
-    // Unknown/other audio containers are validated again by the backend.
     return true;
   });
 }
 
 async function responseError(response: Response, fallback: string): Promise<string> {
   try {
-    const body = await response.json();
-    if (typeof body?.detail === "string" && body.detail.trim()) return body.detail;
-    if (typeof body?.message === "string" && body.message.trim()) return body.message;
+    const body = (await response.json()) as {
+      detail?: unknown;
+      message?: unknown;
+    };
+
+    if (typeof body.detail === "string" && body.detail.trim()) return body.detail;
+    if (typeof body.message === "string" && body.message.trim()) return body.message;
   } catch {
-    // Fall through to a useful local message.
+    // Fall through to the status-based fallback below.
   }
 
   return `${fallback} (${response.status} ${response.statusText})`;
 }
 
-function releaseStream(stream: MediaStream | null) {
+function releaseStream(stream: MediaStream | null): void {
   if (!stream) return;
+
   for (const track of stream.getTracks()) {
     try {
       track.stop();
     } catch {
-      // Best effort cleanup.
+      // Best-effort cleanup.
     }
   }
+}
+
+function optionVoiceEnabled(options: UseVoiceControllerOptions): boolean {
+  if (options.settings?.enabled !== undefined) return options.settings.enabled;
+  if (options.enabled !== undefined) return options.enabled;
+  return true;
+}
+
+function statusSttAvailable(status: VoiceStatusLike | VoiceStatusResponse | null | undefined): boolean | undefined {
+  if (!status) return undefined;
+
+  if (status.stt_dependency_available !== undefined) {
+    return status.stt_dependency_available;
+  }
+  if (status.transcription_available !== undefined) {
+    return status.transcription_available;
+  }
+  if (status.stt_available !== undefined) {
+    return status.stt_available;
+  }
+
+  return undefined;
+}
+
+function statusTtsAvailable(status: VoiceStatusLike | VoiceStatusResponse | null | undefined): boolean | undefined {
+  if (!status) return undefined;
+
+  if (status.synthesis_available !== undefined) {
+    return status.synthesis_available;
+  }
+  if (status.tts_available !== undefined) {
+    return status.tts_available;
+  }
+
+  if (status.tts_dependency_available !== undefined) {
+    if (status.tts_model_files_available !== undefined) {
+      return status.tts_dependency_available && status.tts_model_files_available;
+    }
+    return status.tts_dependency_available;
+  }
+
+  return undefined;
 }
 
 export function useVoiceController(
@@ -201,39 +284,57 @@ export function useVoiceController(
   const [error, setError] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState("");
 
+  const phaseRef = useRef<VoicePhase>("idle");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordingStartedAtRef = useRef<number | null>(null);
   const stoppingRef = useRef<Promise<string | null> | null>(null);
   const homeHeldRef = useRef(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const audioCompletionRef = useRef<(() => void) | null>(null);
+
+  const responseBufferRef = useRef("");
+  const responseShouldSpeakRef = useRef(false);
+
   const mountedRef = useRef(true);
 
   const setPhase = useCallback((next: VoicePhase) => {
+    phaseRef.current = next;
+
     if (!mountedRef.current) return;
+
     setPhaseState(next);
     optionsRef.current.onStateChange?.(next);
     optionsRef.current.onListeningChange?.(next === "listening");
     optionsRef.current.onSpeakingChange?.(next === "speaking");
   }, []);
 
-  const reportError = useCallback((message: string) => {
-    if (!mountedRef.current) return;
-    setError(message);
-    setPhase("error");
-    optionsRef.current.onError?.(message);
-  }, [setPhase]);
+  const reportError = useCallback(
+    (message: string) => {
+      if (!mountedRef.current) return;
+
+      setError(message);
+      setPhase("error");
+      optionsRef.current.onError?.(message);
+    },
+    [setPhase],
+  );
 
   const clearError = useCallback(() => {
     if (!mountedRef.current) return;
+
     setError(null);
-    if (phase === "error") setPhase("idle");
-  }, [phase, setPhase]);
+    if (phaseRef.current === "error") {
+      setPhase("idle");
+    }
+  }, [setPhase]);
 
   const stopSpeaking = useCallback(() => {
     const audio = audioRef.current;
+
     if (audio) {
       try {
         audio.pause();
@@ -242,94 +343,213 @@ export function useVoiceController(
         // Best effort.
       }
     }
+
     audioRef.current = null;
+
+    const complete = audioCompletionRef.current;
+    audioCompletionRef.current = null;
+    complete?.();
 
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
     }
 
-    if (mountedRef.current && phase === "speaking") {
+    if (mountedRef.current && phaseRef.current === "speaking") {
       setPhase("idle");
     }
-  }, [phase, setPhase]);
+  }, [setPhase]);
 
   const refreshStatus = useCallback(async (): Promise<VoiceStatusResponse | null> => {
     try {
       const response = await fetch(`${API_BASE_URL}/voice/status`);
+
       if (!response.ok) {
-        throw new Error(await responseError(response, "Could not read Jace voice status"));
+        throw new Error(
+          await responseError(response, "Could not read Jace voice status"),
+        );
       }
 
       const next = (await response.json()) as VoiceStatusResponse;
-      if (mountedRef.current) setStatus(next);
+
+      if (mountedRef.current) {
+        setStatus(next);
+      }
+
       return next;
     } catch (statusError) {
-      const message = statusError instanceof Error
-        ? statusError.message
-        : "Could not read Jace voice status.";
-      // Status failure is non-fatal to the rest of Jace. Do not force the
-      // whole UI into an error state here.
-      if (mountedRef.current) setError(message);
+      const message =
+        statusError instanceof Error
+          ? statusError.message
+          : "Could not read Jace voice status.";
+
+      // A status read failure must not take the whole app offline.
+      if (mountedRef.current) {
+        setError(message);
+      }
+
       return null;
     }
   }, []);
 
-  const speak = useCallback(async (text: string): Promise<void> => {
-    const value = text.trim();
-    if (!value) return;
+  const speak = useCallback(
+    async (text: string): Promise<void> => {
+      const value = text.trim();
+      if (!value) return;
 
-    stopSpeaking();
+      stopSpeaking();
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: value }),
-      });
+      try {
+        const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: value }),
+        });
 
-      if (!response.ok) {
-        throw new Error(await responseError(response, "Speech synthesis failed"));
-      }
+        if (!response.ok) {
+          throw new Error(
+            await responseError(response, "Speech synthesis failed"),
+          );
+        }
 
-      const blob = await response.blob();
-      if (!blob.size) throw new Error("Speech synthesis returned an empty audio file.");
+        const blob = await response.blob();
+        if (!blob.size) {
+          throw new Error("Speech synthesis returned an empty audio file.");
+        }
 
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audioUrlRef.current = url;
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
 
-      setError(null);
-      setPhase("speaking");
+        audioRef.current = audio;
+        audioUrlRef.current = url;
 
-      await new Promise<void>((resolve, reject) => {
-        audio.addEventListener("ended", () => resolve(), { once: true });
-        audio.addEventListener(
-          "error",
-          () => reject(new Error("Jace could not play the generated speech audio.")),
-          { once: true },
-        );
-        void audio.play().catch(reject);
-      });
+        if (mountedRef.current) {
+          setError(null);
+        }
+        setPhase("speaking");
 
-      if (audioRef.current === audio) {
-        audioRef.current = null;
+        await new Promise<void>((resolve, reject) => {
+          let settled = false;
+
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+
+            if (audioCompletionRef.current === finish) {
+              audioCompletionRef.current = null;
+            }
+
+            resolve();
+          };
+
+          const fail = () => {
+            if (settled) return;
+            settled = true;
+
+            if (audioCompletionRef.current === finish) {
+              audioCompletionRef.current = null;
+            }
+
+            reject(new Error("Jace could not play the generated speech audio."));
+          };
+
+          audioCompletionRef.current = finish;
+          audio.addEventListener("ended", finish, { once: true });
+          audio.addEventListener("error", fail, { once: true });
+
+          void audio.play().catch((playError: unknown) => {
+            if (settled) return;
+            settled = true;
+
+            if (audioCompletionRef.current === finish) {
+              audioCompletionRef.current = null;
+            }
+
+            reject(
+              playError instanceof Error
+                ? playError
+                : new Error("Jace could not start speech playback."),
+            );
+          });
+        });
+
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
+
         if (audioUrlRef.current === url) {
           URL.revokeObjectURL(url);
           audioUrlRef.current = null;
         }
-        setPhase("idle");
+
+        if (phaseRef.current === "speaking") {
+          setPhase("idle");
+        }
+      } catch (speakError) {
+        stopSpeaking();
+
+        const message =
+          speakError instanceof Error
+            ? speakError.message
+            : "Jace could not speak the response.";
+
+        reportError(message);
+        throw speakError;
       }
-    } catch (speakError) {
+    },
+    [reportError, setPhase, stopSpeaking],
+  );
+
+  // App.tsx starts one of these for every streamed assistant response.
+  // For the reliability-first version we buffer the response and synthesize it
+  // once the stream is complete. Sentence-level streaming can be added next.
+  const beginResponse = useCallback(
+    (shouldSpeak: boolean) => {
+      responseBufferRef.current = "";
+      responseShouldSpeakRef.current = shouldSpeak;
+
+      // Never allow a previous answer to speak over a newly-started response.
       stopSpeaking();
-      const message = speakError instanceof Error
-        ? speakError.message
-        : "Jace could not speak the response.";
-      reportError(message);
-      throw speakError;
-    }
-  }, [reportError, setPhase, stopSpeaking]);
+    },
+    [stopSpeaking],
+  );
+
+  const ingestResponseToken = useCallback((token: string) => {
+    if (!responseShouldSpeakRef.current) return;
+    responseBufferRef.current += token;
+  }, []);
+
+  const finishResponse = useCallback(() => {
+    const shouldSpeak = responseShouldSpeakRef.current;
+    const text = responseBufferRef.current.trim();
+
+    responseShouldSpeakRef.current = false;
+    responseBufferRef.current = "";
+
+    if (!shouldSpeak || !text) return;
+
+    void speak(text).catch(() => {
+      // speak() already routes the useful error into Jace's UI.
+    });
+  }, [speak]);
+
+  const speakSystem = useCallback(
+    (text: string) => {
+      const value = text.trim();
+      if (!value) return;
+
+      // A permission prompt/system line has priority over an unfinished normal
+      // response. The model stream may continue, but that response will no
+      // longer auto-speak until the next beginResponse().
+      responseShouldSpeakRef.current = false;
+      responseBufferRef.current = "";
+
+      void speak(value).catch(() => {
+        // speak() already reports the error.
+      });
+    },
+    [speak],
+  );
 
   const deliverTranscript = useCallback(async (text: string) => {
     const current = optionsRef.current;
@@ -341,7 +561,7 @@ export function useVoiceController(
       current.onVoiceInput ??
       current.onText;
 
-    if (typeof handler === "function") {
+    if (handler) {
       await handler(text);
     }
   }, []);
@@ -382,7 +602,9 @@ export function useVoiceController(
     });
 
     if (!response.ok) {
-      throw new Error(await responseError(response, "Audio transcription failed"));
+      throw new Error(
+        await responseError(response, "Audio transcription failed"),
+      );
     }
 
     const result = (await response.json()) as VoiceTranscriptionResponse;
@@ -398,7 +620,7 @@ export function useVoiceController(
   const startRecording = useCallback(async (): Promise<void> => {
     const currentOptions = optionsRef.current;
 
-    if (currentOptions.enabled === false) return;
+    if (!optionVoiceEnabled(currentOptions)) return;
     if (currentOptions.disabled) return;
     if (currentOptions.online === false) return;
     if (currentOptions.isGenerating) return;
@@ -409,14 +631,19 @@ export function useVoiceController(
       !navigator.mediaDevices?.getUserMedia ||
       typeof MediaRecorder === "undefined"
     ) {
-      reportError("Microphone recording is not supported by this Jace desktop runtime.");
+      reportError(
+        "Microphone recording is not supported by this Jace desktop runtime.",
+      );
       return;
     }
 
-    // Holding Home while Jace is speaking should immediately hand control back
-    // to the user instead of recording Jace's own voice output.
+    // Push-to-talk always interrupts current speech so Jace cannot transcribe
+    // its own speaker output.
     stopSpeaking();
-    setError(null);
+
+    if (mountedRef.current) {
+      setError(null);
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -441,6 +668,7 @@ export function useVoiceController(
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data && event.data.size > 0) {
           chunksRef.current.push(event.data);
+
           console.debug("[Jace Voice] audio chunk", {
             bytes: event.data.size,
             type: event.data.type,
@@ -449,26 +677,35 @@ export function useVoiceController(
       });
 
       recorder.addEventListener("error", (event) => {
-        const recorderError = (event as Event & { error?: DOMException }).error;
-        reportError(recorderError?.message || "The microphone recorder reported an error.");
+        const recorderError = (
+          event as Event & { error?: DOMException }
+        ).error;
+
+        reportError(
+          recorderError?.message || "The microphone recorder reported an error.",
+        );
       });
 
       recorder.start(RECORDER_TIMESLICE_MS);
+
       console.debug("[Jace Voice] recorder started", {
         requestedMimeType: mimeType,
         recorderMimeType: recorder.mimeType,
       });
+
       setPhase("listening");
     } catch (recordError) {
       releaseStream(streamRef.current);
       streamRef.current = null;
       recorderRef.current = null;
 
-      const message = recordError instanceof DOMException && recordError.name === "NotAllowedError"
-        ? "Microphone access was denied. Allow microphone access for Jace, then try again."
-        : recordError instanceof Error
-          ? recordError.message
-          : "Jace could not start the microphone.";
+      const message =
+        recordError instanceof DOMException && recordError.name === "NotAllowedError"
+          ? "Microphone access was denied. Allow microphone access for Jace, then try again."
+          : recordError instanceof Error
+            ? recordError.message
+            : "Jace could not start the microphone.";
+
       reportError(message);
     }
   }, [reportError, setPhase, stopSpeaking]);
@@ -484,31 +721,43 @@ export function useVoiceController(
       streamRef.current = null;
       recorderRef.current = null;
       recordingStartedAtRef.current = null;
-      if (phase === "listening") setPhase("idle");
+
+      if (phaseRef.current === "listening") {
+        setPhase("idle");
+      }
+
       return null;
     }
 
-    const task = (async () => {
+    const task = (async (): Promise<string | null> => {
       try {
-        const elapsedMs = startedAt == null ? 0 : performance.now() - startedAt;
+        const elapsedMs =
+          startedAt == null ? 0 : performance.now() - startedAt;
 
         const blob = await new Promise<Blob>((resolve, reject) => {
           const handleStop = () => {
             try {
-              const chunks = chunksRef.current.filter((chunk) => chunk.size > 0);
+              const chunks = chunksRef.current.filter(
+                (chunk) => chunk.size > 0,
+              );
+
               const actualMimeType =
                 chunks[0]?.type ||
                 recorder.mimeType ||
                 preferredAudioMimeType() ||
                 "audio/webm";
 
-              const finalBlob = new Blob(chunks, { type: actualMimeType });
+              const finalBlob = new Blob(chunks, {
+                type: actualMimeType,
+              });
+
               console.debug("[Jace Voice] final recording", {
                 chunks: chunks.length,
                 bytes: finalBlob.size,
                 mimeType: finalBlob.type,
                 elapsedMs: Math.round(elapsedMs),
               });
+
               resolve(finalBlob);
             } catch (blobError) {
               reject(blobError);
@@ -518,19 +767,17 @@ export function useVoiceController(
           recorder.addEventListener("stop", handleStop, { once: true });
 
           try {
-            // Explicitly flush the encoder's current packet before stop. This is
-            // important on Windows/WebView2 where a rapid stop can otherwise
-            // produce a header-only WebM file.
+            // WebView2 can otherwise return only the WebM header on rapid stop.
             recorder.requestData();
           } catch {
-            // Some MediaRecorder implementations reject requestData while they
-            // are already transitioning to inactive. The stop event is still
-            // authoritative.
+            // The stop event remains authoritative.
           }
 
           window.setTimeout(() => {
             try {
-              if (recorder.state !== "inactive") recorder.stop();
+              if (recorder.state !== "inactive") {
+                recorder.stop();
+              }
             } catch (stopError) {
               reject(stopError);
             }
@@ -542,8 +789,6 @@ export function useVoiceController(
         releaseStream(streamRef.current);
         streamRef.current = null;
 
-        // A very brief tap is treated as a cancelled push-to-talk gesture rather
-        // than an audio error.
         if (elapsedMs < MIN_RECORDING_MS) {
           chunksRef.current = [];
           setPhase("idle");
@@ -551,6 +796,7 @@ export function useVoiceController(
         }
 
         setPhase("transcribing");
+
         const transcript = await transcribeBlob(blob);
         chunksRef.current = [];
 
@@ -560,6 +806,9 @@ export function useVoiceController(
         }
 
         await deliverTranscript(transcript);
+
+        // handleVoiceTranscript() may already have started generation by the
+        // time it resolves. The runtime state in App.tsx will take over.
         setPhase("idle");
         return transcript;
       } catch (stopError) {
@@ -569,9 +818,11 @@ export function useVoiceController(
         streamRef.current = null;
         chunksRef.current = [];
 
-        const message = stopError instanceof Error
-          ? stopError.message
-          : "Jace could not process the microphone recording.";
+        const message =
+          stopError instanceof Error
+            ? stopError.message
+            : "Jace could not process the microphone recording.";
+
         reportError(message);
         return null;
       } finally {
@@ -581,7 +832,7 @@ export function useVoiceController(
 
     stoppingRef.current = task;
     return task;
-  }, [deliverTranscript, phase, reportError, setPhase, transcribeBlob]);
+  }, [deliverTranscript, reportError, setPhase, transcribeBlob]);
 
   const toggleRecording = useCallback(async () => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -593,6 +844,8 @@ export function useVoiceController(
 
   const cancel = useCallback(() => {
     homeHeldRef.current = false;
+    responseShouldSpeakRef.current = false;
+    responseBufferRef.current = "";
 
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
@@ -606,14 +859,15 @@ export function useVoiceController(
     recorderRef.current = null;
     recordingStartedAtRef.current = null;
     chunksRef.current = [];
+
     releaseStream(streamRef.current);
     streamRef.current = null;
+
     stopSpeaking();
     setPhase("idle");
   }, [setPhase, stopSpeaking]);
 
-  // Physical Home key = push-to-talk. Keydown starts recording; keyup flushes,
-  // finalises and submits the transcription through the hook's existing callback.
+  // Physical Home key = push-to-talk.
   useEffect(() => {
     if (options.enableHomePushToTalk === false) return;
 
@@ -624,7 +878,7 @@ export function useVoiceController(
 
       const current = optionsRef.current;
       if (
-        current.enabled === false ||
+        !optionVoiceEnabled(current) ||
         current.disabled ||
         current.online === false ||
         current.isGenerating
@@ -648,6 +902,7 @@ export function useVoiceController(
 
     function windowBlur() {
       if (!homeHeldRef.current) return;
+
       homeHeldRef.current = false;
       void stopRecording();
     }
@@ -663,28 +918,27 @@ export function useVoiceController(
     };
   }, [options.enableHomePushToTalk, startRecording, stopRecording]);
 
-  // Startup greeting. It is local TTS only: it is not sent to the model and it
-  // does not create a conversation message. It runs once per desktop launch.
+  // Local startup greeting. It is never sent to the LLM and runs only once
+  // per desktop launch.
   useEffect(() => {
     if (welcomeSpokenThisLaunch) return;
     if (options.speakWelcome === false) return;
-    if (options.enabled === false || options.disabled) return;
+    if (!optionVoiceEnabled(options)) return;
+    if (options.disabled) return;
     if (options.online === false) return;
 
     let cancelled = false;
+
     const timer = window.setTimeout(() => {
       void (async () => {
         const currentStatus = await refreshStatus();
         if (cancelled || welcomeSpokenThisLaunch) return;
 
-        const synthesisAvailable =
-          currentStatus?.synthesis_available ??
-          currentStatus?.tts_available ??
-          false;
-
+        const synthesisAvailable = statusTtsAvailable(currentStatus) ?? false;
         if (!synthesisAvailable) return;
 
         welcomeSpokenThisLaunch = true;
+
         const line =
           String(optionsRef.current.welcomeLine || "").trim() ||
           currentStatus?.welcome_line ||
@@ -693,8 +947,7 @@ export function useVoiceController(
         try {
           await speak(line);
         } catch {
-          // speak() already reports a useful error. The startup greeting must
-          // never prevent the rest of Jace from loading.
+          // speak() already reports a useful error.
         }
       })();
     }, 650);
@@ -707,6 +960,7 @@ export function useVoiceController(
     options.disabled,
     options.enabled,
     options.online,
+    options.settings?.enabled,
     options.speakWelcome,
     refreshStatus,
     speak,
@@ -719,6 +973,8 @@ export function useVoiceController(
     return () => {
       mountedRef.current = false;
       homeHeldRef.current = false;
+      responseShouldSpeakRef.current = false;
+      responseBufferRef.current = "";
 
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== "inactive") {
@@ -741,7 +997,10 @@ export function useVoiceController(
           // Best effort.
         }
       }
+
       audioRef.current = null;
+      audioCompletionRef.current?.();
+      audioCompletionRef.current = null;
 
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
@@ -755,25 +1014,59 @@ export function useVoiceController(
     Boolean(navigator.mediaDevices?.getUserMedia) &&
     typeof MediaRecorder !== "undefined";
 
-  const available = Boolean(
-    supported &&
-    (status?.transcription_available ?? status?.stt_available ?? true),
+  const voiceEnabled = optionVoiceEnabled(options);
+
+  const sttAvailable =
+    statusSttAvailable(options.status) ??
+    statusSttAvailable(status) ??
+    true;
+
+  const ttsAvailable =
+    statusTtsAvailable(options.status) ??
+    statusTtsAvailable(status) ??
+    false;
+
+  const canRecord = Boolean(
+    voiceEnabled &&
+      !options.disabled &&
+      options.online !== false &&
+      supported &&
+      sttAvailable,
   );
+
+  const canSpeak = Boolean(
+    voiceEnabled &&
+      !options.disabled &&
+      options.online !== false &&
+      ttsAvailable,
+  );
+
+  const available = canRecord;
 
   return {
     phase,
     state: phase,
     voiceState: phase,
+
     status,
     error,
     lastTranscript,
+
     isRecording: phase === "listening",
     isListening: phase === "listening",
     isTranscribing: phase === "transcribing",
     isSpeaking: phase === "speaking",
+
     supported,
     available,
+    canRecord,
+    canSpeak,
+
+    // Phase 10B visual telemetry hook. Real Web Audio amplitude comes next.
+    amplitude: 0,
+
     pushToTalkKey: PUSH_TO_TALK_KEY,
+
     startRecording,
     stopRecording,
     startListening: startRecording,
@@ -784,8 +1077,15 @@ export function useVoiceController(
     endPushToTalk: stopRecording,
     toggleRecording,
     toggleListening: toggleRecording,
+
     speak,
     speakText: speak,
+    speakSystem,
+
+    beginResponse,
+    ingestResponseToken,
+    finishResponse,
+
     stopSpeaking,
     cancel,
     clearError,
