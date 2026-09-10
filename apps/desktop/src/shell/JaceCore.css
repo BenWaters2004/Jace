@@ -1,150 +1,145 @@
 /* --------------------------------------------------------------------------
-   Phase 10B.3.1 — PCB Neural Core
+   Phase 10B.3.2 — JACE PCB Core
 
-   Design goals:
-   - dark green PCB/solder-mask background
-   - circuit traces stay green instead of becoming rainbow lines
-   - only the travelling data packets are multicoloured
-   - packets have visible comet-like tails
-   - central processor has one fixed footprint in every runtime state
-   - circuit routes physically meet that processor in normal + fullscreen mode
+   Direction based on the supplied reference:
+   - dense dark-green PCB background
+   - mostly green, low-contrast copper traces
+   - not every trace radiates from or touches the central processor
+   - only moving data packets are multi-coloured
+   - packets carry a short glowing tail
+   - central processor keeps one footprint in every state
+   - central text scales from the processor itself, not from viewport width
+   - activity is communicated by packet direction, lit vias/components/pins,
+     scanning and light intensity rather than changing processor geometry
    -------------------------------------------------------------------------- */
 
-.neural-core-panel {
-  --pcb-black: #010906;
-  --pcb-deep: #02120c;
-  --pcb-dark: #031a11;
-  --pcb-mid: #06251a;
-  --pcb-green: #0b3a29;
-  --pcb-trace: #237655;
-  --pcb-trace-hot: #3ea77a;
-  --pcb-via: #5bb88d;
-  --pcb-text: #92cdb4;
+.pcb-core-panel {
+  --pcb-black: #010704;
+  --pcb-deep: #03110b;
+  --pcb-base: #061b12;
+  --pcb-mid: #0a2a1c;
+  --pcb-mask: #0d3524;
+  --pcb-copper: #356f55;
+  --pcb-copper-soft: #2d5d48;
+  --pcb-copper-bright: #559878;
+  --pcb-text: #91d5b4;
+  --pcb-text-bright: #bdffdc;
 
-  --packet-cyan: #68efff;
-  --packet-blue: #4aa7ff;
-  --packet-violet: #bd73ff;
-  --packet-amber: #ffd06a;
-  --packet-mint: #78ffd2;
-  --packet-danger: #ff7182;
+  --packet-cyan: #72f2ff;
+  --packet-blue: #65adff;
+  --packet-violet: #cf7cff;
+  --packet-amber: #ffd36b;
+  --packet-mint: #71ffc5;
+  --packet-danger: #ff6f82;
 
   isolation: isolate;
-  background:
-    radial-gradient(circle at 50% 48%, rgba(46, 116, 77, .18), transparent 40%),
-    linear-gradient(145deg, rgba(2, 20, 13, .99), rgba(1, 12, 8, .99));
-  border-color: rgba(72, 154, 111, .28);
+  overflow: hidden;
+  background: #020c08;
+  border-color: rgba(84, 151, 113, 0.25);
 }
 
-.neural-core-topline {
+.pcb-core-topline {
   position: relative;
-  z-index: 20;
+  z-index: 30;
   flex: 0 0 auto;
-  background: linear-gradient(90deg, rgba(2, 18, 12, .99), rgba(3, 25, 17, .96));
-  border-bottom-color: rgba(69, 159, 113, .18);
+  background:
+    linear-gradient(90deg, rgba(2, 14, 9, 0.99), rgba(5, 27, 18, 0.97), rgba(2, 14, 9, 0.99));
+  border-bottom-color: rgba(83, 153, 114, 0.19);
 }
 
-.neural-core-top-actions {
+.pcb-core-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.neural-link-badge {
+.pcb-link-light {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
-  border: 1px solid rgba(70, 150, 109, .22);
-  border-radius: 3px;
-  background: rgba(2, 24, 16, .74);
-  color: #79ae96;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid rgba(89, 156, 119, 0.22);
+  border-radius: 2px;
+  background: rgba(1, 13, 8, 0.62);
+  color: #638a75;
   font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .12em;
+  letter-spacing: 0.1em;
 }
 
-.neural-link-badge.online {
-  color: #8cf0bc;
-  border-color: rgba(94, 217, 153, .34);
-  box-shadow: inset 0 0 12px rgba(77, 210, 145, .05);
+.pcb-link-light.online {
+  color: #8ce1b7;
+  border-color: rgba(105, 202, 151, 0.27);
+  text-shadow: 0 0 7px rgba(105, 230, 165, 0.18);
 }
 
-.neural-link-badge.fallback {
-  color: #e3be70;
-  border-color: rgba(230, 184, 91, .28);
+.pcb-link-light.fallback {
+  color: #d2af69;
+  border-color: rgba(216, 171, 83, 0.25);
 }
 
-.neural-core-stage {
+.pcb-core-stage {
   --voice-level: 0;
   position: relative;
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 49%, rgba(58, 150, 101, .13), transparent 27%),
-    radial-gradient(circle at 50% 50%, rgba(26, 91, 59, .14), transparent 56%),
-    linear-gradient(180deg, #041c12, #02150e 56%, #01110b);
   contain: paint;
+  background:
+    radial-gradient(ellipse at 50% 49%, rgba(86, 133, 73, 0.17), transparent 31%),
+    radial-gradient(circle at 25% 31%, rgba(19, 70, 47, 0.18), transparent 24%),
+    radial-gradient(circle at 78% 74%, rgba(18, 62, 43, 0.14), transparent 27%),
+    linear-gradient(180deg, #071f15 0%, #061a12 40%, #05170f 100%);
 }
 
-.neural-board-substrate,
-.neural-board-weave,
-.neural-board-noise,
-.neural-board-vignette,
-.neural-core-glow,
-.neural-scan-line,
-.neural-state-burst {
+.pcb-substrate,
+.pcb-fibreglass,
+.pcb-grain,
+.pcb-hub-aura,
+.pcb-state-scan,
+.pcb-board-vignette {
   position: absolute;
   pointer-events: none;
 }
 
-/* PCB solder-mask texture. */
-.neural-board-substrate {
+/* Uneven solder-mask tone like the reference image. */
+.pcb-substrate {
   inset: 0;
   z-index: 0;
-  opacity: .78;
   background:
-    radial-gradient(circle at 19% 21%, rgba(38, 103, 69, .13), transparent 20%),
-    radial-gradient(circle at 76% 70%, rgba(29, 89, 59, .14), transparent 25%),
-    linear-gradient(118deg, transparent 0 46%, rgba(255,255,255,.012) 46.2% 46.6%, transparent 46.8%),
-    linear-gradient(20deg, rgba(0,0,0,.13), transparent 30% 70%, rgba(0,0,0,.12));
+    linear-gradient(104deg, transparent 0 20%, rgba(106, 158, 119, 0.015) 20.3% 20.7%, transparent 21% 66%, rgba(255, 255, 255, 0.012) 66.2% 66.5%, transparent 66.8%),
+    radial-gradient(ellipse at 46% 54%, rgba(94, 123, 61, 0.1), transparent 29%),
+    radial-gradient(ellipse at 80% 15%, rgba(8, 49, 33, 0.22), transparent 28%),
+    linear-gradient(24deg, rgba(0, 0, 0, 0.1), transparent 35% 65%, rgba(0, 0, 0, 0.12));
+  opacity: 0.95;
 }
 
-.neural-board-weave {
+/* Fine woven PCB/fibreglass texture. */
+.pcb-fibreglass {
   inset: 0;
   z-index: 1;
-  opacity: .22;
+  opacity: 0.19;
   background-image:
-    linear-gradient(rgba(117, 195, 154, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(117, 195, 154, .035) 1px, transparent 1px),
-    linear-gradient(rgba(0, 0, 0, .075) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 0, 0, .075) 1px, transparent 1px);
-  background-size: 24px 24px, 24px 24px, 6px 6px, 6px 6px;
-  mask-image: radial-gradient(ellipse at center, black 20%, rgba(0,0,0,.96) 72%, transparent 100%);
+    linear-gradient(rgba(129, 197, 154, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(129, 197, 154, 0.035) 1px, transparent 1px),
+    linear-gradient(45deg, rgba(0, 0, 0, 0.08) 25%, transparent 25% 75%, rgba(0, 0, 0, 0.08) 75%),
+    linear-gradient(-45deg, rgba(112, 177, 136, 0.018) 25%, transparent 25% 75%, rgba(112, 177, 136, 0.018) 75%);
+  background-size: 31px 31px, 31px 31px, 7px 7px, 7px 7px;
 }
 
-.neural-board-noise {
-  inset: 0;
+.pcb-grain {
+  inset: -20px;
   z-index: 2;
-  opacity: .17;
+  opacity: 0.18;
   mix-blend-mode: screen;
   background-image:
-    radial-gradient(circle at 14% 18%, rgba(166, 244, 205, .20) 0 .8px, transparent 1px),
-    radial-gradient(circle at 74% 68%, rgba(100, 192, 145, .18) 0 .8px, transparent 1px),
-    radial-gradient(circle at 43% 34%, rgba(122, 224, 172, .17) 0 .7px, transparent .9px),
-    radial-gradient(circle at 89% 22%, rgba(109, 205, 156, .17) 0 .7px, transparent .9px);
-  background-size: 51px 47px, 67px 61px, 39px 43px, 73px 69px;
-  animation: neural-noise-drift 13s linear infinite;
+    radial-gradient(circle at 11% 19%, rgba(202, 255, 221, 0.15) 0 0.65px, transparent 0.9px),
+    radial-gradient(circle at 67% 63%, rgba(153, 224, 182, 0.12) 0 0.7px, transparent 1px),
+    radial-gradient(circle at 42% 35%, rgba(146, 214, 176, 0.1) 0 0.6px, transparent 0.95px);
+  background-size: 47px 43px, 63px 57px, 37px 41px;
+  animation: pcb-grain-drift 18s linear infinite;
 }
 
-.neural-board-vignette {
-  inset: 0;
-  z-index: 15;
-  box-shadow:
-    inset 0 0 64px rgba(0, 0, 0, .50),
-    inset 0 0 145px rgba(0, 0, 0, .34);
-}
-
-.neural-circuit-svg {
+.pcb-board-svg {
   position: absolute;
   inset: 0;
   z-index: 4;
@@ -153,474 +148,453 @@
   overflow: visible;
 }
 
-/* The board lines are deliberately one PCB-green family. */
-.neural-static-copper path {
+/* --------------------------------------------------------------------------
+   Copper / traces
+   -------------------------------------------------------------------------- */
+
+.pcb-ambient-traces path,
+.pcb-trace-underlay,
+.pcb-trace,
+.pcb-board-marks path {
   fill: none;
-  stroke: rgba(53, 132, 94, .34);
-  stroke-width: 1.15;
   stroke-linecap: square;
   stroke-linejoin: miter;
   vector-effect: non-scaling-stroke;
 }
 
-.neural-static-copper path:nth-child(3n) {
-  stroke: rgba(71, 151, 109, .23);
-}
-
-.neural-static-copper path:nth-child(5n) {
-  stroke-width: 1.55;
-  opacity: .68;
-}
-
-.neural-chip rect {
-  fill: rgba(1, 11, 7, .88);
-  stroke: rgba(75, 157, 113, .42);
-  stroke-width: 1.15;
-  vector-effect: non-scaling-stroke;
-}
-
-.neural-chip .neural-chip-inner {
-  fill: rgba(3, 20, 13, .92);
-  stroke: rgba(56, 117, 84, .30);
-}
-
-.neural-chip line {
-  stroke: rgba(94, 185, 137, .36);
+.pcb-ambient-traces path {
+  stroke: rgba(58, 120, 88, 0.34);
   stroke-width: 1;
-  vector-effect: non-scaling-stroke;
 }
 
-.neural-solder-pad rect {
-  fill: rgba(91, 172, 129, .12);
-  stroke: rgba(99, 184, 141, .28);
-  stroke-width: .85;
-  vector-effect: non-scaling-stroke;
-}
-
-.neural-trace-shadow,
-.neural-trace-line {
-  fill: none;
-  stroke-linecap: square;
-  stroke-linejoin: miter;
-  vector-effect: non-scaling-stroke;
-}
-
-.neural-trace-shadow {
-  stroke: rgba(40, 133, 91, .50);
-  stroke-width: 4.7;
-  opacity: .07;
-  filter: blur(1.6px);
-}
-
-.neural-trace-line {
-  stroke: rgba(57, 157, 111, .66);
+.pcb-ambient-traces path:nth-child(3n) {
+  stroke: rgba(67, 134, 98, 0.26);
   stroke-width: 1.2;
-  opacity: .78;
 }
 
-.neural-trace:nth-child(3n + 1) .neural-trace-line {
-  stroke: rgba(66, 169, 120, .72);
+.pcb-ambient-traces path:nth-child(5n) {
+  stroke: rgba(81, 142, 108, 0.2);
+  stroke-width: 1.5;
 }
 
-.neural-trace:nth-child(4n + 2) .neural-trace-line {
-  stroke: rgba(48, 140, 99, .72);
+.pcb-trace-underlay {
+  stroke: rgba(64, 143, 99, 0.24);
+  stroke-width: 4.5;
+  opacity: 0.13;
+  filter: blur(1.1px);
 }
 
-.neural-end-node-halo {
-  fill: rgba(62, 154, 107, .05);
-  stroke: rgba(85, 185, 137, .25);
+.pcb-trace {
+  stroke: rgba(66, 145, 105, 0.58);
+  stroke-width: 1.15;
+}
+
+.pcb-signal-route.local-bus .pcb-trace {
+  stroke: rgba(62, 132, 96, 0.44);
+}
+
+.pcb-board-marks path {
+  stroke: rgba(91, 165, 123, 0.38);
   stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.neural-end-node {
-  fill: #74c79e;
-  opacity: .68;
-}
-
-.neural-node-label {
-  fill: rgba(122, 190, 158, .60);
-  font: 700 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .15em;
-}
-
-/* Packet colours only. The copper/trace underneath remains green. */
-.packet-cyan .neural-data-pulse,
-.packet-cyan .neural-data-tail { fill: var(--packet-cyan); }
-.packet-blue .neural-data-pulse,
-.packet-blue .neural-data-tail { fill: var(--packet-blue); }
-.packet-violet .neural-data-pulse,
-.packet-violet .neural-data-tail { fill: var(--packet-violet); }
-.packet-amber .neural-data-pulse,
-.packet-amber .neural-data-tail { fill: var(--packet-amber); }
-.packet-mint .neural-data-pulse,
-.packet-mint .neural-data-tail { fill: var(--packet-mint); }
-
-.neural-data-pulse {
-  opacity: .98;
-}
-
-.neural-data-tail {
-  transform-origin: center;
-}
-
-.neural-via-ring {
-  fill: rgba(1, 12, 8, .72);
-  stroke: rgba(76, 166, 119, .33);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.neural-via {
-  fill: rgba(107, 194, 149, .46);
-}
-
-.neural-corner {
-  position: absolute;
-  z-index: 7;
-  width: 30px;
-  height: 30px;
-  pointer-events: none;
-}
-
-.neural-corner::before,
-.neural-corner::after {
-  content: "";
-  position: absolute;
-  background: rgba(99, 192, 143, .42);
-}
-
-.neural-corner::before { width: 30px; height: 1px; }
-.neural-corner::after { width: 1px; height: 30px; }
-.corner-tl { left: 12px; top: 10px; }
-.corner-tr { right: 12px; top: 10px; transform: scaleX(-1); }
-.corner-bl { left: 12px; bottom: 10px; transform: scaleY(-1); }
-.corner-br { right: 12px; bottom: 10px; transform: scale(-1); }
-
-.neural-hud {
-  position: absolute;
-  z-index: 8;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 112px;
-  padding: 9px 10px;
-  border-left: 1px solid rgba(83, 176, 128, .28);
-  background: linear-gradient(90deg, rgba(2, 21, 14, .62), transparent);
-  color: #6fa68d;
-  font: 700 8px/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .11em;
-  pointer-events: none;
-}
-
-.neural-hud > span {
-  margin-bottom: 3px;
-  color: #88d2aa;
-  font-size: 8.5px;
-}
-
-.neural-hud small {
-  color: rgba(108, 155, 133, .76);
-  font-size: 7px;
-  letter-spacing: .08em;
-}
-
-.neural-hud strong {
-  color: #c8f0db;
-  font-size: 10px;
-  letter-spacing: .16em;
-}
-
-.neural-hud-left {
-  left: 18px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.neural-hud-right {
-  right: 18px;
-  top: 18px;
-  width: 128px;
-  border-left: 0;
-  border-right: 1px solid rgba(83, 176, 128, .28);
-  background: linear-gradient(270deg, rgba(2, 21, 14, .62), transparent);
-  text-align: right;
-}
-
-.neural-core-glow {
-  z-index: 5;
-  left: 50%;
-  top: 50%;
-  width: 46%;
-  height: 34%;
-  transform: translate(-50%, -50%);
-  border-radius: 18%;
-  background: radial-gradient(ellipse, rgba(94, 239, 183, .15), rgba(39, 135, 91, .06) 42%, transparent 74%);
-  filter: blur(24px);
-  opacity: .62;
 }
 
 /* --------------------------------------------------------------------------
-   Fixed central processor footprint
-
-   38% of the 1000-wide SVG = 380 units, matching x=310..690.
-   28.846% of the 520-high SVG = 150 units, matching y=185..335.
-
-   Do not override width/height per runtime state or in fullscreen. That is what
-   keeps every trace connected to the processor pins.
+   Vias, chips and passives
    -------------------------------------------------------------------------- */
 
-.neural-hub-shell {
-  position: absolute;
-  z-index: 12;
-  left: 50%;
-  top: 50%;
-  width: 38%;
-  height: 28.8461538%;
-  min-width: 0;
-  min-height: 0;
-  transform: translate(-50%, -50%);
-  display: grid;
-  grid-template-rows: minmax(20px, 18%) minmax(0, 64%) minmax(20px, 18%);
-  border: 1px solid rgba(119, 219, 174, .56);
-  border-radius: 3px;
-  background:
-    linear-gradient(180deg, rgba(3, 28, 18, .94), rgba(1, 16, 10, .97)),
-    #02140d;
-  box-shadow:
-    0 0 0 1px rgba(0, 7, 4, .88),
-    0 0 0 4px rgba(55, 151, 105, .055),
-    0 0 30px rgba(50, 171, 116, .11),
-    inset 0 0 30px rgba(70, 188, 132, .045);
-  overflow: visible;
+.pcb-via-ring {
+  fill: rgba(3, 18, 11, 0.87);
+  stroke: rgba(100, 169, 129, 0.28);
+  stroke-width: 0.9;
+  vector-effect: non-scaling-stroke;
 }
 
-.neural-hub-shell::before,
-.neural-hub-shell::after {
-  content: "";
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(118, 224, 175, .52), transparent);
-  opacity: .72;
+.pcb-via-hole {
+  fill: rgba(95, 161, 125, 0.38);
 }
 
-.neural-hub-shell::before { top: -5px; }
-.neural-hub-shell::after { bottom: -5px; }
-
-.neural-hub-pin {
-  position: absolute;
-  display: block;
-  opacity: .72;
+.pcb-chip-shadow {
+  fill: rgba(0, 6, 4, 0.7);
+  stroke: rgba(44, 98, 70, 0.18);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
-.pin-top,
-.pin-bottom {
-  left: 12px;
-  right: 12px;
-  height: 5px;
-  background: repeating-linear-gradient(90deg, rgba(91, 183, 137, .80) 0 4px, transparent 4px 8px);
+.pcb-chip-body {
+  fill: rgba(2, 11, 7, 0.94);
+  stroke: rgba(75, 139, 103, 0.4);
+  stroke-width: 1.1;
+  vector-effect: non-scaling-stroke;
 }
 
-.pin-top { top: -8px; }
-.pin-bottom { bottom: -8px; }
-
-.pin-left,
-.pin-right {
-  top: 12px;
-  bottom: 12px;
-  width: 5px;
-  background: repeating-linear-gradient(180deg, rgba(91, 183, 137, .80) 0 4px, transparent 4px 8px);
+.pcb-chip-die {
+  fill: rgba(3, 20, 13, 0.94);
+  stroke: rgba(59, 112, 83, 0.3);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
 }
 
-.pin-left { left: -8px; }
-.pin-right { right: -8px; }
-
-.neural-hub-header,
-.neural-hub-footer {
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 10px;
-  color: #66977f;
-  font: 700 clamp(5.5px, .65vw, 8px)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  overflow: hidden;
+.pcb-chip-pin {
+  stroke: rgba(93, 158, 123, 0.34);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
-.neural-hub-header {
-  border-bottom: 1px solid rgba(87, 174, 131, .14);
+.pcb-passives rect {
+  fill: rgba(8, 30, 19, 0.96);
+  stroke: rgba(86, 151, 115, 0.32);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
 }
 
-.neural-hub-footer {
-  border-top: 1px solid rgba(87, 174, 131, .14);
+/* --------------------------------------------------------------------------
+   Data packets — colour belongs here, not on the copper underneath.
+   -------------------------------------------------------------------------- */
+
+.packet-cyan circle { fill: var(--packet-cyan); }
+.packet-blue circle { fill: var(--packet-blue); }
+.packet-violet circle { fill: var(--packet-violet); }
+.packet-amber circle { fill: var(--packet-amber); }
+.packet-mint circle { fill: var(--packet-mint); }
+.packet-danger circle { fill: var(--packet-danger); }
+
+.pcb-packet-head {
+  opacity: 1;
 }
 
-.neural-hub-header span:last-child {
-  color: #8adbb1;
+.pcb-packet-tail {
+  opacity: 0.4;
 }
 
-.neural-hub-content {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 5px 10px;
-  text-align: center;
-  overflow: hidden;
+.state-idle .pcb-packet {
+  opacity: 0.5;
 }
 
-.neural-main-word {
-  max-width: 92%;
-  overflow: hidden;
-  color: #c9ffe7;
-  font: 800 clamp(13px, 2vw, 32px)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .20em;
-  text-transform: uppercase;
-  text-shadow:
-    0 0 7px rgba(132, 255, 198, .33),
-    0 0 22px rgba(66, 210, 144, .16);
-  white-space: nowrap;
+.state-listening .pcb-packet,
+.state-speaking .pcb-packet,
+.state-thinking .pcb-packet,
+.state-working .pcb-packet {
+  opacity: 1;
 }
 
-.state-word-thinking {
-  font-size: clamp(9px, 1.45vw, 24px);
-  letter-spacing: .10em;
-  animation: neural-data-jitter .22s steps(2, end) infinite;
+.state-waiting_permission .pcb-packet {
+  opacity: 0.75;
 }
 
-.state-word-transcribing {
-  animation: neural-decode-flicker .78s linear infinite;
-}
+/* --------------------------------------------------------------------------
+   Central processor
 
-.state-word-working {
-  color: #c3f6dd;
-  animation: neural-working-breathe 1.05s ease-in-out infinite;
-}
+   The processor is always exactly 37% x 20% of the board. The corresponding
+   signal routes use x=315..685 and y=240..360 in the 1000x600 SVG, so routes
+   that are intended to touch it stay aligned in normal and fullscreen modes.
+   -------------------------------------------------------------------------- */
 
-.state-word-waiting_permission {
-  color: #ffe0a0;
-  text-shadow: 0 0 15px rgba(255, 197, 94, .24);
-  font-size: clamp(9px, 1.35vw, 22px);
-  letter-spacing: .10em;
-}
-
-.state-word-warning {
-  color: #ff9aa6;
-  text-shadow: 0 0 15px rgba(255, 88, 108, .24);
-}
-
-.state-word-offline {
-  color: #78928a;
-  text-shadow: none;
-}
-
-.audio-word {
-  margin-top: -2px;
-  font-size: clamp(8px, .95vw, 14px);
-  letter-spacing: .16em;
-  color: #83bca1;
-  text-shadow: none;
-}
-
-.neural-state-line {
-  width: min(90%, 310px);
-  display: grid;
-  grid-template-columns: auto minmax(14px, 1fr) minmax(0, auto);
-  align-items: center;
-  gap: 6px;
-  color: #70ad8e;
-  font: 700 clamp(5.5px, .62vw, 7.5px)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.neural-state-line i {
-  height: 1px;
-  background: linear-gradient(90deg, rgba(100, 210, 153, .62), rgba(100, 210, 153, .10));
-}
-
-.neural-state-line small {
-  overflow: hidden;
-  color: #537a67;
-  font-size: inherit;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.neural-waveform {
-  max-height: 42%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  overflow: hidden;
-}
-
-.neural-waveform span {
-  width: 2px;
-  min-height: 4px;
-  max-height: 42px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, #dcfff0, #68efb4 55%, #30a574);
-  box-shadow: 0 0 7px rgba(104, 239, 180, .26);
-  transform-origin: center;
-  transition: height 45ms linear, opacity 60ms linear;
-  animation: neural-wave-idle .72s ease-in-out infinite alternate;
-}
-
-.wave-listening span {
-  background: linear-gradient(180deg, #dfffee, #70f5bc 52%, #38a6b8);
-}
-
-.wave-speaking span {
-  background: linear-gradient(180deg, #effff8, #69e8bf 48%, #55aaff 100%);
-}
-
-.neural-scan-line {
-  z-index: 10;
-  left: 0;
-  right: 0;
-  height: 1px;
-  top: -2px;
-  opacity: 0;
-  background: linear-gradient(90deg, transparent 5%, rgba(111, 220, 163, .08), rgba(154, 255, 207, .70), rgba(111, 220, 163, .08), transparent 95%);
-  box-shadow: 0 0 14px rgba(89, 216, 154, .18);
-}
-
-.neural-state-burst {
+.pcb-hub-aura {
   z-index: 6;
   left: 50%;
   top: 50%;
-  width: 90px;
-  height: 90px;
-  border: 1px solid rgba(101, 227, 164, .16);
-  border-radius: 50%;
-  opacity: 0;
+  width: 49%;
+  height: 35%;
   transform: translate(-50%, -50%);
+  background: radial-gradient(ellipse, rgba(160, 185, 78, 0.12), rgba(68, 148, 96, 0.07) 42%, transparent 72%);
+  filter: blur(26px);
+  opacity: 0.52;
 }
 
-.neural-core-footer {
-  position: relative;
+.pcb-core-hub {
+  --hub-light: rgba(105, 205, 150, 0.12);
+  position: absolute;
+  z-index: 14;
+  left: 50%;
+  top: 50%;
+  width: 37%;
+  height: 20%;
+  min-width: 0;
+  min-height: 0;
+  transform: translate(-50%, -50%);
+  container-type: inline-size;
+  border: 1px solid rgba(100, 173, 129, 0.53);
+  border-radius: 3px;
+  background:
+    linear-gradient(180deg, rgba(2, 15, 9, 0.98), rgba(1, 10, 6, 0.99)),
+    #020b07;
+  box-shadow:
+    0 0 0 2px rgba(0, 6, 4, 0.82),
+    0 0 0 5px rgba(64, 121, 87, 0.08),
+    0 0 28px var(--hub-light),
+    inset 0 0 28px rgba(77, 161, 111, 0.04);
+  overflow: visible;
+}
+
+.pcb-core-hub-inner {
+  position: absolute;
+  inset: 5px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(49, 104, 73, 0.42);
+  border-radius: 2px;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(47, 101, 67, 0.06), transparent 65%),
+    linear-gradient(180deg, rgba(2, 13, 8, 0.97), rgba(1, 9, 5, 0.98));
+}
+
+.pcb-hub-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pcb-hub-sheen::before {
+  content: "";
+  position: absolute;
+  left: -45%;
+  top: 0;
+  width: 35%;
+  height: 100%;
+  transform: skewX(-18deg);
+  background: linear-gradient(90deg, transparent, rgba(147, 255, 195, 0.045), transparent);
+  opacity: 0;
+}
+
+/* Main text uses container-width units. This is the important fullscreen fix. */
+.pcb-core-title {
+  display: block;
+  max-width: 92%;
+  color: var(--pcb-text-bright);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: clamp(14px, 11cqw, 64px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.23em;
+  text-align: center;
+  text-indent: 0.23em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-shadow:
+    0 0 6px rgba(142, 255, 193, 0.3),
+    0 0 18px rgba(92, 226, 154, 0.13);
+}
+
+.pcb-core-title.thinking-data {
+  font-size: clamp(8px, 5.2cqw, 38px);
+  letter-spacing: 0.11em;
+  text-indent: 0.11em;
+  animation: pcb-thinking-text 180ms steps(2, end) infinite;
+}
+
+/* Processor edge pins. */
+.pcb-hub-pins {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  pointer-events: none;
+}
+
+.pcb-hub-pins i {
+  --pin-index: 0;
+  display: block;
+  flex: 1 1 auto;
+  background: rgba(88, 153, 117, 0.5);
+  box-shadow: 0 0 0 rgba(123, 255, 184, 0);
+}
+
+.pcb-hub-pins-top,
+.pcb-hub-pins-bottom {
+  left: 12px;
+  right: 12px;
+  height: 5px;
+  gap: 3px;
+}
+
+.pcb-hub-pins-top { top: -8px; }
+.pcb-hub-pins-bottom { bottom: -8px; }
+
+.pcb-hub-pins-top i,
+.pcb-hub-pins-bottom i {
+  min-width: 2px;
+  height: 5px;
+}
+
+.pcb-hub-pins-left,
+.pcb-hub-pins-right {
+  top: 10px;
+  bottom: 10px;
+  width: 5px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pcb-hub-pins-left { left: -8px; }
+.pcb-hub-pins-right { right: -8px; }
+
+.pcb-hub-pins-left i,
+.pcb-hub-pins-right i {
+  width: 5px;
+  min-height: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   State behaviour
+   -------------------------------------------------------------------------- */
+
+.state-idle .pcb-core-hub {
+  animation: pcb-idle-breathe 4.8s ease-in-out infinite;
+}
+
+.state-idle .pcb-hub-aura {
+  animation: pcb-aura-idle 5.2s ease-in-out infinite;
+}
+
+.state-listening .pcb-core-hub {
+  --hub-light: rgba(88, 226, 151, calc(0.09 + (var(--voice-level, 0) * 0.18)));
+  border-color: rgba(112, 205, 151, calc(0.54 + (var(--voice-level, 0) * 0.3)));
+}
+
+.state-listening .pcb-hub-aura {
+  opacity: calc(0.52 + (var(--voice-level, 0) * 0.25));
+  filter: blur(calc(24px + (var(--voice-level, 0) * 8px)));
+}
+
+.state-listening .pcb-hub-pins i:nth-child(3n + 1),
+.state-listening .pcb-chip:nth-child(2n) .pcb-chip-pin,
+.state-listening .pcb-vias g:nth-child(7n) .pcb-via-hole {
+  animation: pcb-pin-spark 0.76s ease-in-out infinite;
+}
+
+.state-transcribing .pcb-state-scan {
+  opacity: 1;
+  animation: pcb-scan-down 1.05s linear infinite;
+}
+
+.state-transcribing .pcb-vias g:nth-child(5n) .pcb-via-hole,
+.state-transcribing .pcb-chip:nth-child(3n + 1) .pcb-chip-pin {
+  animation: pcb-pin-spark 0.48s steps(2, end) infinite;
+}
+
+.state-thinking .pcb-core-hub {
+  --hub-light: rgba(84, 219, 146, 0.19);
+  border-color: rgba(109, 206, 151, 0.72);
+  animation: pcb-thinking-hub 0.88s ease-in-out infinite;
+}
+
+.state-thinking .pcb-hub-sheen::before {
+  opacity: 1;
+  animation: pcb-sheen-pass 1.25s linear infinite;
+}
+
+.state-thinking .pcb-vias g:nth-child(3n) .pcb-via-hole,
+.state-thinking .pcb-vias g:nth-child(7n + 1) .pcb-via-hole,
+.state-thinking .pcb-chip:nth-child(2n + 1) .pcb-chip-pin,
+.state-thinking .pcb-chip:nth-child(3n) .pcb-chip-die {
+  animation: pcb-pin-spark 0.35s steps(2, end) infinite;
+}
+
+.state-thinking .pcb-ambient-traces path:nth-child(4n),
+.state-thinking .pcb-trace {
+  stroke: rgba(75, 158, 114, 0.68);
+}
+
+.state-speaking .pcb-core-hub {
+  --hub-light: rgba(82, 225, 152, calc(0.11 + (var(--voice-level, 0) * 0.24)));
+  border-color: rgba(118, 225, 166, calc(0.58 + (var(--voice-level, 0) * 0.3)));
+  animation: pcb-speaking-pulse 0.68s ease-in-out infinite;
+}
+
+.state-speaking .pcb-hub-aura {
+  opacity: calc(0.57 + (var(--voice-level, 0) * 0.28));
+}
+
+.state-speaking .pcb-hub-pins i:nth-child(2n),
+.state-speaking .pcb-chip:nth-child(odd) .pcb-chip-pin,
+.state-speaking .pcb-vias g:nth-child(6n + 2) .pcb-via-hole {
+  animation: pcb-pin-spark 0.58s ease-in-out infinite;
+}
+
+.state-working .pcb-core-hub {
+  --hub-light: rgba(87, 205, 143, 0.18);
+  border-color: rgba(108, 200, 150, 0.68);
+  animation: pcb-working-pulse 1.15s ease-in-out infinite;
+}
+
+.state-working .pcb-chip:nth-child(2n) .pcb-chip-body,
+.state-working .pcb-chip:nth-child(3n + 1) .pcb-chip-die,
+.state-working .pcb-vias g:nth-child(4n) .pcb-via-hole {
+  animation: pcb-component-live 0.85s ease-in-out infinite;
+}
+
+.state-waiting_permission .pcb-core-hub {
+  --hub-light: rgba(255, 187, 75, 0.15);
+  border-color: rgba(228, 179, 84, 0.7);
+  animation: pcb-permission-pulse 1.5s ease-in-out infinite;
+}
+
+.state-waiting_permission .pcb-hub-pins i:nth-child(4n),
+.state-waiting_permission .pcb-vias g:nth-child(9n) .pcb-via-hole {
+  background: rgba(231, 182, 82, 0.62);
+  animation: pcb-amber-spark 1.05s ease-in-out infinite;
+}
+
+.state-warning .pcb-core-hub {
+  --hub-light: rgba(255, 82, 104, 0.15);
+  border-color: rgba(232, 91, 108, 0.72);
+  animation: pcb-warning-pulse 0.72s ease-in-out infinite;
+}
+
+.state-warning .pcb-core-title {
+  color: #ffb1ba;
+  text-shadow: 0 0 8px rgba(255, 93, 113, 0.35);
+}
+
+.state-offline .pcb-core-stage {
+  filter: saturate(0.38) brightness(0.72);
+}
+
+.state-offline .pcb-packets,
+.state-offline .pcb-hub-aura {
+  opacity: 0.08;
+}
+
+/* Moving scan used only for transcription. */
+.pcb-state-scan {
+  z-index: 12;
+  left: 0;
+  right: 0;
+  top: -2px;
+  height: 1px;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent 8%, rgba(111, 218, 158, 0.12), rgba(170, 255, 206, 0.72), rgba(111, 218, 158, 0.12), transparent 92%);
+  box-shadow: 0 0 13px rgba(112, 240, 170, 0.16);
+}
+
+.pcb-board-vignette {
+  inset: 0;
   z-index: 20;
-  min-height: 25px;
-  gap: 10px;
-  padding: 0 10px;
-  background: rgba(1, 13, 8, .94);
-  border-top: 1px solid rgba(72, 154, 110, .14);
-  color: #5d8570;
-  font-size: 7.5px;
-  letter-spacing: .08em;
+  box-shadow:
+    inset 0 0 58px rgba(0, 0, 0, 0.48),
+    inset 0 0 128px rgba(0, 0, 0, 0.31);
 }
 
-.neural-core-footer span:nth-child(2) {
+.pcb-core-footer {
+  position: relative;
+  z-index: 30;
+  min-height: 25px;
+  padding: 0 10px;
+  gap: 10px;
+  background: rgba(1, 11, 7, 0.96);
+  border-top: 1px solid rgba(68, 137, 100, 0.15);
+  color: #587967;
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+}
+
+.pcb-core-footer span:nth-child(2) {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-align: center;
   white-space: nowrap;
@@ -628,394 +602,200 @@
 }
 
 /* --------------------------------------------------------------------------
-   Runtime state personalities
+   Fullscreen
 
-   Notice that none of these rules change .neural-hub-shell width or height.
-   The processor stays physically fixed while light/glow/activity changes.
+   No separate hub width/height or font size is required. The board and hub use
+   the same percentages, while cqw makes the title scale naturally with the hub.
    -------------------------------------------------------------------------- */
 
-.state-idle .neural-data-pulse,
-.state-idle .neural-data-tail {
-  opacity: .48;
-}
-
-.state-idle .neural-core-glow {
-  opacity: .42;
-  animation: neural-idle-breathe 4.4s ease-in-out infinite;
-}
-
-.state-idle .neural-hub-shell {
-  animation: neural-hub-idle 4.5s ease-in-out infinite;
-}
-
-.state-listening .neural-core-glow {
-  opacity: calc(.54 + (var(--voice-level, 0) * .34));
-}
-
-.state-listening .neural-trace-line {
-  opacity: .88;
-}
-
-.state-listening .neural-data-pulse {
-  opacity: 1;
-}
-
-.state-listening .neural-hub-shell {
-  border-color: rgba(118, 238, 181, calc(.58 + (var(--voice-level, 0) * .30)));
-  box-shadow:
-    0 0 0 1px rgba(0, 7, 4, .88),
-    0 0 calc(22px + (var(--voice-level, 0) * 38px)) rgba(79, 223, 151, calc(.08 + (var(--voice-level, 0) * .16)),
-    inset 0 0 calc(22px + (var(--voice-level, 0) * 18px)) rgba(83, 218, 153, .065);
-}
-
-.state-listening .neural-state-burst {
-  opacity: calc(.07 + (var(--voice-level, 0) * .24));
-  animation: neural-inward-burst .92s ease-out infinite;
-}
-
-.state-listening .burst-b { animation-delay: .46s; }
-
-.state-transcribing .neural-scan-line {
-  opacity: .72;
-  animation: neural-scan-down 1.05s linear infinite;
-}
-
-.state-transcribing .neural-trace-line {
-  stroke-dasharray: 5 5;
-  animation: neural-dash-in .64s linear infinite;
-}
-
-.state-transcribing .neural-core-glow {
-  animation: neural-transcribe-pulse 1.0s ease-in-out infinite;
-}
-
-.state-thinking .neural-trace-line {
-  opacity: .90;
-}
-
-.state-thinking .neural-data-pulse {
-  opacity: 1;
-}
-
-.state-thinking .neural-board-points circle:nth-child(3n) {
-  animation: neural-point-flicker .38s steps(2, end) infinite;
-}
-
-.state-thinking .neural-board-points circle:nth-child(5n) {
-  animation: neural-point-flicker .55s steps(2, end) .2s infinite;
-}
-
-.state-thinking .neural-core-glow {
-  opacity: .82;
-  animation: neural-thinking-energy .76s ease-in-out infinite;
-}
-
-.state-thinking .neural-hub-shell {
-  box-shadow:
-    0 0 0 1px rgba(0, 7, 4, .88),
-    0 0 38px rgba(74, 216, 146, .16),
-    0 0 82px rgba(83, 186, 255, .035),
-    inset 0 0 30px rgba(73, 194, 136, .065);
-}
-
-.state-speaking .neural-core-glow {
-  opacity: calc(.62 + (var(--voice-level, 0) * .30));
-}
-
-.state-speaking .neural-data-pulse {
-  opacity: 1;
-}
-
-.state-speaking .neural-trace-line {
-  opacity: .91;
-}
-
-.state-speaking .neural-state-burst {
-  opacity: calc(.09 + (var(--voice-level, 0) * .28));
-  animation: neural-outward-burst .86s ease-out infinite;
-}
-
-.state-speaking .burst-b { animation-delay: .43s; }
-
-/* Pulse with light only — no size/shape animation on the processor itself. */
-.state-speaking .neural-hub-shell {
-  animation: neural-speaking-light-pulse .62s ease-in-out infinite;
-  border-color: rgba(121, 235, 184, .76);
-}
-
-.state-working .neural-trace-line {
-  opacity: .95;
-  stroke-width: 1.35;
-}
-
-.state-working .neural-data-pulse {
-  opacity: 1;
-}
-
-.state-working .neural-core-glow {
-  opacity: .78;
-  animation: neural-working-energy 1.1s ease-in-out infinite;
-}
-
-.state-working .neural-hub-shell {
-  border-color: rgba(109, 219, 164, .72);
-}
-
-.state-waiting_permission .neural-core-stage {
-  background:
-    radial-gradient(circle at 50% 49%, rgba(194, 145, 57, .07), transparent 27%),
-    radial-gradient(circle at 50% 50%, rgba(31, 93, 61, .13), transparent 58%),
-    linear-gradient(180deg, #041c12, #02150e 56%, #01110b);
-}
-
-.state-waiting_permission .neural-trace-line,
-.state-waiting_permission .neural-end-node {
-  opacity: .34;
-}
-
-.state-waiting_permission .neural-core-glow {
-  background: radial-gradient(ellipse, rgba(255, 194, 84, .19), rgba(72, 120, 70, .04) 44%, transparent 74%);
-  animation: neural-permission-pulse 1.45s ease-in-out infinite;
-}
-
-.state-waiting_permission .neural-hub-shell {
-  border-color: rgba(255, 202, 109, .70);
-  box-shadow:
-    0 0 0 1px rgba(0, 7, 4, .88),
-    0 0 38px rgba(255, 186, 70, .11),
-    inset 0 0 26px rgba(255, 185, 68, .05);
-}
-
-.state-waiting_permission .neural-hud > span,
-.state-waiting_permission .neural-hub-header span:last-child,
-.state-waiting_permission .neural-state-line {
-  color: #e8bd70;
-}
-
-.state-warning .neural-core-stage {
-  background:
-    radial-gradient(circle at 50% 49%, rgba(177, 54, 67, .07), transparent 27%),
-    radial-gradient(circle at 50% 50%, rgba(31, 93, 61, .12), transparent 58%),
-    linear-gradient(180deg, #041c12, #02150e 56%, #01110b);
-}
-
-.state-warning .neural-core-glow {
-  background: radial-gradient(ellipse, rgba(255, 84, 105, .17), rgba(62, 110, 70, .04) 44%, transparent 74%);
-  animation: neural-warning-pulse .7s ease-in-out infinite;
-}
-
-.state-warning .neural-hub-shell {
-  border-color: rgba(255, 107, 124, .64);
-}
-
-.state-offline .neural-core-stage {
-  filter: saturate(.42) brightness(.72);
-}
-
-.state-offline .neural-circuit-svg,
-.state-offline .neural-board-noise {
-  opacity: .44;
-}
-
-/* --------------------------------------------------------------------------
-   Fullscreen presentation
-
-   The core footprint deliberately remains 38% x 28.846%. Because the SVG and
-   hub share the same percentages, every circuit still lands on the hub edge.
-   Fullscreen becomes stronger by exposing more board detail, not by replacing
-   the geometry with a differently-sized processor.
-   -------------------------------------------------------------------------- */
-
-.focus-core .neural-core-panel {
-  border-radius: 8px;
-  box-shadow:
-    inset 0 0 72px rgba(0,0,0,.22),
-    0 0 0 1px rgba(92, 183, 137, .05),
-    0 0 76px rgba(42, 141, 94, .08);
-}
-
-.focus-core .neural-core-stage {
+.focus-core .pcb-core-stage {
   min-height: calc(100vh - 148px);
 }
 
-.focus-core .neural-static-copper path {
-  opacity: .92;
+.focus-core .pcb-ambient-traces path {
+  stroke-width: 1.15;
+  opacity: 0.95;
 }
 
-.focus-core .neural-trace-line {
-  stroke-width: 1.45;
+.focus-core .pcb-trace {
+  stroke-width: 1.3;
 }
 
-.focus-core .neural-trace-shadow {
-  stroke-width: 6;
+.focus-core .pcb-chip-body {
+  stroke-width: 1.25;
 }
 
-.focus-core .neural-main-word {
-  font-size: clamp(24px, 3.25vw, 54px);
+.focus-core .pcb-via-ring {
+  stroke-width: 1.05;
 }
 
-.focus-core .state-word-thinking {
-  font-size: clamp(18px, 2.4vw, 38px);
+.focus-core .pcb-core-hub {
+  /* geometry deliberately unchanged */
+  box-shadow:
+    0 0 0 2px rgba(0, 6, 4, 0.86),
+    0 0 0 6px rgba(64, 121, 87, 0.08),
+    0 0 42px var(--hub-light),
+    inset 0 0 38px rgba(77, 161, 111, 0.045);
 }
 
-.focus-core .state-word-waiting_permission {
-  font-size: clamp(18px, 2.25vw, 36px);
+.focus-core .pcb-core-footer {
+  font-size: 8.5px;
 }
-
-.focus-core .neural-hud {
-  width: 156px;
-  padding: 12px 13px;
-  font-size: 9px;
-}
-
-.focus-core .neural-hud > span { font-size: 10px; }
-.focus-core .neural-hud small { font-size: 8px; }
-.focus-core .neural-node-label { font-size: 10px; }
-.focus-core .neural-waveform { gap: 3px; }
-.focus-core .neural-waveform span { width: 3px; max-height: 58px; }
-.focus-core .audio-word { font-size: 16px; }
-.focus-core .neural-state-line { font-size: 9px; }
-.focus-core .neural-hub-header,
-.focus-core .neural-hub-footer { font-size: clamp(7px, .7vw, 10px); }
 
 /* --------------------------------------------------------------------------
-   Responsive protection
+   Responsive protection for the normal dashboard tile.
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1280px) {
-  .neural-hud { display: none; }
-  .neural-node-label { display: none; }
-  .neural-hub-header,
-  .neural-hub-footer { letter-spacing: .09em; padding-inline: 7px; }
-  .neural-state-line small { display: none; }
-  .neural-state-line { grid-template-columns: auto 1fr; }
+  .pcb-link-light {
+    display: none;
+  }
+
+  .pcb-core-title {
+    font-size: clamp(12px, 10.5cqw, 52px);
+    letter-spacing: 0.19em;
+    text-indent: 0.19em;
+  }
+
+  .pcb-core-title.thinking-data {
+    font-size: clamp(7px, 4.9cqw, 32px);
+  }
 }
 
-@media (max-height: 780px) {
-  .neural-hud { display: none; }
-  .neural-core-footer { min-height: 22px; }
-  .neural-hub-header,
-  .neural-hub-footer { font-size: 5.5px; }
-  .neural-hub-content { gap: 4px; padding: 3px 7px; }
+@media (max-height: 760px) {
+  .pcb-core-footer {
+    min-height: 22px;
+  }
 }
 
 /* --------------------------------------------------------------------------
-   Keyframes
+   Motion
    -------------------------------------------------------------------------- */
 
-@keyframes neural-noise-drift {
-  0% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(7px, -4px, 0); }
-  100% { transform: translate3d(0, 0, 0); }
+@keyframes pcb-grain-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(6px, -4px, 0); }
 }
 
-@keyframes neural-idle-breathe {
-  0%, 100% { opacity: .38; filter: blur(24px); }
-  50% { opacity: .56; filter: blur(26px); }
-}
-
-@keyframes neural-hub-idle {
+@keyframes pcb-idle-breathe {
   0%, 100% {
-    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 22px rgba(55,170,112,.07), inset 0 0 28px rgba(72,180,128,.04);
+    --hub-light: rgba(91, 180, 130, 0.07);
+    border-color: rgba(100, 173, 129, 0.48);
   }
   50% {
-    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 34px rgba(60,188,124,.12), inset 0 0 31px rgba(76,193,136,.06);
+    --hub-light: rgba(101, 197, 141, 0.13);
+    border-color: rgba(108, 190, 141, 0.6);
   }
 }
 
-@keyframes neural-speaking-light-pulse {
+@keyframes pcb-aura-idle {
+  0%, 100% { opacity: 0.42; filter: blur(25px); }
+  50% { opacity: 0.57; filter: blur(29px); }
+}
+
+@keyframes pcb-pin-spark {
   0%, 100% {
-    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 24px rgba(69,207,139,.10), inset 0 0 24px rgba(82,211,151,.06);
+    opacity: 0.34;
+    filter: brightness(0.8);
+  }
+  48% {
+    opacity: 1;
+    filter: brightness(1.8) drop-shadow(0 0 3px rgba(113, 255, 179, 0.72));
+  }
+  58% {
+    opacity: 0.5;
+    filter: brightness(1);
+  }
+}
+
+@keyframes pcb-component-live {
+  0%, 100% {
+    opacity: 0.72;
+    filter: none;
+  }
+  50% {
+    opacity: 1;
+    filter: url(#pcb-hot-glow);
+  }
+}
+
+@keyframes pcb-speaking-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(0, 6, 4, 0.82),
+      0 0 0 5px rgba(64, 121, 87, 0.08),
+      0 0 calc(22px + (var(--voice-level, 0) * 24px)) rgba(83, 221, 148, calc(0.09 + (var(--voice-level, 0) * 0.1))),
+      inset 0 0 24px rgba(77, 187, 127, 0.05);
     filter: brightness(1);
   }
   50% {
-    box-shadow: 0 0 0 1px rgba(0,7,4,.88), 0 0 calc(34px + (var(--voice-level, 0) * 35px)) rgba(73,224,151,.22), inset 0 0 30px rgba(94,223,163,.10);
-    filter: brightness(calc(1.02 + (var(--voice-level, 0) * .10)));
+    box-shadow:
+      0 0 0 2px rgba(0, 6, 4, 0.82),
+      0 0 0 5px rgba(64, 121, 87, 0.08),
+      0 0 calc(33px + (var(--voice-level, 0) * 38px)) rgba(86, 233, 155, calc(0.15 + (var(--voice-level, 0) * 0.16))),
+      inset 0 0 calc(26px + (var(--voice-level, 0) * 14px)) rgba(88, 213, 145, 0.08);
+    filter: brightness(calc(1.01 + (var(--voice-level, 0) * 0.08)));
   }
 }
 
-@keyframes neural-wave-idle {
-  from { transform: scaleY(.84); filter: brightness(.92); }
-  to { transform: scaleY(1.08); filter: brightness(1.12); }
+@keyframes pcb-thinking-hub {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(64, 121, 87, 0.08), 0 0 28px rgba(77, 211, 139, 0.14), inset 0 0 28px rgba(77, 161, 111, 0.04);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(64, 121, 87, 0.08), 0 0 45px rgba(84, 223, 148, 0.2), inset 0 0 32px rgba(83, 184, 127, 0.06);
+  }
 }
 
-@keyframes neural-inward-burst {
-  0% { transform: translate(-50%, -50%) scale(1.65); opacity: 0; }
-  35% { opacity: .24; }
-  100% { transform: translate(-50%, -50%) scale(.65); opacity: 0; }
+@keyframes pcb-thinking-text {
+  0% { opacity: 0.76; transform: translateX(0); }
+  25% { opacity: 1; transform: translateX(0.5px); }
+  50% { opacity: 0.82; transform: translateX(-0.45px); }
+  75% { opacity: 1; transform: translateX(0.35px); }
+  100% { opacity: 0.86; transform: translateX(0); }
 }
 
-@keyframes neural-outward-burst {
-  0% { transform: translate(-50%, -50%) scale(.62); opacity: .27; }
-  100% { transform: translate(-50%, -50%) scale(1.78); opacity: 0; }
+@keyframes pcb-sheen-pass {
+  from { left: -45%; }
+  to { left: 112%; }
 }
 
-@keyframes neural-scan-down {
-  0% { top: 3%; opacity: 0; }
-  12% { opacity: .8; }
-  88% { opacity: .8; }
-  100% { top: 97%; opacity: 0; }
+@keyframes pcb-working-pulse {
+  0%, 100% { filter: brightness(0.98); }
+  50% { filter: brightness(1.08); }
 }
 
-@keyframes neural-dash-in {
-  to { stroke-dashoffset: 20; }
+@keyframes pcb-permission-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(110, 83, 31, 0.06), 0 0 24px rgba(255, 185, 68, 0.1), inset 0 0 24px rgba(255, 187, 73, 0.035);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(110, 83, 31, 0.09), 0 0 39px rgba(255, 190, 77, 0.18), inset 0 0 28px rgba(255, 188, 70, 0.065);
+  }
 }
 
-@keyframes neural-transcribe-pulse {
-  0%, 100% { opacity: .48; filter: blur(24px); }
-  50% { opacity: .76; filter: blur(27px); }
+@keyframes pcb-warning-pulse {
+  0%, 100% { filter: brightness(0.95); }
+  50% { filter: brightness(1.16); }
 }
 
-@keyframes neural-thinking-energy {
-  0%, 100% { opacity: .66; filter: blur(23px); }
-  50% { opacity: .92; filter: blur(27px); }
+@keyframes pcb-amber-spark {
+  0%, 100% { opacity: 0.35; filter: brightness(0.85); }
+  50% { opacity: 1; filter: brightness(1.7) drop-shadow(0 0 3px rgba(255, 201, 101, 0.7)); }
 }
 
-@keyframes neural-data-jitter {
-  0% { transform: translateX(0); opacity: .92; }
-  25% { transform: translateX(.6px); opacity: 1; }
-  50% { transform: translateX(-.5px); opacity: .83; }
-  75% { transform: translateX(.4px); opacity: 1; }
-  100% { transform: translateX(0); opacity: .92; }
-}
-
-@keyframes neural-decode-flicker {
-  0%, 100% { opacity: .72; letter-spacing: .17em; }
-  45% { opacity: 1; letter-spacing: .22em; }
-  51% { opacity: .62; }
-  60% { opacity: 1; }
-}
-
-@keyframes neural-point-flicker {
-  0%, 45% { opacity: .14; }
-  46%, 100% { opacity: .74; }
-}
-
-@keyframes neural-working-breathe {
-  0%, 100% { opacity: .78; }
-  50% { opacity: 1; }
-}
-
-@keyframes neural-working-energy {
-  0%, 100% { opacity: .60; filter: blur(24px); }
-  50% { opacity: .88; filter: blur(27px); }
-}
-
-@keyframes neural-permission-pulse {
-  0%, 100% { opacity: .46; filter: blur(24px); }
-  50% { opacity: .84; filter: blur(27px); }
-}
-
-@keyframes neural-warning-pulse {
-  0%, 100% { opacity: .42; filter: blur(24px); }
-  50% { opacity: .88; filter: blur(27px); }
+@keyframes pcb-scan-down {
+  0% { top: 1%; opacity: 0; }
+  10% { opacity: 0.72; }
+  90% { opacity: 0.72; }
+  100% { top: 99%; opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .neural-core-panel *,
-  .neural-core-panel *::before,
-  .neural-core-panel *::after {
-    animation-duration: .001ms !important;
+  .pcb-core-panel *,
+  .pcb-core-panel *::before,
+  .pcb-core-panel *::after {
+    animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
   }

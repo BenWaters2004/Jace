@@ -14,185 +14,417 @@ const LABELS: Record<JaceRuntimeState, string> = {
   warning: "Attention",
 };
 
-const STATUS_COPY: Record<JaceRuntimeState, string> = {
-  offline: "Core link unavailable",
-  idle: "Standing by for your next request",
-  listening: "Receiving voice input",
-  transcribing: "Decoding local speech",
-  thinking: "Processing context and intent",
-  speaking: "Delivering a response",
-  working: "Coordinating tools and agents",
-  waiting_permission: "Awaiting your confirmation",
-  warning: "A subsystem needs attention",
-};
+type PacketColour = "cyan" | "blue" | "violet" | "amber" | "mint" | "danger";
+type PacketDirection = "forward" | "reverse";
 
-const STATE_MODE_COPY: Record<JaceRuntimeState, string> = {
-  offline: "LINK LOST",
-  idle: "STANDBY",
-  listening: "SIGNAL IN",
-  transcribing: "VOICE DECODE",
-  thinking: "REASONING",
-  speaking: "SIGNAL OUT",
-  working: "EXECUTION",
-  waiting_permission: "AUTH GATE",
-  warning: "ALERT",
-};
-
-const SYSTEM_LINES: Record<JaceRuntimeState, string[]> = {
-  offline: ["LOCAL CORE", "RUNTIME", "TOOLS", "MEMORY"],
-  idle: ["MEMORY", "TOOLS", "AGENTS", "NETWORK"],
-  listening: ["MICROPHONE", "VOICE LEVEL", "LOCAL STT", "CONTEXT"],
-  transcribing: ["WHISPER", "LANGUAGE", "TIMING", "TRANSCRIPT"],
-  thinking: ["CONTEXT", "MEMORY", "REASONING", "ROUTING"],
-  speaking: ["RESPONSE", "KOKORO", "AUDIO", "PLAYBACK"],
-  working: ["TOOLS", "AGENTS", "POLICIES", "AUDIT"],
-  waiting_permission: ["ACTION", "RISK", "SCOPE", "APPROVAL"],
-  warning: ["EVENT", "RUNTIME", "POLICY", "RECOVERY"],
-};
-
-type PacketColor = "cyan" | "blue" | "violet" | "amber" | "mint";
-
-type CircuitTrace = {
+type Route = {
   id: string;
-  points: Array<[number, number]>;
-  color: PacketColor;
-  delay: number;
-  speed: number;
-  nodeLabel: string;
+  d: string;
+  colour: PacketColour;
+  hubLinked?: boolean;
+  delay?: number;
+  speed?: number;
+};
+
+type Chip = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotate?: number;
+};
+
+const HUB = {
+  left: 315,
+  right: 685,
+  top: 240,
+  bottom: 360,
 };
 
 /*
- * IMPORTANT:
- * The central hub occupies exactly:
- *   x = 310..690 in the SVG viewBox
- *   y = 185..335 in the SVG viewBox
- *
- * .neural-hub-shell uses those same percentages in CSS. This keeps the
- * circuit traces physically connected to the processor in normal and
- * fullscreen modes without state-dependent resizing.
+ * These are the signal routes that can carry visible data packets.
+ * Only some of them touch the central processor. The rest behave like local
+ * buses on the board so the scene does not look like a starburst.
  */
-const CIRCUIT_TRACES: CircuitTrace[] = [
-  { id: "t01", points: [[310, 210], [280, 210], [280, 174], [230, 174], [230, 128], [178, 128], [178, 78], [72, 78]], color: "cyan", delay: 0.15, speed: 3.5, nodeLabel: "MEM" },
-  { id: "t02", points: [[310, 232], [258, 232], [258, 254], [204, 254], [204, 224], [118, 224], [118, 176], [32, 176]], color: "blue", delay: 1.0, speed: 4.0, nodeLabel: "NET" },
-  { id: "t03", points: [[310, 256], [270, 256], [270, 300], [218, 300], [218, 354], [144, 354], [144, 420], [48, 420]], color: "violet", delay: 0.55, speed: 4.2, nodeLabel: "WEB" },
-  { id: "t04", points: [[310, 280], [286, 280], [286, 328], [250, 328], [250, 392], [198, 392], [198, 470], [122, 470]], color: "amber", delay: 1.65, speed: 3.7, nodeLabel: "OPS" },
-
-  { id: "t05", points: [[390, 185], [390, 150], [354, 150], [354, 104], [300, 104], [300, 56], [244, 56], [244, 18]], color: "mint", delay: 0.35, speed: 3.6, nodeLabel: "CTX" },
-  { id: "t06", points: [[448, 185], [448, 132], [422, 132], [422, 78], [394, 78], [394, 24]], color: "cyan", delay: 1.05, speed: 4.1, nodeLabel: "SYS" },
-  { id: "t07", points: [[552, 185], [552, 138], [586, 138], [586, 92], [640, 92], [640, 42], [718, 42], [718, 12]], color: "blue", delay: 1.8, speed: 3.8, nodeLabel: "LLM" },
-  { id: "t08", points: [[610, 185], [610, 158], [664, 158], [664, 102], [738, 102], [738, 66], [836, 66], [836, 24]], color: "violet", delay: 0.55, speed: 4.15, nodeLabel: "RAG" },
-
-  { id: "t09", points: [[690, 210], [724, 210], [724, 176], [776, 176], [776, 124], [852, 124], [852, 80], [970, 80]], color: "amber", delay: 1.35, speed: 3.85, nodeLabel: "MAIL" },
-  { id: "t10", points: [[690, 234], [744, 234], [744, 270], [806, 270], [806, 226], [886, 226], [886, 184], [982, 184]], color: "cyan", delay: 0.25, speed: 3.45, nodeLabel: "CAL" },
-  { id: "t11", points: [[690, 258], [736, 258], [736, 310], [786, 310], [786, 364], [858, 364], [858, 418], [972, 418]], color: "blue", delay: 1.6, speed: 4.05, nodeLabel: "FILE" },
-  { id: "t12", points: [[690, 282], [724, 282], [724, 338], [756, 338], [756, 402], [812, 402], [812, 470], [902, 470]], color: "mint", delay: 0.75, speed: 4.3, nodeLabel: "AGT" },
-
-  { id: "t13", points: [[410, 335], [410, 374], [374, 374], [374, 418], [332, 418], [332, 482], [286, 482]], color: "violet", delay: 1.15, speed: 3.8, nodeLabel: "LOG" },
-  { id: "t14", points: [[468, 335], [468, 384], [446, 384], [446, 446], [420, 446], [420, 510]], color: "cyan", delay: 0.4, speed: 4.0, nodeLabel: "AUD" },
-  { id: "t15", points: [[532, 335], [532, 378], [562, 378], [562, 430], [608, 430], [608, 482], [668, 482], [668, 516]], color: "amber", delay: 1.45, speed: 3.95, nodeLabel: "SAFE" },
-  { id: "t16", points: [[590, 335], [590, 356], [636, 356], [636, 402], [702, 402], [702, 468], [742, 468], [742, 510]], color: "blue", delay: 0.65, speed: 4.2, nodeLabel: "CTRL" },
+const SIGNAL_ROUTES: Route[] = [
+  {
+    id: "sig-west-a",
+    d: `M 18 102 H 95 L 135 142 H 218 L 250 174 H 278 V 258 H ${HUB.left}`,
+    colour: "cyan",
+    hubLinked: true,
+    delay: 0.1,
+    speed: 1,
+  },
+  {
+    id: "sig-west-b",
+    d: `M 22 492 H 118 L 154 456 H 214 L 270 400 V 330 H ${HUB.left}`,
+    colour: "blue",
+    hubLinked: true,
+    delay: 0.7,
+    speed: 0.95,
+  },
+  {
+    id: "sig-west-c",
+    d: `M 58 316 H 142 L 168 290 H 234 L 267 323 H ${HUB.left}`,
+    colour: "violet",
+    hubLinked: true,
+    delay: 1.25,
+    speed: 1.12,
+  },
+  {
+    id: "sig-east-a",
+    d: `M ${HUB.right} 272 H 728 L 760 240 H 824 L 855 209 H 982`,
+    colour: "mint",
+    hubLinked: true,
+    delay: 0.42,
+    speed: 1.02,
+  },
+  {
+    id: "sig-east-b",
+    d: `M ${HUB.right} 334 H 744 L 782 372 H 846 L 884 410 H 976`,
+    colour: "blue",
+    hubLinked: true,
+    delay: 1.65,
+    speed: 0.94,
+  },
+  {
+    id: "sig-east-c",
+    d: `M ${HUB.right} 304 H 722 L 747 329 H 820 L 854 295 H 934 V 258 H 984`,
+    colour: "amber",
+    hubLinked: true,
+    delay: 2.05,
+    speed: 1.08,
+  },
+  {
+    id: "sig-north-a",
+    d: `M 374 18 V 82 L 411 119 V 180 L 445 214 V ${HUB.top}`,
+    colour: "cyan",
+    hubLinked: true,
+    delay: 0.2,
+    speed: 1.04,
+  },
+  {
+    id: "sig-north-b",
+    d: `M 585 14 V 74 L 553 106 V 150 L 526 177 V ${HUB.top}`,
+    colour: "violet",
+    hubLinked: true,
+    delay: 1.05,
+    speed: 1.1,
+  },
+  {
+    id: "sig-south-a",
+    d: `M 444 ${HUB.bottom} V 397 L 412 429 V 488 L 381 519 V 586`,
+    colour: "amber",
+    hubLinked: true,
+    delay: 0.58,
+    speed: 0.98,
+  },
+  {
+    id: "sig-south-b",
+    d: `M 566 ${HUB.bottom} V 403 L 597 434 V 474 L 630 507 V 586`,
+    colour: "mint",
+    hubLinked: true,
+    delay: 1.44,
+    speed: 1.06,
+  },
+  {
+    id: "sig-local-a",
+    d: "M 82 210 H 152 L 184 178 H 245 L 278 145 H 338",
+    colour: "blue",
+    delay: 0.82,
+    speed: 0.92,
+  },
+  {
+    id: "sig-local-b",
+    d: "M 720 94 H 788 L 821 127 H 898 L 931 160 H 984",
+    colour: "amber",
+    delay: 1.2,
+    speed: 0.88,
+  },
+  {
+    id: "sig-local-c",
+    d: "M 40 424 H 112 L 147 389 H 216 L 247 420 H 293",
+    colour: "mint",
+    delay: 1.95,
+    speed: 1.1,
+  },
+  {
+    id: "sig-local-d",
+    d: "M 724 475 H 786 L 817 444 H 875 L 907 476 H 980",
+    colour: "violet",
+    delay: 0.35,
+    speed: 1.02,
+  },
+  {
+    id: "sig-local-e",
+    d: "M 166 64 H 224 L 254 94 H 302 L 332 124 H 365",
+    colour: "cyan",
+    delay: 2.35,
+    speed: 0.86,
+  },
+  {
+    id: "sig-local-f",
+    d: "M 634 526 H 696 L 726 496 H 781 L 816 531 H 914",
+    colour: "blue",
+    delay: 1.72,
+    speed: 1.04,
+  },
 ];
 
-const CHIP_LAYOUT = [
-  { x: 88, y: 106, w: 56, h: 36 },
-  { x: 192, y: 310, w: 64, h: 42 },
-  { x: 96, y: 370, w: 50, h: 32 },
-  { x: 778, y: 142, w: 58, h: 40 },
-  { x: 846, y: 292, w: 66, h: 42 },
-  { x: 724, y: 408, w: 48, h: 32 },
-  { x: 864, y: 428, w: 42, h: 28 },
-  { x: 272, y: 76, w: 44, h: 30 },
+const CHIPS: Chip[] = [
+  { x: 78, y: 154, width: 78, height: 52 },
+  { x: 188, y: 372, width: 58, height: 42 },
+  { x: 246, y: 72, width: 52, height: 44 },
+  { x: 732, y: 132, width: 68, height: 48 },
+  { x: 820, y: 364, width: 72, height: 52 },
+  { x: 700, y: 456, width: 52, height: 40 },
+  { x: 89, y: 468, width: 68, height: 46 },
+  { x: 868, y: 74, width: 54, height: 42 },
 ];
 
-const STATIC_BOARD_PATHS = [
-  "M0 42 H92 V20 H164 V48 H246",
-  "M0 478 H88 V448 H160 V470 H240",
-  "M1000 46 H922 V24 H846 V52 H770",
-  "M1000 476 H932 V446 H860 V468 H800",
-  "M18 104 H54 V136 H94 V156 H150",
-  "M982 112 H940 V142 H900 V164 H850",
-  "M28 332 H88 V302 H146 V278 H188",
-  "M972 344 H916 V314 H864 V286 H824",
-  "M56 52 H56 V102 H100 V120",
-  "M944 58 V104 H904 V126",
-  "M64 246 H108 V270 H154 V248 H188",
-  "M936 244 H894 V268 H842 V248 H816",
-  "M264 18 V42 H286 V70",
-  "M750 16 V44 H730 V72",
-  "M252 500 V466 H280 V440",
-  "M770 504 V472 H744 V444",
-  "M170 188 H206 V164 H246",
-  "M830 196 H798 V170 H760",
-  "M154 442 H190 V420 H222",
-  "M846 448 H812 V426 H782",
-];
+const PACKET_COLOURS: PacketColour[] = ["cyan", "blue", "violet", "amber", "mint"];
 
-const DATA_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789@$%#&+<>?/";
-
-const PACKET_TAILS = [
-  { offset: 0.045, r: 2.45, opacity: 0.58 },
-  { offset: 0.085, r: 2.05, opacity: 0.38 },
-  { offset: 0.125, r: 1.65, opacity: 0.24 },
-  { offset: 0.165, r: 1.25, opacity: 0.13 },
-];
-
-function pointPath(points: Array<[number, number]>): string {
-  return points.map(([x, y], index) => `${index === 0 ? "M" : "L"}${x} ${y}`).join(" ");
+function seededRandom(seed: number) {
+  let value = seed >>> 0;
+  return () => {
+    value = (value * 1664525 + 1013904223) >>> 0;
+    return value / 0xffffffff;
+  };
 }
 
-function flowDirection(state: JaceRuntimeState, index: number): "in" | "out" | "none" {
-  if (state === "listening" || state === "transcribing") return "in";
-  if (state === "speaking" || state === "working") return "out";
-  if (state === "thinking") return index % 2 === 0 ? "in" : "out";
+function buildAmbientRoutes() {
+  const random = seededRandom(0x4a414345);
+  const routes: string[] = [];
 
-  // Idle should feel alive without looking busy. Only a few buses carry data.
-  if (state === "idle") {
-    if (index % 5 === 0) return "in";
-    if (index % 7 === 0) return "out";
-  }
+  for (let index = 0; index < 42; index += 1) {
+    const leftSide = index % 2 === 0;
+    const topSide = index % 3 === 0;
+    let x = leftSide ? 8 + random() * 255 : 738 + random() * 250;
+    let y = topSide ? 12 + random() * 250 : 342 + random() * 242;
+    const points = [`M ${x.toFixed(1)} ${y.toFixed(1)}`];
+    const segmentCount = 3 + Math.floor(random() * 4);
 
-  return "none";
-}
+    for (let segment = 0; segment < segmentCount; segment += 1) {
+      const horizontal = segment % 2 === 0;
+      const direction = random() > 0.48 ? 1 : -1;
+      const length = 34 + random() * 92;
 
-function pulseSpeed(state: JaceRuntimeState, base: number): number {
-  if (state === "listening" || state === "speaking") return Math.max(1.1, base * 0.44);
-  if (state === "thinking" || state === "working") return Math.max(1.25, base * 0.52);
-  if (state === "transcribing") return Math.max(1.4, base * 0.62);
-  return base * 1.55;
-}
-
-function randomCoreText(): string {
-  const groups = [3, 3, 3, 3];
-  let result = "";
-
-  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
-    if (groupIndex > 0) result += ".";
-
-    for (let index = 0; index < groups[groupIndex]; index += 1) {
-      result += DATA_CHARS[Math.floor(Math.random() * DATA_CHARS.length)];
+      if (horizontal) {
+        x = Math.max(12, Math.min(988, x + direction * length));
+        points.push(`H ${x.toFixed(1)}`);
+      } else {
+        const diagonal = random() > 0.55;
+        if (diagonal) {
+          const nextX = Math.max(12, Math.min(988, x + direction * Math.min(38, length * 0.42)));
+          y = Math.max(12, Math.min(588, y + (random() > 0.5 ? 1 : -1) * Math.min(38, length * 0.42)));
+          x = nextX;
+          points.push(`L ${x.toFixed(1)} ${y.toFixed(1)}`);
+        } else {
+          y = Math.max(12, Math.min(588, y + direction * length));
+          points.push(`V ${y.toFixed(1)}`);
+        }
+      }
     }
+
+    routes.push(points.join(" "));
   }
 
-  return result;
+  return routes;
 }
 
-function displayForState(state: JaceRuntimeState, changingText: string): string {
-  switch (state) {
-    case "thinking":
-      return changingText;
-    case "transcribing":
-      return "DECODING";
-    case "working":
-      return "EXECUTING";
-    case "waiting_permission":
-      return "AUTH REQUIRED";
-    case "warning":
-      return "ATTENTION";
-    case "offline":
-      return "OFFLINE";
-    default:
-      return "J.A.C.E.";
+function buildVias() {
+  const random = seededRandom(0x50434231);
+  const points: Array<{ x: number; y: number; r: number }> = [];
+
+  while (points.length < 74) {
+    const x = 16 + random() * 968;
+    const y = 16 + random() * 568;
+    const insideHub = x > HUB.left - 30 && x < HUB.right + 30 && y > HUB.top - 25 && y < HUB.bottom + 25;
+    if (insideHub) continue;
+    points.push({ x, y, r: random() > 0.84 ? 3.2 : 2.1 });
   }
+
+  return points;
+}
+
+const AMBIENT_ROUTES = buildAmbientRoutes();
+const VIA_POINTS = buildVias();
+
+function makeThinkingText() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789@#$%";
+  const groups = [3, 3, 3, 3];
+  return groups
+    .map((length) =>
+      Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join(""),
+    )
+    .join(".");
+}
+
+function packetDirection(state: JaceRuntimeState, routeIndex: number): PacketDirection {
+  if (state === "listening" || state === "transcribing") return "reverse";
+  if (state === "speaking") return "forward";
+  if (state === "thinking") return routeIndex % 2 === 0 ? "forward" : "reverse";
+  if (state === "working") return routeIndex % 4 === 0 ? "reverse" : "forward";
+  return routeIndex % 2 === 0 ? "forward" : "reverse";
+}
+
+function packetIsVisible(state: JaceRuntimeState, routeIndex: number, hubLinked: boolean) {
+  switch (state) {
+    case "offline":
+      return false;
+    case "idle":
+      return routeIndex % 5 === 0;
+    case "listening":
+      return hubLinked;
+    case "transcribing":
+      return hubLinked || routeIndex % 3 === 0;
+    case "thinking":
+      return true;
+    case "speaking":
+      return hubLinked;
+    case "working":
+      return true;
+    case "waiting_permission":
+      return routeIndex % 4 === 0;
+    case "warning":
+      return routeIndex % 3 === 0;
+    default:
+      return false;
+  }
+}
+
+function stateDuration(state: JaceRuntimeState, speed = 1, amplitude = 0) {
+  const base = (() => {
+    switch (state) {
+      case "idle":
+        return 8.8;
+      case "listening":
+        return 3.6 - amplitude * 1.25;
+      case "transcribing":
+        return 2.8;
+      case "thinking":
+        return 2.15;
+      case "speaking":
+        return 3.15 - amplitude * 0.85;
+      case "working":
+        return 2.0;
+      case "waiting_permission":
+        return 5.4;
+      case "warning":
+        return 2.6;
+      default:
+        return 6;
+    }
+  })();
+
+  return Math.max(1.05, base / speed);
+}
+
+function Packet(props: {
+  route: Route;
+  routeIndex: number;
+  state: JaceRuntimeState;
+  amplitude: number;
+}) {
+  const { route, routeIndex, state, amplitude } = props;
+  if (!packetIsVisible(state, routeIndex, Boolean(route.hubLinked))) return null;
+
+  const direction = packetDirection(state, routeIndex);
+  const duration = stateDuration(state, route.speed, amplitude);
+  const delay = (route.delay ?? 0) + routeIndex * 0.09;
+  const colour: PacketColour =
+    state === "waiting_permission" ? "amber" : state === "warning" ? "danger" : route.colour;
+  const reverse = direction === "reverse";
+
+  return (
+    <g className={`pcb-packet packet-${colour} packet-state-${state}`} aria-hidden="true">
+      {[4, 3, 2, 1, 0].map((tailIndex) => {
+        const isHead = tailIndex === 0;
+        const radius = isHead ? 2.55 : 0.9 + (4 - tailIndex) * 0.24;
+        const opacity = isHead ? 1 : 0.1 + (4 - tailIndex) * 0.11;
+        const extraDelay = (4 - tailIndex) * 0.038;
+
+        return (
+          <circle
+            key={`${route.id}-tail-${tailIndex}`}
+            className={isHead ? "pcb-packet-head" : "pcb-packet-tail"}
+            r={radius}
+            opacity={opacity}
+          >
+            <animateMotion
+              path={route.d}
+              dur={`${duration.toFixed(2)}s`}
+              begin={`${(delay + extraDelay).toFixed(2)}s`}
+              repeatCount="indefinite"
+              calcMode="linear"
+              keyPoints={reverse ? "1;0" : "0;1"}
+              keyTimes="0;1"
+            />
+          </circle>
+        );
+      })}
+    </g>
+  );
+}
+
+function BoardChip({ chip, index }: { chip: Chip; index: number }) {
+  const pinCount = 7;
+  const centerX = chip.x + chip.width / 2;
+  const centerY = chip.y + chip.height / 2;
+
+  return (
+    <g
+      className={`pcb-chip pcb-chip-${index + 1}`}
+      transform={`rotate(${chip.rotate ?? 0} ${centerX} ${centerY})`}
+      aria-hidden="true"
+    >
+      <rect className="pcb-chip-shadow" x={chip.x - 3} y={chip.y - 3} width={chip.width + 6} height={chip.height + 6} rx="2" />
+      <rect className="pcb-chip-body" x={chip.x} y={chip.y} width={chip.width} height={chip.height} rx="2" />
+      <rect
+        className="pcb-chip-die"
+        x={chip.x + chip.width * 0.16}
+        y={chip.y + chip.height * 0.18}
+        width={chip.width * 0.68}
+        height={chip.height * 0.64}
+        rx="1"
+      />
+      {Array.from({ length: pinCount }, (_, pinIndex) => {
+        const t = (pinIndex + 1) / (pinCount + 1);
+        const px = chip.x + chip.width * t;
+        const py = chip.y + chip.height * t;
+        return (
+          <g key={`${index}-${pinIndex}`}>
+            <line className="pcb-chip-pin" x1={px} y1={chip.y - 7} x2={px} y2={chip.y} />
+            <line className="pcb-chip-pin" x1={px} y1={chip.y + chip.height} x2={px} y2={chip.y + chip.height + 7} />
+            <line className="pcb-chip-pin" x1={chip.x - 7} y1={py} x2={chip.x} y2={py} />
+            <line className="pcb-chip-pin" x1={chip.x + chip.width} y1={py} x2={chip.x + chip.width + 7} y2={py} />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function HubPins() {
+  const horizontalPins = Array.from({ length: 26 }, (_, index) => index);
+  const verticalPins = Array.from({ length: 9 }, (_, index) => index);
+
+  return (
+    <>
+      <div className="pcb-hub-pins pcb-hub-pins-top" aria-hidden="true">
+        {horizontalPins.map((pin) => <i key={`top-${pin}`} style={{ "--pin-index": pin } as CSSProperties} />)}
+      </div>
+      <div className="pcb-hub-pins pcb-hub-pins-bottom" aria-hidden="true">
+        {horizontalPins.map((pin) => <i key={`bottom-${pin}`} style={{ "--pin-index": pin } as CSSProperties} />)}
+      </div>
+      <div className="pcb-hub-pins pcb-hub-pins-left" aria-hidden="true">
+        {verticalPins.map((pin) => <i key={`left-${pin}`} style={{ "--pin-index": pin } as CSSProperties} />)}
+      </div>
+      <div className="pcb-hub-pins pcb-hub-pins-right" aria-hidden="true">
+        {verticalPins.map((pin) => <i key={`right-${pin}`} style={{ "--pin-index": pin } as CSSProperties} />)}
+      </div>
+    </>
+  );
 }
 
 export function JaceCore(props: {
@@ -203,87 +435,74 @@ export function JaceCore(props: {
   amplitude?: number;
   onExpand: () => void;
 }) {
-  const [changingText, setChangingText] = useState(() => randomCoreText());
-  const [clock, setClock] = useState(() => new Date());
-
   const amplitude = Math.max(0, Math.min(1, props.amplitude ?? 0));
-  const waveformBars = useMemo(() => Array.from({ length: 25 }, (_, index) => index), []);
-  const visibleDisplay = displayForState(props.state, changingText);
+  const [thinkingText, setThinkingText] = useState(() => makeThinkingText());
 
   useEffect(() => {
     if (props.state !== "thinking") return;
-
-    const timer = window.setInterval(() => {
-      setChangingText(randomCoreText());
-    }, 86);
-
+    const timer = window.setInterval(() => setThinkingText(makeThinkingText()), 92);
     return () => window.clearInterval(timer);
   }, [props.state]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
+  const displayText = props.state === "thinking" ? thinkingText : "J.A.C.E.";
   const stageStyle = {
     "--voice-level": amplitude.toFixed(3),
   } as CSSProperties;
 
-  const timeString = clock.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const packets = useMemo(
+    () => SIGNAL_ROUTES.map((route, routeIndex) => (
+      <Packet
+        key={route.id}
+        route={route}
+        routeIndex={routeIndex}
+        state={props.state}
+        amplitude={amplitude}
+      />
+    )),
+    [props.state, amplitude],
+  );
 
   return (
-    <section className={`cc-panel jace-core-panel neural-core-panel state-${props.state}`}>
-      <div className="cc-panel-topline neural-core-topline">
+    <section className={`cc-panel jace-core-panel pcb-core-panel state-${props.state}`}>
+      <div className="cc-panel-topline pcb-core-topline">
         <div>
           <span className="cc-kicker">Neural core</span>
           <strong>{LABELS[props.state]}</strong>
         </div>
-
-        <div className="neural-core-top-actions">
-          <span className={`neural-link-badge ${props.runtimeConnected ? "online" : "fallback"}`}>
-            {props.runtimeConnected ? "● EVENT LINK" : "○ FALLBACK"}
+        <div className="pcb-core-actions">
+          <span className={`pcb-link-light ${props.runtimeConnected ? "online" : "fallback"}`}>
+            {props.runtimeConnected ? "● LINK" : "○ FALLBACK"}
           </span>
-          <button
-            className="cc-icon-button"
-            onClick={props.onExpand}
-            title="Focus Jace core"
-            aria-label="Focus Jace core"
-          >
-            □
-          </button>
+          <button className="cc-icon-button" onClick={props.onExpand} title="Focus Jace core">□</button>
         </div>
       </div>
 
       <div
-        className={`neural-core-stage mode-${props.state}`}
+        className={`pcb-core-stage state-${props.state}`}
         style={stageStyle}
-        aria-label={`${props.name} ${LABELS[props.state]}`}
+        aria-label={`${props.name} neural core, ${LABELS[props.state]}`}
       >
-        <div className="neural-board-substrate" />
-        <div className="neural-board-weave" />
-        <div className="neural-board-noise" />
-        <div className="neural-board-vignette" />
+        <div className="pcb-substrate" />
+        <div className="pcb-fibreglass" />
+        <div className="pcb-grain" />
 
         <svg
-          className="neural-circuit-svg"
-          viewBox="0 0 1000 520"
+          className="pcb-board-svg"
+          viewBox="0 0 1000 600"
           preserveAspectRatio="none"
+          role="presentation"
           aria-hidden="true"
         >
           <defs>
-            <filter id="neuralPacketGlow" x="-120%" y="-120%" width="340%" height="340%">
-              <feGaussianBlur stdDeviation="4.5" result="blur" />
+            <filter id="pcb-packet-glow" x="-300%" y="-300%" width="700%" height="700%">
+              <feGaussianBlur stdDeviation="2.4" result="blur" />
               <feMerge>
                 <feMergeNode in="blur" />
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
             </filter>
-            <filter id="neuralPacketTailGlow" x="-100%" y="-100%" width="300%" height="300%">
-              <feGaussianBlur stdDeviation="2.7" result="blur" />
+            <filter id="pcb-hot-glow" x="-200%" y="-200%" width="500%" height="500%">
+              <feGaussianBlur stdDeviation="1.45" result="blur" />
               <feMerge>
                 <feMergeNode in="blur" />
                 <feMergeNode in="SourceGraphic" />
@@ -291,200 +510,76 @@ export function JaceCore(props: {
             </filter>
           </defs>
 
-          <g className="neural-static-copper">
-            {STATIC_BOARD_PATHS.map((path, index) => (
-              <path key={`static-${index}`} d={path} />
+          <g className="pcb-ambient-traces">
+            {AMBIENT_ROUTES.map((d, index) => (
+              <path key={`ambient-${index}`} d={d} />
             ))}
           </g>
 
-          <g className="neural-pcb-components">
-            {CHIP_LAYOUT.map((chip, index) => (
-              <g key={`chip-${index}`} className="neural-chip">
-                <rect x={chip.x} y={chip.y} width={chip.w} height={chip.h} rx="2" />
-                <rect
-                  className="neural-chip-inner"
-                  x={chip.x + 6}
-                  y={chip.y + 6}
-                  width={Math.max(8, chip.w - 12)}
-                  height={Math.max(8, chip.h - 12)}
-                  rx="1"
-                />
-                {Array.from({ length: 5 }, (_, pin) => {
-                  const pinX = chip.x + 6 + pin * ((chip.w - 12) / 4);
-                  return (
-                    <g key={`pins-${index}-${pin}`}>
-                      <line x1={pinX} y1={chip.y - 5} x2={pinX} y2={chip.y} />
-                      <line x1={pinX} y1={chip.y + chip.h} x2={pinX} y2={chip.y + chip.h + 5} />
-                    </g>
-                  );
-                })}
+          <g className="pcb-signal-traces">
+            {SIGNAL_ROUTES.map((route) => (
+              <g className={`pcb-signal-route ${route.hubLinked ? "hub-linked" : "local-bus"}`} key={route.id}>
+                <path className="pcb-trace-underlay" d={route.d} />
+                <path className="pcb-trace" d={route.d} />
               </g>
             ))}
-
-            {Array.from({ length: 24 }, (_, index) => {
-              const x = 64 + ((index * 151) % 868);
-              const y = 48 + ((index * 91) % 424);
-              return (
-                <g key={`pad-${index}`} className="neural-solder-pad">
-                  <rect x={x} y={y} width="10" height="5" rx="1" />
-                  <rect x={x + 15} y={y} width="10" height="5" rx="1" />
-                </g>
-              );
-            })}
           </g>
 
-          <g className="neural-traces">
-            {CIRCUIT_TRACES.map((trace, index) => {
-              const outwardPath = pointPath(trace.points);
-              const inwardPath = pointPath([...trace.points].reverse());
-              const direction = flowDirection(props.state, index);
-              const activePath = direction === "in" ? inwardPath : outwardPath;
-              const endPoint = trace.points[trace.points.length - 1];
-              const duration = pulseSpeed(props.state, trace.speed);
-
-              return (
-                <g key={trace.id} className={`neural-trace packet-${trace.color} flow-${direction}`}>
-                  <path className="neural-trace-shadow" d={outwardPath} />
-                  <path className="neural-trace-line" d={outwardPath} />
-
-                  <circle className="neural-end-node-halo" cx={endPoint[0]} cy={endPoint[1]} r="7" />
-                  <circle className="neural-end-node" cx={endPoint[0]} cy={endPoint[1]} r="2.4" />
-                  <text className="neural-node-label" x={endPoint[0] + 10} y={endPoint[1] - 7}>
-                    {trace.nodeLabel}
-                  </text>
-
-                  {direction !== "none" && (
-                    <>
-                      {PACKET_TAILS.map((tail, tailIndex) => (
-                        <circle
-                          key={`${trace.id}-tail-${tailIndex}`}
-                          className="neural-data-tail"
-                          r={tail.r}
-                          opacity={tail.opacity}
-                          filter="url(#neuralPacketTailGlow)"
-                        >
-                          <animateMotion
-                            path={activePath}
-                            dur={`${duration}s`}
-                            begin={`${trace.delay + tail.offset}s`}
-                            repeatCount="indefinite"
-                          />
-                        </circle>
-                      ))}
-
-                      <circle className="neural-data-pulse" r="3.3" filter="url(#neuralPacketGlow)">
-                        <animateMotion
-                          path={activePath}
-                          dur={`${duration}s`}
-                          begin={`${trace.delay}s`}
-                          repeatCount="indefinite"
-                        />
-                      </circle>
-                    </>
-                  )}
-                </g>
-              );
-            })}
+          <g className="pcb-vias">
+            {VIA_POINTS.map((point, index) => (
+              <g key={`via-${index}`} transform={`translate(${point.x.toFixed(1)} ${point.y.toFixed(1)})`}>
+                <circle className="pcb-via-ring" r={point.r + 1.55} />
+                <circle className="pcb-via-hole" r={point.r} />
+              </g>
+            ))}
           </g>
 
-          <g className="neural-board-points">
-            {Array.from({ length: 58 }, (_, index) => {
-              const x = 40 + ((index * 137) % 920);
-              const y = 24 + ((index * 83) % 468);
-              const large = index % 9 === 0;
+          <g className="pcb-chips">
+            {CHIPS.map((chip, index) => <BoardChip key={`chip-${index}`} chip={chip} index={index} />)}
+          </g>
 
-              return (
-                <g key={`point-${index}`}>
-                  {large && <circle className="neural-via-ring" cx={x} cy={y} r="4.5" />}
-                  <circle className="neural-via" cx={x} cy={y} r={large ? 1.7 : 1.05} />
-                </g>
-              );
-            })}
+          <g className="pcb-passives" aria-hidden="true">
+            {[
+              [35, 258], [48, 258], [61, 258], [934, 310], [947, 310], [960, 310],
+              [176, 118], [176, 131], [176, 144], [806, 516], [819, 516], [832, 516],
+              [522, 58], [535, 58], [548, 58], [453, 528], [466, 528], [479, 528],
+            ].map(([x, y], index) => (
+              <rect key={`passive-${index}`} x={x} y={y} width="6" height="12" rx="1" />
+            ))}
+          </g>
+
+          <g className="pcb-board-marks" aria-hidden="true">
+            <path d="M 18 26 H 48 M 18 26 V 54" />
+            <path d="M 982 26 H 952 M 982 26 V 54" />
+            <path d="M 18 574 H 48 M 18 574 V 546" />
+            <path d="M 982 574 H 952 M 982 574 V 546" />
+          </g>
+
+          <g className="pcb-packets" filter="url(#pcb-packet-glow)">
+            {packets}
           </g>
         </svg>
 
-        <div className="neural-corner corner-tl" />
-        <div className="neural-corner corner-tr" />
-        <div className="neural-corner corner-bl" />
-        <div className="neural-corner corner-br" />
+        <div className="pcb-hub-aura" />
+        <div className="pcb-state-scan" />
 
-        <div className="neural-hud neural-hud-left">
-          <span>SIGNAL INTAKE</span>
-          {SYSTEM_LINES[props.state].map((line) => (
-            <small key={line}>{line}</small>
-          ))}
+        <div className="pcb-core-hub">
+          <HubPins />
+          <div className="pcb-core-hub-inner">
+            <span className={`pcb-core-title ${props.state === "thinking" ? "thinking-data" : ""}`}>
+              {displayText}
+            </span>
+          </div>
+          <span className="pcb-hub-sheen" aria-hidden="true" />
         </div>
 
-        <div className="neural-hud neural-hud-right">
-          <span>{STATE_MODE_COPY[props.state]}</span>
-          <strong>{LABELS[props.state]}</strong>
-          <small>{timeString}</small>
-        </div>
-
-        <div className="neural-core-glow" />
-
-        <div className="neural-hub-shell">
-          <span className="neural-hub-pin pin-top" />
-          <span className="neural-hub-pin pin-bottom" />
-          <span className="neural-hub-pin pin-left" />
-          <span className="neural-hub-pin pin-right" />
-
-          <div className="neural-hub-header">
-            <span>J.A.C.E. // CORE</span>
-            <span>{props.runtimeConnected ? "LIVE" : "LOCAL"}</span>
-          </div>
-
-          <div className="neural-hub-content">
-            {props.state === "listening" || props.state === "speaking" ? (
-              <>
-                <div className={`neural-waveform wave-${props.state}`} aria-hidden="true">
-                  {waveformBars.map((index) => {
-                    const centre = (waveformBars.length - 1) / 2;
-                    const centreBias = 1 - Math.abs(index - centre) / (centre + 1);
-                    const base = 7 + centreBias * 8;
-                    const reactive = amplitude * (16 + centreBias * 30);
-                    const wobble = ((index * 13) % 9) * 0.55;
-
-                    return (
-                      <span
-                        key={`wave-${index}`}
-                        style={{
-                          height: `${Math.max(7, base + reactive + wobble)}px`,
-                          animationDelay: `${(index % 7) * 0.045}s`,
-                          opacity: 0.46 + amplitude * 0.54,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="neural-main-word audio-word">{visibleDisplay}</div>
-              </>
-            ) : (
-              <div className={`neural-main-word state-word-${props.state}`}>{visibleDisplay}</div>
-            )}
-
-            <div className="neural-state-line">
-              <span>{LABELS[props.state]}</span>
-              <i />
-              <small>{STATUS_COPY[props.state]}</small>
-            </div>
-          </div>
-
-          <div className="neural-hub-footer">
-            <span>{props.model || "NO MODEL"}</span>
-            <span>{STATE_MODE_COPY[props.state]}</span>
-          </div>
-        </div>
-
-        <div className="neural-scan-line" />
-        <div className="neural-state-burst burst-a" />
-        <div className="neural-state-burst burst-b" />
+        <div className="pcb-board-vignette" />
       </div>
 
-      <div className="core-footer neural-core-footer">
+      <div className="core-footer pcb-core-footer">
         <span>{props.runtimeConnected ? "● LIVE EVENT LINK" : "○ EVENT FALLBACK"}</span>
-        <span>{STATUS_COPY[props.state]}</span>
         <span>{props.model || "No model"}</span>
+        <span>{props.state.toUpperCase().replace("_", " ")}</span>
       </div>
     </section>
   );
