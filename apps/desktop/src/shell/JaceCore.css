@@ -1,559 +1,237 @@
-/* --------------------------------------------------------------------------
-   JACE core — lit PCB board
+/*
+ * Jace visualizer chrome adapted to embed the AGPL-3.0-or-later
+ * ai-visualizer Circuit Board face inside the Jace command center.
+ */
 
-   Palette sampled directly from the reference frame:
-     board corners        rgb(2, 10, 5)
-     board mid tone       rgb(6, 27, 20)
-     copper traces        pale grey-green, low alpha
-     centre halo          warm olive-gold, peaking near rgb(121, 131, 85)
-     nameplate top bevel  rgb(250, 249, 188)
-     nameplate interior   rgb(3, 13, 6)
-
-   The halo is the dominant light source: everything else on the board is
-   deliberately low contrast so the centre reads as lit rather than drawn.
-   -------------------------------------------------------------------------- */
-
-.cc-panel.jc-panel {
-  --jc-black: #010603;
-  --jc-deep: #020a06;
-  --jc-base: #061b14;
-  --jc-copper: 152, 198, 172;
-  --jc-warm: 214, 198, 116;
-  --jc-plate-lit: 250, 249, 188;
-
-  --packet-cyan: #72f2ff;
-  --packet-blue: #65adff;
-  --packet-violet: #cf7cff;
-  --packet-amber: #ffd36b;
-  --packet-mint: #71ffc5;
-  --packet-danger: #ff6f82;
-
-  display: block;
-  padding: 0;
-  isolation: isolate;
-  overflow: hidden;
-  background: var(--jc-deep);
-  border-color: rgba(84, 151, 113, 0.16);
-}
-
-.cc-panel.jc-panel::before {
-  display: none;
-}
-
-.jc-stage {
-  --voice-level: 0;
-  --halo: 1;
+.jace-ai-visualizer {
   position: relative;
-  width: 100%;
-  height: 100%;
+  display: block;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
-  contain: paint;
-  background:
-    radial-gradient(ellipse 58% 62% at 50% 50%, #071f16 0%, #04140e 55%, #020a06 100%);
+  isolation: isolate;
+  container-type: size;
+  border-color: rgba(61, 220, 132, .16) !important;
+  border-radius: 8px !important;
+  background: #020705 !important;
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, .28), 0 0 0 1px rgba(255, 255, 255, .008) !important;
+  outline: none;
 }
 
-.jc-substrate,
-.jc-weave,
-.jc-glow-warm,
-.jc-glow-cool,
-.jc-scan,
-.jc-vignette {
+.jace-ai-visualizer:focus-visible {
+  outline: 1px solid rgba(61, 220, 132, .4);
+  outline-offset: -1px;
+}
+
+.jace-av-stage {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-}
-
-/* Uneven solder-mask tone. Very low contrast on purpose. */
-.jc-substrate {
-  z-index: 1;
-  background:
-    radial-gradient(ellipse 30% 34% at 28% 26%, rgba(24, 68, 50, 0.2), transparent 70%),
-    radial-gradient(ellipse 26% 30% at 76% 74%, rgba(16, 54, 40, 0.16), transparent 70%),
-    linear-gradient(112deg, transparent 0 34%, rgba(120, 176, 140, 0.02) 34.2% 34.6%, transparent 35% 100%);
-}
-
-/* Fine woven fibreglass texture. */
-.jc-weave {
-  z-index: 2;
-  opacity: 0.16;
-  background-image:
-    repeating-linear-gradient(0deg, rgba(150, 200, 172, 0.05) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(90deg, rgba(150, 200, 172, 0.04) 0 1px, transparent 1px 4px);
-}
-
-.jc-board {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
   width: 100%;
   height: 100%;
-}
-
-/* --------------------------------------------------------------------------
-   Copper
-   -------------------------------------------------------------------------- */
-
-.jc-trace,
-.jc-bus,
-.jc-signal,
-.jc-accent,
-.jc-chip-pin,
-.jc-cap-gloss {
-  fill: none;
-  stroke-linecap: butt;
-  stroke-linejoin: miter;
-  vector-effect: non-scaling-stroke;
-}
-
-.jc-trace {
-  stroke: rgba(var(--jc-copper), 0.13);
-  stroke-width: 1;
-}
-
-.jc-trace.w-1 {
-  stroke: rgba(var(--jc-copper), 0.1);
-  stroke-width: 1.2;
-}
-
-.jc-trace.w-2 {
-  stroke: rgba(var(--jc-copper), 0.16);
-  stroke-width: 1.6;
-}
-
-.jc-bus {
-  stroke: rgba(var(--jc-copper), 0.11);
-  stroke-width: 1.1;
-}
-
-.jc-signal {
-  stroke: rgba(var(--jc-copper), 0.2);
-  stroke-width: 1.2;
-}
-
-.jc-pads circle {
-  fill: none;
-  stroke: rgba(var(--jc-copper), 0.22);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.jc-passives rect {
-  fill: rgba(6, 20, 14, 0.9);
-  stroke: rgba(var(--jc-copper), 0.28);
-  stroke-width: 0.7;
-  vector-effect: non-scaling-stroke;
-}
-
-.jc-chip-body {
-  fill: rgba(4, 14, 10, 0.86);
-  stroke: rgba(var(--jc-copper), 0.3);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.jc-chip-inner {
-  fill: none;
-  stroke: rgba(var(--jc-copper), 0.16);
-  stroke-width: 0.8;
-  vector-effect: non-scaling-stroke;
-}
-
-.jc-chip-pin {
-  stroke: rgba(var(--jc-copper), 0.22);
-  stroke-width: 0.9;
-}
-
-.jc-cap-body {
-  fill: rgba(5, 16, 11, 0.94);
-  stroke: rgba(var(--jc-copper), 0.34);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.jc-cap-gloss {
-  stroke: rgba(196, 232, 210, 0.4);
-  stroke-width: 1.1;
-  stroke-linecap: round;
-}
-
-/* Sparse static colour. */
-.jc-accent {
-  stroke-width: 1.4;
-  opacity: 0.85;
-}
-
-.jc-accent.tone-rose { stroke: #e2607f; }
-.jc-accent.tone-ice { stroke: #6fd4e6; }
-.jc-accent.tone-gold { stroke: #e2b95e; }
-.jc-accent.tone-ember { stroke: #e26a58; }
-.jc-accent.tone-mint { stroke: #74dfa6; }
-
-/* --------------------------------------------------------------------------
-   Packets
-   -------------------------------------------------------------------------- */
-
-.jc-packets { z-index: 4; }
-.jc-packet-head { filter: brightness(1.35); }
-
-.jc-packet-cyan circle { fill: var(--packet-cyan); }
-.jc-packet-blue circle { fill: var(--packet-blue); }
-.jc-packet-violet circle { fill: var(--packet-violet); }
-.jc-packet-amber circle { fill: var(--packet-amber); }
-.jc-packet-mint circle { fill: var(--packet-mint); }
-.jc-packet-danger circle { fill: var(--packet-danger); }
-
-/* --------------------------------------------------------------------------
-   Light
-
-   Screen blending is what makes these read as emitted light sitting on top of
-   the copper rather than as painted shapes.
-   -------------------------------------------------------------------------- */
-
-.jc-glow-warm {
-  z-index: 6;
-  mix-blend-mode: screen;
-  opacity: calc(var(--halo) * (0.86 + var(--voice-level) * 0.34));
-  background:
-    radial-gradient(ellipse 40% 34% at 50% 50%, rgba(var(--jc-warm), 0.5) 0%, rgba(168, 158, 74, 0.26) 32%, rgba(96, 108, 48, 0.1) 58%, transparent 76%),
-    radial-gradient(ellipse 20% 46% at 50% 50%, rgba(var(--jc-warm), 0.22), transparent 70%);
-  filter: blur(14px);
-  transition: opacity 380ms ease;
-}
-
-.jc-glow-cool {
-  z-index: 6;
-  mix-blend-mode: screen;
-  opacity: 0.5;
-  background: radial-gradient(ellipse 15% 19% at 41% 70%, rgba(66, 190, 186, 0.34), transparent 72%);
-  filter: blur(16px);
-  transition: opacity 380ms ease;
-}
-
-.jc-scan {
-  z-index: 7;
-  opacity: 0;
-  mix-blend-mode: screen;
-  background: linear-gradient(180deg, transparent, rgba(150, 232, 190, 0.05) 48%, transparent);
-}
-
-.jc-vignette {
-  z-index: 12;
-  background:
-    radial-gradient(ellipse 74% 78% at 50% 50%, transparent 40%, rgba(1, 7, 4, 0.5) 76%, rgba(1, 5, 3, 0.94) 100%);
-}
-
-/* --------------------------------------------------------------------------
-   Nameplate
-
-   Proportions come from the reference: 26.8% of stage width, 18% of height,
-   centred. The frame is a bevel lit from above, so the top edge is close to
-   white and the sides fall away to a dim olive.
-   -------------------------------------------------------------------------- */
-
-.jc-plate {
-  position: absolute;
-  z-index: 14;
-  left: 50%;
-  top: 50%;
-  width: 26.8%;
-  height: 18%;
-  min-width: 132px;
-  transform: translate(-50%, -50%);
-  container-type: inline-size;
-}
-
-.jc-plate::before {
-  content: "";
-  position: absolute;
-  inset: -60% -34%;
-  z-index: -1;
-  pointer-events: none;
-  border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(var(--jc-warm), 0.34), rgba(150, 150, 70, 0.13) 46%, transparent 72%);
-  filter: blur(18px);
-  opacity: calc(0.8 + var(--voice-level) * 0.4);
-  transition: opacity 300ms ease;
-}
-
-.jc-plate-frame {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  padding: 5px;
-  border-radius: 8px;
-  background:
-    linear-gradient(
-      180deg,
-      rgba(var(--jc-plate-lit), 0.96) 0%,
-      rgba(196, 192, 128, 0.7) 14%,
-      rgba(104, 114, 74, 0.58) 44%,
-      rgba(120, 126, 82, 0.6) 62%,
-      rgba(206, 200, 140, 0.82) 92%,
-      rgba(232, 228, 168, 0.9) 100%
-    );
-  box-shadow:
-    0 0 0 1px rgba(0, 6, 3, 0.6),
-    0 0 26px rgba(var(--jc-warm), calc(0.2 + var(--voice-level) * 0.22)),
-    0 0 70px rgba(var(--jc-warm), 0.12);
-  transition: box-shadow 300ms ease;
-}
-
-/* Sides of the bevel catch far less light than the top and bottom. */
-.jc-plate-frame::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 8px;
-  pointer-events: none;
-  background: linear-gradient(90deg, rgba(4, 12, 8, 0.5) 0%, transparent 7%, transparent 93%, rgba(4, 12, 8, 0.45) 100%);
-}
-
-.jc-plate-screen {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  border: 1px solid rgba(74, 116, 98, 0.5);
-  border-radius: 4px;
-  background:
-    radial-gradient(ellipse 70% 90% at 50% 50%, rgba(18, 46, 32, 0.5), transparent 70%),
-    linear-gradient(180deg, #030f08, #020a05);
-  box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.9);
-}
-
-.jc-plate-text {
   display: block;
-  max-width: 94%;
-  color: #dcfbe8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: clamp(11px, 11.5cqw, 62px);
-  font-weight: 700;
+  background: #020705;
+  transform-origin: center center;
+}
+
+/* The engine itself performs the upstream live camera flythrough. */
+.jace-av-stage.jace-av-cinematic {
+  transform: none;
+}
+
+.jace-av-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(0,0,0,.6) 100%);
+}
+
+.jace-av-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  font-family: "SF Mono", Menlo, Consolas, ui-monospace, monospace;
+  color: #e8f0f2;
+  text-transform: uppercase;
+  transition: opacity .7s ease;
+}
+
+.jace-ai-visualizer:has(.jace-av-stage.jace-av-cinematic) .jace-av-hud {
+  opacity: 0;
+}
+
+
+.jace-av-corner {
+  position: absolute;
+  width: clamp(17px, 4.2cqw, 34px);
+  height: clamp(17px, 4.2cqw, 34px);
+  border: 1px solid #1c2f26;
+}
+.jace-av-corner.tl { top: clamp(8px, 2.2cqw, 18px); left: clamp(8px, 2.2cqw, 18px); border-right: 0; border-bottom: 0; }
+.jace-av-corner.tr { top: clamp(8px, 2.2cqw, 18px); right: clamp(8px, 2.2cqw, 18px); border-left: 0; border-bottom: 0; }
+.jace-av-corner.bl { bottom: clamp(8px, 2.2cqw, 18px); left: clamp(8px, 2.2cqw, 18px); border-right: 0; border-top: 0; }
+.jace-av-corner.br { bottom: clamp(8px, 2.2cqw, 18px); right: clamp(8px, 2.2cqw, 18px); border-left: 0; border-top: 0; }
+
+.jace-av-square {
+  position: absolute;
+  width: clamp(8px, 2cqw, 16px);
+  height: clamp(8px, 2cqw, 16px);
+  border: 1px solid #39464e;
+}
+.jace-av-square.tl { top: clamp(32px, 8cqw, 64px); left: clamp(17px, 4.2cqw, 34px); }
+.jace-av-square.tr { top: clamp(32px, 8cqw, 64px); right: clamp(17px, 4.2cqw, 34px); }
+
+.jace-av-brand {
+  position: absolute;
+  top: clamp(14px, 4.2cqw, 34px);
+  left: clamp(23px, 6.8cqw, 56px);
+  white-space: nowrap;
+}
+
+.jace-av-brand-title {
+  font-size: clamp(15px, 1.1cqw, 22px);
   line-height: 1;
-  letter-spacing: 0.2em;
-  text-align: center;
-  text-indent: 0.2em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  text-shadow:
-    0 0 8px rgba(168, 255, 208, 0.42),
-    0 0 22px rgba(96, 226, 158, 0.2),
-    0 0 46px rgba(70, 200, 132, 0.12);
+  letter-spacing: .62em;
+  color: #e8f0f2;
+  text-shadow: 0 0 12px rgba(120,255,190,.4);
 }
 
-.jc-plate-text.is-data {
-  font-size: clamp(8px, 5.6cqw, 34px);
-  letter-spacing: 0.1em;
-  text-indent: 0.1em;
-  animation: jc-flicker 180ms steps(2, end) infinite;
+.jace-av-brand-sub {
+  margin-top: clamp(4px, .9cqw, 7px);
+  font-size: clamp(8px, .55cqw, 11px);
+  line-height: 1;
+  letter-spacing: .34em;
+  color: #5a6a72;
 }
 
-/* Short bright stubs where the board meets the plate. */
-.jc-plate-stub {
+.jace-av-brand-sub b,
+.jace-av-bus span {
+  color: #3ddc84;
+  font-weight: 400;
+}
+
+.jace-av-status {
   position: absolute;
-  z-index: 2;
-  background: rgba(var(--jc-plate-lit), 0.5);
-  pointer-events: none;
+  top: clamp(14px, 4.2cqw, 34px);
+  right: clamp(23px, 6.8cqw, 56px);
+  text-align: right;
 }
 
-.stub-top { left: 50%; top: -9px; width: 1px; height: 9px; }
-.stub-bottom { left: 42%; bottom: -9px; width: 1px; height: 9px; }
-.stub-left { left: -10px; top: 62%; width: 10px; height: 1px; }
-.stub-right { right: -10px; top: 34%; width: 10px; height: 1px; }
-
-/* --------------------------------------------------------------------------
-   Corner HUD
-   -------------------------------------------------------------------------- */
-
-.jc-hud {
-  position: absolute;
-  z-index: 18;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.jc-hud strong {
-  color: #c9e8d6;
-  margin-right: -0.34em;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.34em;
-  text-transform: uppercase;
-  text-shadow: 0 0 10px rgba(120, 226, 170, 0.3);
-}
-
-.jc-hud em {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: #4e7c68;
-  font-size: 7.5px;
-  font-style: normal;
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+.jace-av-state {
+  font-size: clamp(13px, .95cqw, 19px);
+  line-height: 1;
+  letter-spacing: .5em;
+  color: #e8f0f2;
   white-space: nowrap;
 }
 
-.jc-hud em i {
-  width: 5px;
-  height: 5px;
-  border: 1px solid rgba(110, 190, 150, 0.5);
-}
-
-.jc-hud em i.on { background: #55d69a; box-shadow: 0 0 6px rgba(85, 214, 154, 0.7); }
-.jc-hud em i.off { background: transparent; }
-
-.jc-hud-tl {
-  left: 14px;
-  top: 11px;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-}
-
-.jc-hud-tr {
-  right: 14px;
-  top: 11px;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-}
-
-.jc-hud-tr strong { letter-spacing: 0.3em; font-size: 10px; margin-right: -0.3em; }
-.jc-hud-tr em { color: #6ba98d; letter-spacing: 0.26em; }
-
-.jc-hud-bl { left: 14px; bottom: 10px; }
-.jc-hud-br { right: 44px; bottom: 10px; }
-.jc-hud-bl em,
-.jc-hud-br em { color: #3f6957; font-size: 7px; }
-
-.jc-led {
-  align-self: flex-end;
-  margin-top: 5px;
-  width: 18px;
-  height: 18px;
+.jace-av-spinner {
+  display: inline-block;
+  width: .85em;
+  height: .85em;
+  margin-left: .55em;
+  vertical-align: -8%;
+  border: 1px solid #5a6a72;
+  border-top-color: #e8f0f2;
   border-radius: 50%;
-  background: radial-gradient(circle at 40% 34%, #ddffee 0%, #58d79c 40%, #1d7c53 68%, #0a3a26 100%);
-  box-shadow:
-    0 0 12px rgba(80, 216, 152, 0.75),
-    0 0 30px rgba(70, 200, 140, 0.35),
-    inset 0 0 6px rgba(255, 255, 255, 0.3);
-  transition: background 300ms ease, box-shadow 300ms ease;
+  animation: jace-av-spin 1.1s linear infinite;
 }
 
-.jc-expand {
+@keyframes jace-av-spin { to { transform: rotate(360deg); } }
+
+.jace-av-clock {
+  margin-top: clamp(4px, 1cqw, 8px);
+  font-size: clamp(11px, .8cqw, 16px);
+  letter-spacing: .3em;
+  color: #8fe8b8;
+  text-shadow: 0 0 10px rgba(90,240,160,.4);
+}
+
+.jace-av-orb {
+  position: relative;
+  width: clamp(34px, 2.6cqw, 52px);
+  height: clamp(34px, 2.6cqw, 52px);
+  margin: clamp(7px, 1.7cqw, 14px) 0 0 auto;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #7dffb8 0%, #1d9c58 42%, #06301a 100%);
+  box-shadow: 0 0 24px rgba(61,220,132,.5), inset 0 0 14px rgba(0,0,0,.55);
+}
+
+.jace-av-orb::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 1px solid rgba(61,220,132,.35);
+  border-radius: 50%;
+}
+
+.jace-av-orb.alert {
+  background: radial-gradient(circle at 38% 32%, #ff9aa5 0%, #b82f3d 42%, #36050b 100%);
+  box-shadow: 0 0 24px rgba(255,77,94,.55), inset 0 0 14px rgba(0,0,0,.55);
+}
+.jace-av-orb.alert::after { border-color: rgba(255,77,94,.4); }
+
+.jace-av-bus,
+.jace-av-hint {
+  position: absolute;
+  bottom: clamp(14px, 4.2cqw, 34px);
+  font-size: clamp(8px, .6cqw, 12px);
+  line-height: 1;
+  letter-spacing: .3em;
+  color: #5a6a72;
+  white-space: nowrap;
+}
+
+.jace-av-bus { left: clamp(23px, 6.8cqw, 56px); }
+.jace-av-hint { right: clamp(23px, 6.8cqw, 56px); text-align: right; }
+
+.jace-av-focus-button {
   position: absolute;
   z-index: 20;
-  right: 12px;
-  bottom: 9px;
-  opacity: 0.5;
-  transition: opacity 180ms ease, color 180ms ease, border-color 180ms ease;
+  right: 8px;
+  bottom: 8px;
+  width: 27px;
+  height: 25px;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 22px;
   padding: 0;
-  border: 1px solid rgba(120, 190, 155, 0.16);
+  border: 1px solid rgba(120,220,170,.18);
   border-radius: 4px;
-  background: rgba(3, 14, 9, 0.7);
-  color: #5f8d78;
+  background: rgba(2,7,5,.72);
+  color: rgba(180,230,205,.55);
+  font: 12px/1 ui-monospace, monospace;
   cursor: pointer;
-  font-size: 10px;
+  opacity: 0;
+  transition: opacity .18s ease, color .18s ease, border-color .18s ease;
 }
 
-.jc-expand:hover,
-.jc-expand:focus-visible {
+.jace-ai-visualizer:hover .jace-av-focus-button,
+.jace-av-focus-button:focus-visible {
   opacity: 1;
-  color: #cdeadb;
-  border-color: rgba(140, 216, 178, 0.4);
 }
 
-/* --------------------------------------------------------------------------
-   States
-
-   Geometry never changes between states. Only light, packet behaviour and
-   accent hue do, which is what keeps the board feeling like one machine.
-   -------------------------------------------------------------------------- */
-
-.jc-stage.state-offline {
-  filter: saturate(0.2) brightness(0.62);
+.jace-av-focus-button:hover {
+  color: #a6ffd0;
+  border-color: rgba(61,220,132,.42);
 }
 
-.jc-stage.state-offline .jc-glow-warm,
-.jc-stage.state-offline .jc-glow-cool { opacity: 0.12; }
-
-.jc-stage.state-idle { --halo: 0.72; }
-
-.jc-stage.state-listening {
-  --halo: 0.8;
+.state-warning.jace-ai-visualizer,
+.state-offline.jace-ai-visualizer {
+  border-color: rgba(255,77,94,.2) !important;
 }
 
-.jc-stage.state-listening .jc-glow-cool { opacity: calc(0.9 + var(--voice-level) * 0.6); }
-.jc-stage.state-listening .jc-plate-screen { border-color: rgba(96, 186, 200, 0.55); }
-
-.jc-stage.state-transcribing { --halo: 0.86; }
-
-.jc-stage.state-thinking { --halo: 1.05; }
-.jc-stage.state-thinking .jc-scan {
-  opacity: 1;
-  animation: jc-scan 2.4s linear infinite;
+/* Command-center focus mode: let the board use every available pixel. */
+.focus-core .jace-core-panel.jace-ai-visualizer {
+  width: 100%;
+  height: 100%;
+  border-radius: 9px !important;
 }
 
-.jc-stage.state-speaking { --halo: 1.25; }
-.jc-stage.state-speaking .jc-plate-frame {
-  box-shadow:
-    0 0 0 1px rgba(0, 6, 3, 0.6),
-    0 0 34px rgba(var(--jc-warm), calc(0.3 + var(--voice-level) * 0.4)),
-    0 0 90px rgba(var(--jc-warm), calc(0.16 + var(--voice-level) * 0.2));
-}
-
-.jc-stage.state-working { --halo: 1.12; }
-.jc-stage.state-working .jc-scan {
-  opacity: 0.8;
-  animation: jc-scan 1.6s linear infinite;
-}
-
-.jc-stage.state-waiting_permission {
-  --halo: 1;
-  --jc-warm: 236, 186, 92;
-}
-
-.jc-stage.state-waiting_permission .jc-led {
-  background: radial-gradient(circle at 40% 34%, #fff0cf 0%, #e7bd63 40%, #8a6520 68%, #3a2c0c 100%);
-  box-shadow: 0 0 12px rgba(231, 189, 99, 0.75), 0 0 30px rgba(220, 176, 84, 0.3);
-}
-
-.jc-stage.state-warning {
-  --halo: 1.05;
-  --jc-warm: 232, 122, 108;
-}
-
-.jc-stage.state-warning .jc-led {
-  background: radial-gradient(circle at 40% 34%, #ffd9d4 0%, #e0776a 40%, #7d2c22 68%, #35100c 100%);
-  box-shadow: 0 0 12px rgba(224, 119, 106, 0.8), 0 0 30px rgba(210, 100, 88, 0.35);
-}
-
-.jc-stage.state-warning .jc-plate-screen { border-color: rgba(198, 104, 92, 0.55); }
-
-@keyframes jc-scan {
-  from { transform: translateY(-100%); }
-  to { transform: translateY(100%); }
-}
-
-@keyframes jc-flicker {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.72; }
+@media (max-width: 1100px) {
+  .jace-av-hint { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .jc-scan,
-  .jc-plate-text.is-data { animation: none !important; }
-  .jc-packets { display: none; }
+  .jace-av-spinner { animation-duration: 2.4s; }
 }
