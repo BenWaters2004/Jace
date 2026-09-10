@@ -14,7 +14,7 @@ import {
 } from "./JaceBoardEngine";
 import "./JaceCore.css";
 
-const THINKING_SOUND_URL = "/assets_thinking.wav";
+const THINKING_SOUND_URL = new URL("../assets/assets_thinking.wav", import.meta.url).href;
 const THINKING_SOUND_VOLUME = 0.3;
 
 // Other Windows audio sessions are reduced to 18% of their existing app
@@ -156,54 +156,91 @@ export function JaceCore(props: {
     return () => window.clearInterval(timer);
   }, []);
 
-  // Preload the local thinking loop once. Put the user's WAV at:
-  // apps/desktop/public/assets_thinking.wav
+  // Preload the thinking loop once. The WAV is imported as a Vite asset so
+  // it is copied into the production bundle and receives the correct Tauri
+  // asset URL automatically. Put the user's file at:
+  // apps/desktop/src/assets/assets_thinking.wav
   useEffect(() => {
-    const audio = new Audio(THINKING_SOUND_URL);
+    const audio = new Audio();
+    audio.src = THINKING_SOUND_URL;
     audio.loop = true;
     audio.preload = "auto";
     audio.volume = THINKING_SOUND_VOLUME;
+
+    const handleCanPlay = () => {
+      console.debug("[Jace Audio] thinking sound ready", THINKING_SOUND_URL);
+    };
+
+    const handleError = () => {
+      console.error(
+        "[Jace Audio] thinking sound failed to load",
+        THINKING_SOUND_URL,
+        audio.error,
+      );
+    };
+
+    audio.addEventListener("canplay", handleCanPlay);
+    audio.addEventListener("error", handleError);
+    audio.load();
 
     thinkingAudioRef.current = audio;
 
     return () => {
       audio.pause();
-      audio.currentTime = 0;
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // Best effort reset.
+      }
+      audio.removeEventListener("canplay", handleCanPlay);
+      audio.removeEventListener("error", handleError);
+      audio.removeAttribute("src");
+      audio.load();
       thinkingAudioRef.current = null;
     };
   }, []);
 
-  // Play the thinking sound only while the real Jace runtime is in its
-  // thinking state. It stops immediately on speaking (and on every other
-  // state transition), keeping the sound tied to the centre text scramble.
+  // IMPORTANT: follow the visualizer's thinking state rather than only the
+  // literal runtime value "thinking". The centre text scrambles for
+  // thinking/transcribing/working/waiting_permission because those states are
+  // intentionally mapped to BoardVisualState "thinking". The sound now
+  // follows exactly that same mapping and stops immediately when speaking.
+  const thinkingVisualActive = toBoardState(props.state) === "thinking";
+
   useEffect(() => {
     const audio = thinkingAudioRef.current;
     if (!audio) return;
 
-    if (props.state === "thinking") {
-      audio.volume = THINKING_SOUND_VOLUME;
-
-      // Start from the beginning for each new reasoning pass.
+    const stopThinkingAudio = () => {
+      audio.pause();
       try {
         audio.currentTime = 0;
       } catch {
-        // Some WebView audio implementations can reject currentTime changes
-        // before metadata has loaded. Playback still works without it.
+        // Best effort reset.
       }
+    };
 
-      void audio.play().catch((error) => {
-        console.debug("[Jace Audio] thinking sound could not start", error);
-      });
+    // Speaking always wins, even if another state update arrives close by.
+    if (props.state === "speaking" || !thinkingVisualActive) {
+      stopThinkingAudio();
       return;
     }
 
-    audio.pause();
-    try {
-      audio.currentTime = 0;
-    } catch {
-      // Best effort reset.
-    }
-  }, [props.state]);
+    audio.loop = true;
+    audio.volume = THINKING_SOUND_VOLUME;
+
+    // Do not restart the WAV when Jace moves between thinking-like runtime
+    // states (for example transcribing -> thinking -> working). That keeps the
+    // loop continuous until Jace actually leaves the visual thinking state.
+    if (!audio.paused) return;
+
+    void audio.play().catch((error) => {
+      console.error(
+        "[Jace Audio] thinking sound could not start",
+        { url: THINKING_SOUND_URL, state: props.state, error },
+      );
+    });
+  }, [props.state, thinkingVisualActive]);
 
   // Native Windows audio ducking. The Tauri backend lowers every non-Jace
   // audio session while speaking, then restores the exact session volumes.
