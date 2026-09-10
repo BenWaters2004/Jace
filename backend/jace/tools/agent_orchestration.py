@@ -88,6 +88,16 @@ class ListAgentTasksInput(BaseModel):
     limit: int = Field(default=10, ge=1, le=30)
 
 
+class LatestAgentResultInput(BaseModel):
+    agent_id: AgentKind | None = Field(
+        default=None,
+        description=(
+            "Optional specialist filter. Omit when the user says 'the agent', "
+            "'background job', or otherwise refers to the most recent delegated task."
+        ),
+    )
+
+
 def _agent_label(agent_id: str) -> str:
     definition = get_agent_definition(agent_id)
     return definition.name if definition else agent_id
@@ -262,6 +272,104 @@ async def _list(
     )
 
 
+async def _latest_result(
+    payload: LatestAgentResultInput,
+    context: ToolContext,
+) -> ToolExecutionResult:
+    """
+    Resolve conversational references such as "the agent" without forcing the
+    small local model to remember a UUID or perform a list -> check sequence.
+
+    Prefer tasks originating from the current conversation. Only fall back to
+    global recent tasks when the conversation has no delegated work at all.
+    """
+    rows = await list_tasks(
+        context.session,
+        agent_id=payload.agent_id,
+        conversation_id=context.conversation_id,
+        limit=25,
+    )
+
+    scope = "current conversation"
+
+    if not rows and context.conversation_id:
+        rows = await list_tasks(
+            context.session,
+            agent_id=payload.agent_id,
+            conversation_id=None,
+            limit=25,
+        )
+        scope = "recent Jace history"
+
+    if not rows:
+        specialist = (
+            f" for the {_agent_label(payload.agent_id)}"
+            if payload.agent_id
+            else ""
+        )
+        return ToolExecutionResult(
+            content=(
+                f"No background agent task{specialist} was found. "
+                "Do not invent an agent result."
+            ),
+            display="No matching background agent task found.",
+            metadata={"task": None, "scope": scope},
+        )
+
+    # list_tasks() is newest-first. The most recently delegated task is the
+    # user's natural referent for phrases like "the agent" or "what did it find?"
+    row = rows[0]
+    summary = _task_summary(row, include_result=True)
+
+    if row.status == "completed":
+        content = (
+            f"Most recent background task from {scope}:\n"
+            f"Agent: {_agent_label(row.agent_id)}\n"
+            f"Title: {row.title}\n"
+            f"Task ID: {row.id}\n"
+            "Status: completed\n\n"
+            f"RESULT\n{row.result or 'No textual result was returned.'}\nEND RESULT\n\n"
+            "This is the real persisted agent result. Use it to answer the user directly."
+        )
+    elif row.status == "failed":
+        content = (
+            f"Most recent background task from {scope}:\n"
+            f"Agent: {_agent_label(row.agent_id)}\n"
+            f"Title: {row.title}\n"
+            f"Task ID: {row.id}\n"
+            "Status: failed\n"
+            f"Error: {row.error or 'Unknown failure'}\n\n"
+            "Tell the user the actual failure rather than claiming the agent is unavailable."
+        )
+    elif row.status == "cancelled":
+        content = (
+            f"Most recent background task from {scope}:\n"
+            f"Agent: {_agent_label(row.agent_id)}\n"
+            f"Title: {row.title}\n"
+            f"Task ID: {row.id}\n"
+            "Status: cancelled\n\n"
+            "Tell the user this task was cancelled."
+        )
+    else:
+        content = (
+            f"Most recent background task from {scope}:\n"
+            f"Agent: {_agent_label(row.agent_id)}\n"
+            f"Title: {row.title}\n"
+            f"Task ID: {row.id}\n"
+            f"Status: {row.status}\n"
+            f"Progress: {round(float(row.progress or 0.0) * 100)}%\n"
+            f"Current activity: {row.progress_message or row.status}\n\n"
+            "The task has not produced a final result yet. Report its real current "
+            "status and do not invent findings."
+        )
+
+    return ToolExecutionResult(
+        content=content,
+        display=content[:1500],
+        metadata={"task": summary, "scope": scope},
+    )
+
+
 async def _cancel(
     payload: AgentTaskIdInput,
     context: ToolContext,
@@ -345,6 +453,26 @@ def register_agent_orchestration_tools() -> None:
             default_permission="allow",
             input_model=ListAgentTasksInput,
             handler=_list,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="get_latest_agent_result",
+            label="Get latest agent result",
+            description=(
+                "Retrieve the most recent real background-agent task/result, preferring "
+                "the current conversation. Use this when the user says 'the agent', "
+                "'what did the agent find?', 'what did it find?', 'what came back?', "
+                "or asks for the result without supplying a task ID. Call this tool "
+                "instead of claiming that agent output is unavailable or stored in an "
+                "unknown/shared memory location."
+            ),
+            category="Agents",
+            risk="read",
+            default_permission="allow",
+            input_model=LatestAgentResultInput,
+            handler=_latest_result,
         )
     )
 

@@ -96,6 +96,7 @@ export function JaceCore(props: {
   const engineRef = useRef<JaceBoardEngine | null>(null);
 
   const thinkingAudioRef = useRef<HTMLAudioElement | null>(null);
+  const thinkingShouldPlayRef = useRef(false);
   const latestStateRef = useRef<JaceRuntimeState>(props.state);
   const duckRequestRef = useRef(0);
   const unduckTimerRef = useRef<number | null>(null);
@@ -156,19 +157,120 @@ export function JaceCore(props: {
     return () => window.clearInterval(timer);
   }, []);
 
-  // Preload the thinking loop once. The WAV is imported as a Vite asset so
-  // it is copied into the production bundle and receives the correct Tauri
-  // asset URL automatically. Put the user's file at:
-  // apps/desktop/src/assets/assets_thinking.wav
+  // Thinking audio is prepared once and kept for the lifetime of the visual
+  // core. WebView2/browser autoplay policies can reject an audio.play() call
+  // that occurs several seconds after the original Send/voice gesture, so we
+  // proactively "unlock" the element on the first local user interaction.
   useEffect(() => {
-    const audio = new Audio();
-    audio.src = THINKING_SOUND_URL;
+    const audio = new Audio(THINKING_SOUND_URL);
     audio.loop = true;
     audio.preload = "auto";
     audio.volume = THINKING_SOUND_VOLUME;
 
+    let unlocked = false;
+    let priming = false;
+
+    const stopAudio = (reset = true) => {
+      audio.pause();
+
+      if (reset) {
+        try {
+          audio.currentTime = 0;
+        } catch {
+          // Best-effort reset.
+        }
+      }
+    };
+
+    const tryPlay = async (reason: string) => {
+      if (!thinkingShouldPlayRef.current) {
+        return;
+      }
+
+      audio.loop = true;
+      audio.muted = false;
+      audio.volume = THINKING_SOUND_VOLUME;
+
+      if (!audio.paused) {
+        return;
+      }
+
+      try {
+        await audio.play();
+        unlocked = true;
+        console.debug("[Jace Audio] thinking sound playing", {
+          reason,
+          url: THINKING_SOUND_URL,
+        });
+      } catch (error) {
+        console.warn("[Jace Audio] thinking sound play was blocked", {
+          reason,
+          url: THINKING_SOUND_URL,
+          error,
+        });
+      }
+    };
+
+    const primeFromGesture = () => {
+      if (unlocked || priming) {
+        if (thinkingShouldPlayRef.current) {
+          void tryPlay("user-gesture");
+        }
+        return;
+      }
+
+      priming = true;
+
+      const previousMuted = audio.muted;
+      const previousVolume = audio.volume;
+
+      // Muted playback is allowed by WebView/browser autoplay policy. Starting
+      // and immediately pausing it inside the user's gesture unlocks later
+      // audible playback when the model enters thinking asynchronously.
+      audio.muted = true;
+      audio.volume = 0;
+
+      void audio
+        .play()
+        .then(() => {
+          audio.pause();
+
+          try {
+            audio.currentTime = 0;
+          } catch {
+            // Best effort.
+          }
+
+          audio.muted = previousMuted;
+          audio.volume = previousVolume;
+          unlocked = true;
+          priming = false;
+
+          console.debug("[Jace Audio] thinking sound unlocked");
+
+          if (thinkingShouldPlayRef.current) {
+            void tryPlay("post-unlock");
+          }
+        })
+        .catch((error) => {
+          audio.muted = previousMuted;
+          audio.volume = previousVolume;
+          priming = false;
+
+          console.debug("[Jace Audio] thinking sound unlock deferred", error);
+        });
+    };
+
     const handleCanPlay = () => {
       console.debug("[Jace Audio] thinking sound ready", THINKING_SOUND_URL);
+
+      if (thinkingShouldPlayRef.current) {
+        void tryPlay("canplay");
+      }
+    };
+
+    const handlePlaying = () => {
+      unlocked = true;
     };
 
     const handleError = () => {
@@ -180,65 +282,79 @@ export function JaceCore(props: {
     };
 
     audio.addEventListener("canplay", handleCanPlay);
+    audio.addEventListener("playing", handlePlaying);
     audio.addEventListener("error", handleError);
-    audio.load();
 
+    window.addEventListener("pointerdown", primeFromGesture, true);
+    window.addEventListener("keydown", primeFromGesture, true);
+
+    audio.load();
     thinkingAudioRef.current = audio;
 
     return () => {
-      audio.pause();
-      try {
-        audio.currentTime = 0;
-      } catch {
-        // Best effort reset.
-      }
+      thinkingShouldPlayRef.current = false;
+      stopAudio();
+
+      window.removeEventListener("pointerdown", primeFromGesture, true);
+      window.removeEventListener("keydown", primeFromGesture, true);
+
       audio.removeEventListener("canplay", handleCanPlay);
+      audio.removeEventListener("playing", handlePlaying);
       audio.removeEventListener("error", handleError);
+
       audio.removeAttribute("src");
       audio.load();
-      thinkingAudioRef.current = null;
+
+      if (thinkingAudioRef.current === audio) {
+        thinkingAudioRef.current = null;
+      }
     };
   }, []);
 
-  // IMPORTANT: follow the visualizer's thinking state rather than only the
-  // literal runtime value "thinking". The centre text scrambles for
-  // thinking/transcribing/working/waiting_permission because those states are
-  // intentionally mapped to BoardVisualState "thinking". The sound now
-  // follows exactly that same mapping and stops immediately when speaking.
+  // Follow the same mapped state used by the ai-visualizer text scramble.
+  // Transcribing, thinking, working and waiting_permission form one continuous
+  // processing period; the WAV should not restart while Jace moves between
+  // those internal states. Speaking always stops it immediately.
   const thinkingVisualActive = toBoardState(props.state) === "thinking";
 
   useEffect(() => {
     const audio = thinkingAudioRef.current;
-    if (!audio) return;
 
-    const stopThinkingAudio = () => {
+    thinkingShouldPlayRef.current =
+      thinkingVisualActive && props.state !== "speaking";
+
+    if (!audio) {
+      return;
+    }
+
+    if (!thinkingShouldPlayRef.current) {
       audio.pause();
+
       try {
         audio.currentTime = 0;
       } catch {
-        // Best effort reset.
+        // Best effort.
       }
-    };
 
-    // Speaking always wins, even if another state update arrives close by.
-    if (props.state === "speaking" || !thinkingVisualActive) {
-      stopThinkingAudio();
       return;
     }
 
     audio.loop = true;
+    audio.muted = false;
     audio.volume = THINKING_SOUND_VOLUME;
 
-    // Do not restart the WAV when Jace moves between thinking-like runtime
-    // states (for example transcribing -> thinking -> working). That keeps the
-    // loop continuous until Jace actually leaves the visual thinking state.
-    if (!audio.paused) return;
+    if (!audio.paused) {
+      return;
+    }
 
     void audio.play().catch((error) => {
-      console.error(
-        "[Jace Audio] thinking sound could not start",
-        { url: THINKING_SOUND_URL, state: props.state, error },
-      );
+      // If WebView2 rejected this asynchronous play call, the gesture-unlock
+      // listener above will retry the sound on the next user interaction.
+      console.warn("[Jace Audio] thinking sound waiting for audio unlock", {
+        state: props.state,
+        url: THINKING_SOUND_URL,
+        error,
+      });
     });
   }, [props.state, thinkingVisualActive]);
 

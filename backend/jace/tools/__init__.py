@@ -23,16 +23,37 @@ def ensure_tools_registered() -> None:
     register_interactive_tools()
     register_agent_orchestration_tools()
 
-    # Preserve every existing smart-routing rule and layer agent routing on top.
-    #
-    # jace.tools.agent imports route_tool_names into its module namespace, so
-    # replacing that module-global callable here extends routing without a risky
-    # full replacement of routing.py.
+    # Extend Jace's existing smart tool router.
     from jace.tools import agent as primary_agent
     from jace.tools.agent_routing import extend_agent_tool_route
 
     primary_agent.route_tool_names = extend_agent_tool_route(
         primary_agent.route_tool_names
     )
+
+    # Phase 11B.1.2:
+    # Explicit background delegation must be deterministic rather than merely
+    # hoping a small local model chooses the supplied tool. api.chat imported
+    # stream_agent directly during module import, so patch the chat module's
+    # reference as well as the source module.
+    from jace.tools.agent_delegation_bridge import wrap_stream_agent
+
+    if not getattr(
+        primary_agent.stream_agent,
+        "_jace_agent_delegation_bridge",
+        False,
+    ):
+        primary_agent.stream_agent = wrap_stream_agent(
+            primary_agent.stream_agent
+        )
+
+    try:
+        from jace.api import chat as chat_api
+
+        chat_api.stream_agent = primary_agent.stream_agent
+    except (ImportError, AttributeError):
+        # main.py normally imports chat before application lifespan startup.
+        # This fallback keeps tool registration safe in isolated tests.
+        pass
 
     _registered = True
