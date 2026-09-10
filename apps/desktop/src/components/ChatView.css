@@ -1,0 +1,134 @@
+/*
+ * Jace chat transcript behaviour.
+ *
+ * This file intentionally layers on top of the existing global chat styles
+ * without requiring another large replacement of styles.css.
+ */
+
+/* The wrapper owns the flexible chat height and provides the positioning
+   context for the "jump to latest" button. */
+.chat-shell .chat-scroll-shell {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  overflow: hidden;
+}
+
+.chat-shell .chat-scroll.chat-scroll-bottom {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+
+/*
+ * Short conversations grow upward from the composer rather than beginning
+ * at the top of the workspace.
+ *
+ * Once the transcript is taller than the viewport, it behaves like a normal
+ * scrollable conversation.
+ */
+.chat-shell .chat-scroll .messages.chat-messages-bottom {
+  min-height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/*
+ * Floating "return to latest" control.
+ * It stays above the composer and does not move with the transcript.
+ */
+.chat-scroll-to-bottom {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: 20;
+
+  display: grid;
+  place-items: center;
+
+  width: 34px;
+  height: 34px;
+  padding: 0;
+
+  border: 1px solid rgba(100, 220, 235, 0.24);
+  border-radius: 50%;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(17, 30, 34, 0.97),
+      rgba(10, 20, 24, 0.97)
+    );
+  color: #8feaf4;
+
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.34),
+    0 0 18px rgba(71, 214, 231, 0.08);
+
+  cursor: pointer;
+
+  animation: chat-scroll-button-in 140ms ease-out;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.chat-scroll-to-bottom:hover {
+  transform: translateY(-2px);
+  border-color: rgba(116, 231, 244, 0.5);
+  color: #d5fbff;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(20, 39, 44, 0.99),
+      rgba(12, 26, 30, 0.99)
+    );
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.4),
+    0 0 22px rgba(71, 214, 231, 0.14);
+}
+
+.chat-scroll-to-bottom:active {
+  transform: translateY(0);
+}
+
+.chat-scroll-to-bottom:focus-visible {
+  outline: 2px solid rgba(127, 231, 243, 0.65);
+  outline-offset: 2px;
+}
+
+@keyframes chat-scroll-button-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-shell .chat-scroll.chat-scroll-bottom {
+    scroll-behavior: auto;
+  }
+
+  .chat-scroll-to-bottom {
+    animation: none;
+    transition: none;
+  }
+}

@@ -1,10 +1,22 @@
-import { useState, type ReactNode } from "react";
-import type { ConversationSummary, Screen, VoicePhase } from "../types";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type {
+  AutomationNotificationRecord,
+  AutomationRecord,
+  ConversationSummary,
+  PendingToolApproval,
+  Screen,
+  ToolActivity,
+  VoicePhase,
+} from "../types";
 import type { JaceRuntimeState } from "./runtime";
 import { JaceCore } from "./JaceCore";
 import { AgentOffice } from "./AgentOffice";
 import { AttentionPanel } from "./AttentionPanel";
-import type { AutomationNotificationRecord, AutomationRecord, PendingToolApproval, ToolActivity } from "../types";
 
 const TABS: Array<{ screen: Screen; label: string }> = [
   { screen: "chat", label: "Chat" },
@@ -48,17 +60,49 @@ export function CommandCenter(props: {
   onEmergencyStop: () => void;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [focus, setFocus] = useState<"none" | "core" | "office" | "workspace">("none");
+  const [focus, setFocus] = useState<
+    "none" | "core" | "office" | "workspace"
+  >("none");
+
+  /*
+   * Jace should always open ready for a new conversation rather than
+   * reopening yesterday's/latest transcript.
+   *
+   * App.tsx keeps previous conversations in the drawer. onNewChat only
+   * clears the active UI state; the backend does not create an empty
+   * conversation until the user actually sends something.
+   *
+   * useLayoutEffect avoids a visible one-frame flash of the most recently
+   * loaded conversation during application startup.
+   */
+  const startedFreshChatRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (startedFreshChatRef.current) return;
+
+    startedFreshChatRef.current = true;
+    props.onNewChat();
+  }, [props.onNewChat]);
 
   return (
     <main className={`command-center-shell focus-${focus}`}>
       <header className="command-topbar">
-        <div className="command-brand"><span className="command-mark">J</span><div><strong>{props.assistantName}</strong><small>COMMAND CENTER · v{props.appVersion}</small></div></div>
+        <div className="command-brand">
+          <span className="command-mark">J</span>
+          <div>
+            <strong>{props.assistantName}</strong>
+            <small>COMMAND CENTER · v{props.appVersion}</small>
+          </div>
+        </div>
+
         <div className="command-statuses">
-          <span className={`status-chip ${props.online ? "online" : "offline"}`}>● {props.online ? "LOCAL" : "OFFLINE"}</span>
+          <span className={`status-chip ${props.online ? "online" : "offline"}`}>
+            ● {props.online ? "LOCAL" : "OFFLINE"}
+          </span>
           <span className="status-chip">{props.model || "No model"}</span>
           <span className="status-chip private">◆ PRIVATE</span>
         </div>
+
         <div className="command-actions">
           <button onClick={() => setDrawerOpen((open) => !open)}>Chats</button>
           <button onClick={() => props.onScreenChange("settings")}>⚙</button>
@@ -78,17 +122,50 @@ export function CommandCenter(props: {
         />
 
         <div className="command-center-column">
-          <JaceCore name={props.assistantName} state={props.state} model={props.model} runtimeConnected={props.runtimeConnected} amplitude={props.voiceAmplitude} activities={props.toolActivity} onExpand={() => setFocus(focus === "core" ? "none" : "core")} />
-          <AgentOffice activities={props.toolActivity} onExpand={() => setFocus(focus === "office" ? "none" : "office")} />
+          <JaceCore
+            name={props.assistantName}
+            state={props.state}
+            model={props.model}
+            runtimeConnected={props.runtimeConnected}
+            amplitude={props.voiceAmplitude}
+            activities={props.toolActivity}
+            onExpand={() =>
+              setFocus(focus === "core" ? "none" : "core")
+            }
+          />
+
+          <AgentOffice
+            activities={props.toolActivity}
+            onExpand={() =>
+              setFocus(focus === "office" ? "none" : "office")
+            }
+          />
         </div>
 
         <section className="workspace-column cc-panel">
           <div className="workspace-tabs-row">
             <div className="workspace-tabs-scroll">
-              {TABS.map((tab) => <button key={tab.screen} className={props.screen === tab.screen ? "active" : ""} onClick={() => props.onScreenChange(tab.screen)}>{tab.label}</button>)}
+              {TABS.map((tab) => (
+                <button
+                  key={tab.screen}
+                  className={props.screen === tab.screen ? "active" : ""}
+                  onClick={() => props.onScreenChange(tab.screen)}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
-            <button className="cc-icon-button" onClick={() => setFocus(focus === "workspace" ? "none" : "workspace")}>□</button>
+
+            <button
+              className="cc-icon-button"
+              onClick={() =>
+                setFocus(focus === "workspace" ? "none" : "workspace")
+              }
+            >
+              □
+            </button>
           </div>
+
           <div className="workspace-host">{props.workspace}</div>
         </section>
       </div>
@@ -96,60 +173,150 @@ export function CommandCenter(props: {
       <footer className="command-footer">
         <button
           className={`voice-placeholder voice-live voice-${props.voicePhase}`}
-          disabled={!props.voiceReady || props.voicePhase === "transcribing"}
-          title={props.voiceReady ? "Hold while speaking. Release to send. Press while Jace is speaking to interrupt." : "Local voice runtime is not ready."}
+          disabled={
+            !props.voiceReady || props.voicePhase === "transcribing"
+          }
+          title={
+            props.voiceReady
+              ? "Hold while speaking. Release to send. Press while Jace is speaking to interrupt."
+              : "Local voice runtime is not ready."
+          }
           onPointerDown={(event) => {
-            if (!props.voiceReady || props.voicePhase === "transcribing") return;
+            if (!props.voiceReady || props.voicePhase === "transcribing") {
+              return;
+            }
+
             event.currentTarget.setPointerCapture(event.pointerId);
             void props.onVoiceStart();
           }}
           onPointerUp={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-            if (props.voicePhase === "listening") void props.onVoiceStop();
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+
+            if (props.voicePhase === "listening") {
+              void props.onVoiceStop();
+            }
           }}
-          onPointerCancel={() => { if (props.voicePhase === "listening") void props.onVoiceStop(); }}
+          onPointerCancel={() => {
+            if (props.voicePhase === "listening") {
+              void props.onVoiceStop();
+            }
+          }}
           onKeyDown={(event) => {
-            if ((event.key === " " || event.key === "Enter") && !event.repeat && props.voiceReady && props.voicePhase !== "transcribing") {
+            if (
+              (event.key === " " || event.key === "Enter") &&
+              !event.repeat &&
+              props.voiceReady &&
+              props.voicePhase !== "transcribing"
+            ) {
               event.preventDefault();
               void props.onVoiceStart();
             }
           }}
           onKeyUp={(event) => {
-            if ((event.key === " " || event.key === "Enter") && props.voicePhase === "listening") {
+            if (
+              (event.key === " " || event.key === "Enter") &&
+              props.voicePhase === "listening"
+            ) {
               event.preventDefault();
               void props.onVoiceStop();
             }
           }}
         >
           <span>🎙</span>
-          {props.voicePhase === "listening" && <>LISTENING <small>RELEASE TO SEND</small></>}
-          {props.voicePhase === "transcribing" && <>TRANSCRIBING <small>LOCAL WHISPER</small></>}
-          {props.voicePhase === "speaking" && <>SPEAKING <small>HOLD TO INTERRUPT</small></>}
-          {(props.voicePhase === "idle" || props.voicePhase === "error") && <>HOLD TO TALK <small>{props.voiceReady ? "LOCAL" : "SETUP"}</small></>}
+
+          {props.voicePhase === "listening" && (
+            <>
+              LISTENING <small>RELEASE TO SEND</small>
+            </>
+          )}
+
+          {props.voicePhase === "transcribing" && (
+            <>
+              TRANSCRIBING <small>LOCAL WHISPER</small>
+            </>
+          )}
+
+          {props.voicePhase === "speaking" && (
+            <>
+              SPEAKING <small>HOLD TO INTERRUPT</small>
+            </>
+          )}
+
+          {(props.voicePhase === "idle" || props.voicePhase === "error") && (
+            <>
+              HOLD TO TALK <small>{props.voiceReady ? "LOCAL" : "SETUP"}</small>
+            </>
+          )}
         </button>
+
         <div className="footer-state">
           <span className={`state-led state-${props.state}`} />
-          <span>{props.state === "idle" ? "Ready when you are." : props.state.replace(/_/g, " ")}</span>
-          {props.voiceLastTranscript && <small className="footer-transcript">Heard: {props.voiceLastTranscript}</small>}
+          <span>
+            {props.state === "idle"
+              ? "Ready when you are."
+              : props.state.replace(/_/g, " ")}
+          </span>
+
+          {props.voiceLastTranscript && (
+            <small className="footer-transcript">
+              Heard: {props.voiceLastTranscript}
+            </small>
+          )}
         </div>
+
         <div className="footer-private">● Local / Private</div>
       </footer>
 
       {drawerOpen && (
         <aside className="conversation-drawer">
-          <div className="drawer-head"><div><span className="cc-kicker">Conversations</span><h2>Recent chats</h2></div><button onClick={() => setDrawerOpen(false)}>×</button></div>
-          <button className="drawer-new" onClick={() => { props.onNewChat(); setDrawerOpen(false); }}>＋ New chat</button>
+          <div className="drawer-head">
+            <div>
+              <span className="cc-kicker">Conversations</span>
+              <h2>Recent chats</h2>
+            </div>
+            <button onClick={() => setDrawerOpen(false)}>×</button>
+          </div>
+
+          <button
+            className="drawer-new"
+            onClick={() => {
+              props.onNewChat();
+              setDrawerOpen(false);
+            }}
+          >
+            ＋ New chat
+          </button>
+
           <div className="drawer-list">
             {props.conversations.map((conversation) => (
-              <button key={conversation.id} className={conversation.id === props.activeConversationId ? "active" : ""} onClick={() => { props.onLoadConversation(conversation.id); setDrawerOpen(false); }}>
-                <strong>{conversation.title}</strong><small>{conversation.message_count} messages</small>
+              <button
+                key={conversation.id}
+                className={
+                  conversation.id === props.activeConversationId ? "active" : ""
+                }
+                onClick={() => {
+                  props.onLoadConversation(conversation.id);
+                  setDrawerOpen(false);
+                }}
+              >
+                <strong>{conversation.title}</strong>
+                <small>{conversation.message_count} messages</small>
               </button>
             ))}
           </div>
         </aside>
       )}
 
-      {props.controlActive && <button className="global-control-stop command-stop" onClick={props.onEmergencyStop}>■ STOP CONTROL</button>}
+      {props.controlActive && (
+        <button
+          className="global-control-stop command-stop"
+          onClick={props.onEmergencyStop}
+        >
+          ■ STOP CONTROL
+        </button>
+      )}
     </main>
   );
 }
