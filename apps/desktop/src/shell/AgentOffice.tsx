@@ -8,45 +8,74 @@ import {
   PixelAgentOffice,
 } from "./PixelAgentOffice";
 import "./AgentOffice.css";
-import "./AgentOfficeRealtime.css";
 import "./AgentOfficeVisuals.css";
 
 function formatElapsed(
-  start: string | null,
-  end: string | null,
+  start:
+    string | null,
+  end:
+    string | null,
 ): string {
-  if (!start) return "—";
+  if (!start) {
+    return "—";
+  }
 
   const startMs =
-    new Date(start).getTime();
+    new Date(
+      start,
+    ).getTime();
+
   const endMs =
     end
-      ? new Date(end).getTime()
+      ? new Date(
+          end,
+        ).getTime()
       : Date.now();
 
   const seconds =
     Math.max(
       0,
       Math.floor(
-        (endMs - startMs) / 1000,
+        (
+          endMs -
+          startMs
+        ) /
+          1000,
       ),
     );
 
-  if (seconds < 60) {
+  if (
+    seconds <
+    60
+  ) {
     return `${seconds}s`;
   }
 
   const minutes =
-    Math.floor(seconds / 60);
-  const remainder =
-    seconds % 60;
+    Math.floor(
+      seconds /
+        60,
+    );
 
-  if (minutes < 60) {
-    return `${minutes}m ${remainder}s`;
+  const remainder =
+    seconds %
+    60;
+
+  if (
+    minutes <
+    60
+  ) {
+    return (
+      `${minutes}m ` +
+      `${remainder}s`
+    );
   }
 
   const hours =
-    Math.floor(minutes / 60);
+    Math.floor(
+      minutes /
+        60,
+    );
 
   return (
     `${hours}h ` +
@@ -54,23 +83,32 @@ function formatElapsed(
   );
 }
 
-export function AgentOffice(props: {
-  activities: ToolActivity[];
-  onExpand: () => void;
-}) {
+export function AgentOffice(
+  props: {
+    activities:
+      ToolActivity[];
+    onExpand:
+      () => void;
+  },
+) {
   void props.activities;
 
-  const office = useAgentOffice();
+  const office =
+    useAgentOffice();
 
   const busyCount =
     office.activeTasks.length;
+
   const workerCount =
-    office.status?.workers ?? 0;
+    office.status
+      ?.workers ??
+    0;
 
   return (
     <section
       className={
-        "cc-panel agent-office-panel " +
+        "cc-panel " +
+        "agent-office-panel " +
         "phase11-agent-office"
       }
     >
@@ -81,14 +119,19 @@ export function AgentOffice(props: {
         }
       >
         <div>
-          <span className="cc-kicker">
+          <span
+            className={
+              "cc-kicker"
+            }
+          >
             Jace office
           </span>
 
           <strong>
             {office.error
-              ? "Agent office degraded"
-              : busyCount > 0
+              ? "Agent office unavailable"
+              : busyCount >
+                  0
                 ? (
                     `${busyCount} background job` +
                     `${busyCount === 1 ? "" : "s"} active`
@@ -97,39 +140,24 @@ export function AgentOffice(props: {
           </strong>
         </div>
 
-        <div className="agent-office-actions">
-          <span
-            className={
-              "agent-live-pill " +
-              (
-                office.realtimeConnected
-                  ? "live"
-                  : "reconnecting"
-              )
-            }
-            title={
-              office.realtimeConnected
-                ? "Agent office is receiving runtime events"
-                : "Runtime WebSocket reconnecting; SQLite remains authoritative"
-            }
-          >
-            <i />
-            {office.realtimeConnected
-              ? "LIVE"
-              : "SYNC"}
-          </span>
-
+        <div
+          className={
+            "agent-office-actions"
+          }
+        >
           {office.status && (
             <span
               className={
                 `agent-manager-pill ${
-                  office.status.manager_running
+                  office.status
+                    .manager_running
                     ? "online"
                     : "offline"
                 }`
               }
             >
-              {office.status.manager_running
+              {office.status
+                .manager_running
                 ? "●"
                 : "○"}{" "}
               {workerCount} worker
@@ -140,54 +168,31 @@ export function AgentOffice(props: {
           )}
 
           <button
-            className="cc-icon-button"
-            onClick={props.onExpand}
-            title="Focus agent office"
+            className={
+              "cc-icon-button"
+            }
+            onClick={
+              props.onExpand
+            }
+            title={
+              "Focus agent office"
+            }
           >
             □
           </button>
         </div>
       </div>
 
-      {office.notice && (
-        <div
-          className={
-            `agent-office-notice ${
-              office.notice.kind
-            }`
-          }
-        >
-          <span>
-            {office.notice.kind ===
-            "completed"
-              ? "✓"
-              : "×"}
-          </span>
-
-          <div>
-            <strong>
-              {
-                office.notice.task
-                  .agent_name
-              }{" "}
-              {office.notice.kind ===
-              "completed"
-                ? "finished"
-                : "failed"}
-            </strong>
-
-            <small>
-              {office.notice.task.title}
-            </small>
-          </div>
-        </div>
-      )}
-
       {office.error &&
       office.tasks.length === 0 ? (
-        <div className="agent-office-error">
+        <div
+          className={
+            "agent-office-error"
+          }
+        >
           <strong>
-            Could not synchronise agents
+            Could not connect to
+            background agents
           </strong>
 
           <span>
@@ -196,17 +201,24 @@ export function AgentOffice(props: {
 
           <button
             type="button"
-            onClick={() =>
-              void office.refresh()
+            onClick={
+              () =>
+                void office.refresh()
             }
           >
             Retry
           </button>
         </div>
       ) : (
-        <div className="agent-office-stage">
+        <div
+          className={
+            "agent-office-stage"
+          }
+        >
           <PixelAgentOffice
-            workers={office.workers}
+            workers={
+              office.workers
+            }
             selectedTaskId={
               office.selectedTaskId
             }
@@ -216,8 +228,16 @@ export function AgentOffice(props: {
           />
 
           {office.selectedTask && (
-            <div className="agent-task-inspector overlay">
-              <div className="agent-task-inspector-head">
+            <div
+              className={
+                "agent-task-inspector overlay"
+              }
+            >
+              <div
+                className={
+                  "agent-task-inspector-head"
+                }
+              >
                 <div>
                   <span>
                     {
@@ -236,18 +256,26 @@ export function AgentOffice(props: {
 
                 <button
                   type="button"
-                  onClick={() =>
-                    office.setSelectedTaskId(
-                      null,
-                    )
+                  onClick={
+                    () =>
+                      office
+                        .setSelectedTaskId(
+                          null,
+                        )
                   }
-                  aria-label="Close task details"
+                  aria-label={
+                    "Close task details"
+                  }
                 >
                   ×
                 </button>
               </div>
 
-              <div className="agent-task-meta">
+              <div
+                className={
+                  "agent-task-meta"
+                }
+              >
                 <span
                   className={
                     `agent-task-status ${
@@ -256,16 +284,19 @@ export function AgentOffice(props: {
                     }`
                   }
                 >
-                  {office.selectedTask.status.replace(
-                    /_/g,
-                    " ",
-                  )}
+                  {office.selectedTask
+                    .status
+                    .replace(
+                      /_/g,
+                      " ",
+                    )}
                 </span>
 
                 <span>
                   {Math.round(
                     office.selectedTask
-                      .progress * 100,
+                      .progress *
+                      100,
                   )}
                   %
                 </span>
@@ -289,7 +320,11 @@ export function AgentOffice(props: {
 
               {office.selectedTask
                 .progress_message && (
-                <div className="agent-current-action">
+                <div
+                  className={
+                    "agent-current-action"
+                  }
+                >
                   {
                     office.selectedTask
                       .progress_message
@@ -298,12 +333,22 @@ export function AgentOffice(props: {
               )}
 
               {office.selectedTask
-                .used_tools.length > 0 && (
-                <div className="agent-tool-chips">
+                .used_tools.length >
+                0 && (
+                <div
+                  className={
+                    "agent-tool-chips"
+                  }
+                >
                   {office.selectedTask
-                    .used_tools.map(
+                    .used_tools
+                    .map(
                       (tool) => (
-                        <span key={tool}>
+                        <span
+                          key={
+                            tool
+                          }
+                        >
                           {tool}
                         </span>
                       ),
@@ -311,8 +356,13 @@ export function AgentOffice(props: {
                 </div>
               )}
 
-              {office.selectedTask.result && (
-                <div className="agent-result-preview">
+              {office.selectedTask
+                .result && (
+                <div
+                  className={
+                    "agent-result-preview"
+                  }
+                >
                   <strong>
                     Result
                   </strong>
@@ -326,7 +376,8 @@ export function AgentOffice(props: {
                 </div>
               )}
 
-              {office.selectedTask.error && (
+              {office.selectedTask
+                .error && (
                 <div
                   className={
                     "agent-result-preview error"
@@ -345,7 +396,11 @@ export function AgentOffice(props: {
                 </div>
               )}
 
-              <div className="agent-task-inspector-actions">
+              <div
+                className={
+                  "agent-task-inspector-actions"
+                }
+              >
                 {[
                   "queued",
                   "running",
@@ -358,11 +413,16 @@ export function AgentOffice(props: {
                 ) && (
                   <button
                     type="button"
-                    className="danger"
-                    onClick={() =>
-                      void office.cancel(
-                        office.selectedTask!.id,
-                      )
+                    className={
+                      "danger"
+                    }
+                    onClick={
+                      () =>
+                        void office.cancel(
+                          office
+                            .selectedTask!
+                            .id,
+                        )
                     }
                   >
                     Cancel job
@@ -378,10 +438,13 @@ export function AgentOffice(props: {
                 ) && (
                   <button
                     type="button"
-                    onClick={() =>
-                      void office.retry(
-                        office.selectedTask!.id,
-                      )
+                    onClick={
+                      () =>
+                        void office.retry(
+                          office
+                            .selectedTask!
+                            .id,
+                        )
                     }
                   >
                     Retry job

@@ -1,8 +1,10 @@
 .jace-canvas-office {
   position: relative;
   width: 100%;
+  min-width: 0;
   min-height: 320px;
   height: 100%;
+  flex: 1 1 auto;
   overflow: hidden;
   background:
     radial-gradient(
@@ -31,14 +33,17 @@
       transparent 3px
     );
   mix-blend-mode: soft-light;
-  opacity: 0.32;
+  opacity: 0.24;
 }
 
 .jace-canvas-office-surface {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 320px;
+  min-width: 0;
+  min-height: 0;
   touch-action: none;
   cursor: crosshair;
   image-rendering: pixelated;
@@ -55,8 +60,27 @@
   right: 8px;
   z-index: 8;
   display: flex;
+  align-items: center;
   gap: 4px;
   pointer-events: auto;
+}
+
+.jace-pixel-assets-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border:
+    1px solid rgba(107, 218, 211, 0.12);
+  border-radius: 2px;
+  background:
+    rgba(5, 16, 17, 0.76);
+  color:
+    rgba(141, 207, 198, 0.52);
+  font:
+    700 6px/1 "Courier New", monospace;
+  letter-spacing: 0.08em;
+  user-select: none;
 }
 
 .jace-canvas-office-actions button {
@@ -66,8 +90,10 @@
   border:
     1px solid rgba(107, 218, 211, 0.15);
   border-radius: 2px;
-  background: rgba(5, 16, 17, 0.84);
-  color: rgba(177, 224, 219, 0.58);
+  background:
+    rgba(5, 16, 17, 0.84);
+  color:
+    rgba(177, 224, 219, 0.58);
   font:
     700 7px/1 "Courier New", monospace;
   letter-spacing: 0.06em;
@@ -78,34 +104,92 @@
   border-color:
     rgba(112, 229, 219, 0.34);
   color: #bcece6;
-  background: rgba(7, 25, 25, 0.94);
+  background:
+    rgba(7, 25, 25, 0.94);
 }
 
 .phase11-agent-office,
-.phase11-agent-office .agent-office-stage,
-.phase11-agent-office .jace-canvas-office,
-.phase11-agent-office .jace-canvas-office-surface {
+.phase11-agent-office
+  .agent-office-stage,
+.phase11-agent-office
+  .jace-canvas-office {
+  min-width: 0;
   min-height: 0;
 }
 
-.phase11-agent-office .agent-office-stage {
+.phase11-agent-office
+  .agent-office-stage {
   flex: 1 1 auto;
 }
 
-.focus-office .phase11-agent-office,
-.focus-office .phase11-agent-office .agent-office-stage,
-.focus-office .phase11-agent-office .jace-canvas-office,
-.focus-office .phase11-agent-office .jace-canvas-office-surface {
-  min-height: 0;
+.focus-office
+  .phase11-agent-office {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
   height: 100%;
-  flex: 1 1 auto;
-}
-
-.focus-office .phase11-agent-office .jace-canvas-office {
+  min-height: 0;
+  margin: 0;
   border-radius: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
+.focus-office
+  .phase11-agent-office
+  .agent-office-stage,
+.focus-office
+  .phase11-agent-office
+  .jace-canvas-office {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+}
+
+.focus-office
+  .phase11-agent-office
+  .cc-panel-topline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  min-height: 42px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(4, 14, 15, 0.94),
+      rgba(4, 14, 15, 0.54),
+      transparent
+    );
+  pointer-events: none;
+}
+
+.focus-office
+  .phase11-agent-office
+  .cc-panel-topline
+  button,
+.focus-office
+  .phase11-agent-office
+  .cc-panel-topline
+  .agent-office-actions {
+  pointer-events: auto;
+}
+
+.focus-office
+  .phase11-agent-office
+  .jace-canvas-office-actions {
+  top: 50px;
+}
+
+@media (
+  prefers-reduced-motion:
+    reduce
+) {
   .jace-canvas-office::after {
     display: none;
   }

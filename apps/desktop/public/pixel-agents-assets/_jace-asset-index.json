@@ -1,0 +1,153 @@
+﻿{
+    "version":  1,
+    "source":  {
+                   "repository":  "pixel-agents-hq/pixel-agents",
+                   "ref":  "v1.4.1",
+                   "syncedAt":  "2026-09-10T18:45:55.8095344Z"
+               },
+    "characters":  [
+                       "char_0.png",
+                       "char_1.png",
+                       "char_2.png",
+                       "char_3.png",
+                       "char_4.png",
+                       "char_5.png"
+                   ],
+    "floors":  [
+                   "floor_0.png",
+                   "floor_1.png",
+                   "floor_2.png",
+                   "floor_3.png",
+                   "floor_4.png",
+                   "floor_5.png",
+                   "floor_6.png",
+                   "floor_7.png",
+                   "floor_8.png"
+               ],
+    "walls":  [
+                  "wall_0.png"
+              ],
+    "carpets":  [
+                    "carpet_0.png",
+                    "carpet_1.png",
+                    "carpet_2.png"
+                ],
+    "pets":  [
+                 {
+                     "id":  "claudio",
+                     "name":  "Claudio",
+                     "folder":  "claudio",
+                     "manifest":  "pets/claudio/manifest.json",
+                     "image":  "pets/claudio/pet.png"
+                 },
+                 {
+                     "id":  "gitcat",
+                     "name":  "Gitcat",
+                     "folder":  "gitcat",
+                     "manifest":  "pets/gitcat/manifest.json",
+                     "image":  "pets/gitcat/pet.png"
+                 }
+             ],
+    "furniture":  [
+                      {
+                          "folder":  "BIN",
+                          "manifest":  "furniture/BIN/manifest.json"
+                      },
+                      {
+                          "folder":  "BOOKSHELF",
+                          "manifest":  "furniture/BOOKSHELF/manifest.json"
+                      },
+                      {
+                          "folder":  "CACTUS",
+                          "manifest":  "furniture/CACTUS/manifest.json"
+                      },
+                      {
+                          "folder":  "CLOCK",
+                          "manifest":  "furniture/CLOCK/manifest.json"
+                      },
+                      {
+                          "folder":  "COFFEE",
+                          "manifest":  "furniture/COFFEE/manifest.json"
+                      },
+                      {
+                          "folder":  "COFFEE_TABLE",
+                          "manifest":  "furniture/COFFEE_TABLE/manifest.json"
+                      },
+                      {
+                          "folder":  "CUSHIONED_BENCH",
+                          "manifest":  "furniture/CUSHIONED_BENCH/manifest.json"
+                      },
+                      {
+                          "folder":  "CUSHIONED_CHAIR",
+                          "manifest":  "furniture/CUSHIONED_CHAIR/manifest.json"
+                      },
+                      {
+                          "folder":  "DESK",
+                          "manifest":  "furniture/DESK/manifest.json"
+                      },
+                      {
+                          "folder":  "DOUBLE_BOOKSHELF",
+                          "manifest":  "furniture/DOUBLE_BOOKSHELF/manifest.json"
+                      },
+                      {
+                          "folder":  "HANGING_PLANT",
+                          "manifest":  "furniture/HANGING_PLANT/manifest.json"
+                      },
+                      {
+                          "folder":  "LARGE_PAINTING",
+                          "manifest":  "furniture/LARGE_PAINTING/manifest.json"
+                      },
+                      {
+                          "folder":  "LARGE_PLANT",
+                          "manifest":  "furniture/LARGE_PLANT/manifest.json"
+                      },
+                      {
+                          "folder":  "PC",
+                          "manifest":  "furniture/PC/manifest.json"
+                      },
+                      {
+                          "folder":  "PLANT",
+                          "manifest":  "furniture/PLANT/manifest.json"
+                      },
+                      {
+                          "folder":  "PLANT_2",
+                          "manifest":  "furniture/PLANT_2/manifest.json"
+                      },
+                      {
+                          "folder":  "POT",
+                          "manifest":  "furniture/POT/manifest.json"
+                      },
+                      {
+                          "folder":  "SMALL_PAINTING",
+                          "manifest":  "furniture/SMALL_PAINTING/manifest.json"
+                      },
+                      {
+                          "folder":  "SMALL_PAINTING_2",
+                          "manifest":  "furniture/SMALL_PAINTING_2/manifest.json"
+                      },
+                      {
+                          "folder":  "SMALL_TABLE",
+                          "manifest":  "furniture/SMALL_TABLE/manifest.json"
+                      },
+                      {
+                          "folder":  "SOFA",
+                          "manifest":  "furniture/SOFA/manifest.json"
+                      },
+                      {
+                          "folder":  "TABLE_FRONT",
+                          "manifest":  "furniture/TABLE_FRONT/manifest.json"
+                      },
+                      {
+                          "folder":  "WHITEBOARD",
+                          "manifest":  "furniture/WHITEBOARD/manifest.json"
+                      },
+                      {
+                          "folder":  "WOODEN_BENCH",
+                          "manifest":  "furniture/WOODEN_BENCH/manifest.json"
+                      },
+                      {
+                          "folder":  "WOODEN_CHAIR",
+                          "manifest":  "furniture/WOODEN_CHAIR/manifest.json"
+                      }
+                  ]
+}
