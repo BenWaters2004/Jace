@@ -2998,17 +2998,39 @@ export class JacePixelOfficeEngine {
     } else if (
       this.sprites.sourceRef
     ) {
+      const diagnostics =
+        this.sprites.getDiagnostics();
+
       ctx.textAlign =
         "left";
 
       ctx.fillStyle =
-        "rgba(125,221,211,0.38)";
+        diagnostics.warnings.length > 0
+          ? "rgba(232,184,105,0.82)"
+          : "rgba(125,221,211,0.52)";
 
       ctx.fillText(
-        `UPSTREAM ${this.sprites.sourceRef}`,
+        `UPSTREAM ${this.sprites.sourceRef}  •  ` +
+        `CHAR ${diagnostics.charactersLoaded}/${diagnostics.charactersExpected}  •  ` +
+        `FLOOR ${diagnostics.floorsLoaded}/${diagnostics.floorsExpected}  •  ` +
+        `FURN ${diagnostics.furnitureGroupsLoaded}/${diagnostics.furnitureGroupsExpected}`,
         12,
         14,
       );
+
+      if (
+        diagnostics.warnings.length > 0
+      ) {
+        ctx.fillStyle =
+          "rgba(232,184,105,0.72)";
+
+        ctx.fillText(
+          `ASSET WARNINGS ${diagnostics.warnings.length} — ` +
+          diagnostics.warnings[0].slice(0, 100),
+          12,
+          24,
+        );
+      }
     }
   }
 }

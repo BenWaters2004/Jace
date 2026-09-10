@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$DesktopRoot = Join-Path $RepoRoot "..\apps\desktop"
+$DesktopRoot = Join-Path $RepoRoot "../apps\desktop"
 $Destination = Join-Path $DesktopRoot "public\pixel-agents-assets"
 
 $Repository = "pixel-agents-hq/pixel-agents"

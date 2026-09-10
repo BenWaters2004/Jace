@@ -27,16 +27,34 @@ interface LoadedFurnitureAsset
 }
 
 interface ResolveFurnitureOptions {
-  orientation?: UpstreamFurnitureOrientation;
+  orientation?:
+    UpstreamFurnitureOrientation;
   state?: string;
   mirrorX?: boolean;
   animationFrame?: number;
 }
 
 interface InheritedManifestState {
-  orientation?: UpstreamFurnitureOrientation;
+  orientation?:
+    UpstreamFurnitureOrientation;
   state?: string;
   mirrorSide?: boolean;
+}
+
+export interface PixelAssetDiagnostics {
+  charactersLoaded: number;
+  charactersExpected: number;
+  floorsLoaded: number;
+  floorsExpected: number;
+  wallsLoaded: number;
+  wallsExpected: number;
+  carpetsLoaded: number;
+  carpetsExpected: number;
+  petsLoaded: number;
+  petsExpected: number;
+  furnitureGroupsLoaded: number;
+  furnitureGroupsExpected: number;
+  warnings: string[];
 }
 
 function loadImage(
@@ -44,19 +62,25 @@ function loadImage(
 ): Promise<HTMLImageElement> {
   return new Promise(
     (resolve, reject) => {
-      const image = new Image();
+      const image =
+        new Image();
 
-      image.onload = () =>
-        resolve(image);
+      image.onload =
+        () =>
+          resolve(
+            image,
+          );
 
-      image.onerror = () =>
-        reject(
-          new Error(
-            `Could not load Pixel Agents asset: ${url}`,
-          ),
-        );
+      image.onerror =
+        () =>
+          reject(
+            new Error(
+              `Image failed: ${url}`,
+            ),
+          );
 
-      image.src = url;
+      image.src =
+        url;
     },
   );
 }
@@ -68,13 +92,16 @@ async function loadJson<T>(
     await fetch(
       url,
       {
-        cache: "force-cache",
+        cache:
+          "no-store",
       },
     );
 
-  if (!response.ok) {
+  if (
+    !response.ok
+  ) {
     throw new Error(
-      `Could not load ${url} (${response.status}).`,
+      `HTTP ${response.status}: ${url}`,
     );
   }
 
@@ -82,13 +109,18 @@ async function loadJson<T>(
 }
 
 function isGroup(
-  node: UpstreamFurnitureManifestNode,
+  node:
+    UpstreamFurnitureManifestNode,
 ): node is UpstreamFurnitureGroupNode {
-  return node.type === "group";
+  return (
+    node.type ===
+    "group"
+  );
 }
 
 function flattenFurnitureManifest(
-  manifest: UpstreamFurnitureManifest,
+  manifest:
+    UpstreamFurnitureManifest,
   folder: string,
 ): ResolvedFurnitureAsset[] {
   const output:
@@ -98,7 +130,9 @@ function flattenFurnitureManifest(
     node:
       Extract<
         UpstreamFurnitureManifestNode,
-        { type: "asset" }
+        {
+          type: "asset";
+        }
       >,
     inherited:
       InheritedManifestState,
@@ -156,7 +190,7 @@ function flattenFurnitureManifest(
     inherited:
       InheritedManifestState,
   ) {
-    const nextInherited:
+    const next:
       InheritedManifestState = {
         orientation:
           node.orientation ??
@@ -169,14 +203,18 @@ function flattenFurnitureManifest(
           inherited.mirrorSide,
       };
 
-    if (isGroup(node)) {
+    if (
+      isGroup(
+        node,
+      )
+    ) {
       for (
         const member
         of node.members
       ) {
         visit(
           member,
-          nextInherited,
+          next,
         );
       }
 
@@ -185,12 +223,13 @@ function flattenFurnitureManifest(
 
     pushAsset(
       node,
-      nextInherited,
+      next,
     );
   }
 
   if (
-    manifest.type === "group"
+    manifest.type ===
+    "group"
   ) {
     for (
       const member
@@ -219,10 +258,14 @@ function parseHex(
   number,
 ] {
   const clean =
-    hex.replace("#", "");
+    hex.replace(
+      "#",
+      "",
+    );
 
   if (
-    clean.length !== 6
+    clean.length !==
+    6
   ) {
     return [
       80,
@@ -233,15 +276,24 @@ function parseHex(
 
   return [
     Number.parseInt(
-      clean.slice(0, 2),
+      clean.slice(
+        0,
+        2,
+      ),
       16,
     ),
     Number.parseInt(
-      clean.slice(2, 4),
+      clean.slice(
+        2,
+        4,
+      ),
       16,
     ),
     Number.parseInt(
-      clean.slice(4, 6),
+      clean.slice(
+        4,
+        6,
+      ),
       16,
     ),
   ];
@@ -252,7 +304,8 @@ function positiveModulo(
   length: number,
 ): number {
   if (
-    length <= 0
+    length <=
+    0
   ) {
     return 0;
   }
@@ -267,22 +320,62 @@ function positiveModulo(
     length;
 }
 
+async function loadImageList(
+  paths:
+    string[],
+): Promise<
+  Array<
+    HTMLImageElement |
+    null
+  >
+> {
+  return await Promise.all(
+    paths.map(
+      async (
+        path,
+      ) => {
+        try {
+          return await loadImage(
+            pixelAssetUrl(
+              path,
+            ),
+          );
+        } catch {
+          return null;
+        }
+      },
+    ),
+  );
+}
+
 export class PixelSpriteLibrary {
   private index:
     PixelAgentsAssetIndex | null =
       null;
 
   private characters:
-    HTMLImageElement[] = [];
+    Array<
+      HTMLImageElement |
+      null
+    > = [];
 
   private floors:
-    HTMLImageElement[] = [];
+    Array<
+      HTMLImageElement |
+      null
+    > = [];
 
   private walls:
-    HTMLImageElement[] = [];
+    Array<
+      HTMLImageElement |
+      null
+    > = [];
 
   private carpets:
-    HTMLImageElement[] = [];
+    Array<
+      HTMLImageElement |
+      null
+    > = [];
 
   private pets =
     new Map<
@@ -306,16 +399,23 @@ export class PixelSpriteLibrary {
     Promise<void> | null =
       null;
 
-  ready = false;
+  private warnings:
+    string[] = [];
+
+  ready =
+    false;
 
   error:
-    string | null = null;
+    string | null =
+      null;
 
   sourceRef:
-    string | null = null;
+    string | null =
+      null;
 
-  load(): Promise<void> {
-    if (
+  load():
+    Promise<void> {
+  if (
       this.loading
     ) {
       return this.loading;
@@ -339,50 +439,34 @@ export class PixelSpriteLibrary {
         index.source.ref;
 
       this.characters =
-        await Promise.all(
+        await loadImageList(
           index.characters.map(
             (file) =>
-              loadImage(
-                pixelAssetUrl(
-                  `characters/${file}`,
-                ),
-              ),
+              `characters/${file}`,
           ),
         );
 
       this.floors =
-        await Promise.all(
+        await loadImageList(
           index.floors.map(
             (file) =>
-              loadImage(
-                pixelAssetUrl(
-                  `floors/${file}`,
-                ),
-              ),
+              `floors/${file}`,
           ),
         );
 
       this.walls =
-        await Promise.all(
+        await loadImageList(
           index.walls.map(
             (file) =>
-              loadImage(
-                pixelAssetUrl(
-                  `walls/${file}`,
-                ),
-              ),
+              `walls/${file}`,
           ),
         );
 
       this.carpets =
-        await Promise.all(
+        await loadImageList(
           index.carpets.map(
             (file) =>
-              loadImage(
-                pixelAssetUrl(
-                  `carpets/${file}`,
-                ),
-              ),
+              `carpets/${file}`,
           ),
         );
 
@@ -390,63 +474,147 @@ export class PixelSpriteLibrary {
         const pet
         of index.pets
       ) {
-        const image =
-          await loadImage(
-            pixelAssetUrl(
-              pet.image,
-            ),
-          );
+        try {
+          const image =
+            await loadImage(
+              pixelAssetUrl(
+                pet.image,
+              ),
+            );
 
-        this.pets.set(
-          pet.id,
-          image,
-        );
+          this.pets.set(
+            pet.id,
+            image,
+          );
+        } catch (error) {
+          this.warnings.push(
+            `Pet ${pet.id}: ${
+              error instanceof Error
+                ? error.message
+                : "load failed"
+            }`,
+          );
+        }
       }
 
-      await Promise.all(
-        index.furniture.map(
-          async (
-            entry,
-          ) => {
-            const manifest =
-              await loadJson<
-                UpstreamFurnitureManifest
-              >(
-                pixelAssetUrl(
-                  entry.manifest,
-                ),
-              );
+      const furnitureResults =
+        await Promise.allSettled(
+          index.furniture.map(
+            async (
+              entry,
+            ) => {
+              const manifest =
+                await loadJson<
+                  UpstreamFurnitureManifest
+                >(
+                  pixelAssetUrl(
+                    entry.manifest,
+                  ),
+                );
 
-            const flattened =
-              flattenFurnitureManifest(
-                manifest,
-                entry.folder,
-              );
+              const flattened =
+                flattenFurnitureManifest(
+                  manifest,
+                  entry.folder,
+                );
 
-            const loaded =
-              await Promise.all(
-                flattened.map(
-                  async (
-                    asset,
-                  ) => ({
-                    ...asset,
-                    image:
-                      await loadImage(
-                        pixelAssetUrl(
-                          `furniture/${entry.folder}/${asset.file}`,
-                        ),
+              const assets:
+                LoadedFurnitureAsset[] =
+                  [];
+
+              for (
+                const asset
+                of flattened
+              ) {
+                try {
+                  const image =
+                    await loadImage(
+                      pixelAssetUrl(
+                        `furniture/${entry.folder}/${asset.file}`,
                       ),
-                  }),
-                ),
-              );
+                    );
 
-            this.furniture.set(
-              manifest.id,
-              loaded,
+                  assets.push({
+                    ...asset,
+                    image,
+                  });
+                } catch (error) {
+                  this.warnings.push(
+                    `${manifest.id}/${asset.file}: ${
+                      error instanceof Error
+                        ? error.message
+                        : "image load failed"
+                    }`,
+                  );
+                }
+              }
+
+              if (
+                assets.length >
+                0
+              ) {
+                this.furniture.set(
+                  manifest.id,
+                  assets,
+                );
+              } else {
+                throw new Error(
+                  `${manifest.id} has no usable sprites.`,
+                );
+              }
+
+              return manifest.id;
+            },
+          ),
+        );
+
+      furnitureResults.forEach(
+        (
+          result,
+          indexPosition,
+        ) => {
+          if (
+            result.status ===
+            "rejected"
+          ) {
+            const source =
+              index.furniture[
+                indexPosition
+              ];
+
+            this.warnings.push(
+              `Furniture ${source?.folder ?? indexPosition}: ${
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(
+                      result.reason,
+                    )
+              }`,
             );
-          },
-        ),
+          }
+        },
       );
+
+      const characterCount =
+        this.characters.filter(
+          Boolean,
+        ).length;
+
+      const floorCount =
+        this.floors.filter(
+          Boolean,
+        ).length;
+
+      if (
+        characterCount ===
+          0 ||
+        floorCount ===
+          0
+      ) {
+        throw new Error(
+          "The asset index loaded, but no usable character/floor sprites could be decoded.",
+        );
+      }
 
       this.ready =
         true;
@@ -464,6 +632,55 @@ export class PixelSpriteLibrary {
     }
   }
 
+  getDiagnostics():
+    PixelAssetDiagnostics {
+    const index =
+      this.index;
+
+    return {
+      charactersLoaded:
+        this.characters.filter(
+          Boolean,
+        ).length,
+      charactersExpected:
+        index?.characters.length ??
+        0,
+      floorsLoaded:
+        this.floors.filter(
+          Boolean,
+        ).length,
+      floorsExpected:
+        index?.floors.length ??
+        0,
+      wallsLoaded:
+        this.walls.filter(
+          Boolean,
+        ).length,
+      wallsExpected:
+        index?.walls.length ??
+        0,
+      carpetsLoaded:
+        this.carpets.filter(
+          Boolean,
+        ).length,
+      carpetsExpected:
+        index?.carpets.length ??
+        0,
+      petsLoaded:
+        this.pets.size,
+      petsExpected:
+        index?.pets.length ??
+        0,
+      furnitureGroupsLoaded:
+        this.furniture.size,
+      furnitureGroupsExpected:
+        index?.furniture.length ??
+        0,
+      warnings:
+        [...this.warnings],
+    };
+  }
+
   private resolveFurniture(
     groupId: string,
     options:
@@ -471,7 +688,8 @@ export class PixelSpriteLibrary {
   ): {
     asset:
       LoadedFurnitureAsset;
-    mirrorX: boolean;
+    mirrorX:
+      boolean;
   } | null {
     const available =
       this.furniture.get(
@@ -480,7 +698,8 @@ export class PixelSpriteLibrary {
 
     if (
       !available ||
-      available.length === 0
+      available.length ===
+        0
     ) {
       return null;
     }
@@ -491,24 +710,24 @@ export class PixelSpriteLibrary {
     if (
       options.orientation
     ) {
-      const requested =
-        options.orientation;
-
       const exact =
         candidates.filter(
           (item) =>
             item.orientation ===
-            requested,
+            options.orientation,
         );
 
       if (
-        exact.length > 0
+        exact.length >
+        0
       ) {
         candidates =
           exact;
       } else if (
-        requested === "left" ||
-        requested === "right"
+        options.orientation ===
+          "left" ||
+        options.orientation ===
+          "right"
       ) {
         const side =
           candidates.filter(
@@ -518,7 +737,8 @@ export class PixelSpriteLibrary {
           );
 
         if (
-          side.length > 0
+          side.length >
+          0
         ) {
           candidates =
             side;
@@ -537,7 +757,8 @@ export class PixelSpriteLibrary {
         );
 
       if (
-        exactState.length > 0
+        exactState.length >
+        0
       ) {
         candidates =
           exactState;
@@ -551,7 +772,8 @@ export class PixelSpriteLibrary {
         );
 
       if (
-        neutral.length > 0
+        neutral.length >
+        0
       ) {
         candidates =
           neutral;
@@ -578,7 +800,8 @@ export class PixelSpriteLibrary {
         );
 
     const selected =
-      animated.length > 0
+      animated.length >
+      0
         ? animated[
             positiveModulo(
               options.animationFrame ??
@@ -591,15 +814,6 @@ export class PixelSpriteLibrary {
             available[0]
           );
 
-    const orientationMirror =
-      (
-        options.orientation ===
-          "right" &&
-        selected.orientation ===
-          "side" &&
-        selected.mirrorSide
-      );
-
     return {
       asset:
         selected,
@@ -607,20 +821,33 @@ export class PixelSpriteLibrary {
         Boolean(
           options.mirrorX,
         ) ||
-        orientationMirror,
+        (
+          options.orientation ===
+            "right" &&
+          selected.orientation ===
+            "side" &&
+          selected.mirrorSide
+        ),
     };
   }
 
   drawCharacter(
     ctx:
       CanvasRenderingContext2D,
-    spriteIndex: number,
-    mode: CharacterMode,
-    direction: OfficeDirection,
-    frame: number,
-    x: number,
-    baselineY: number,
-    scale = 1,
+    spriteIndex:
+      number,
+    mode:
+      CharacterMode,
+    direction:
+      OfficeDirection,
+    frame:
+      number,
+    x:
+      number,
+    baselineY:
+      number,
+    scale =
+      1,
   ): boolean {
     if (
       this.characters.length ===
@@ -637,6 +864,10 @@ export class PixelSpriteLibrary {
         )
       ];
 
+    if (!image) {
+      return false;
+    }
+
     let row =
       UPSTREAM_CHARACTER
         .rows.down;
@@ -645,13 +876,15 @@ export class PixelSpriteLibrary {
       false;
 
     if (
-      direction === "up"
+      direction ===
+      "up"
     ) {
       row =
         UPSTREAM_CHARACTER
           .rows.up;
     } else if (
-      direction === "left"
+      direction ===
+      "left"
     ) {
       row =
         UPSTREAM_CHARACTER
@@ -660,7 +893,8 @@ export class PixelSpriteLibrary {
       mirror =
         true;
     } else if (
-      direction === "right"
+      direction ===
+      "right"
     ) {
       row =
         UPSTREAM_CHARACTER
@@ -668,38 +902,48 @@ export class PixelSpriteLibrary {
     }
 
     let frameIndex =
-      UPSTREAM_CHARACTER.idle;
+      UPSTREAM_CHARACTER
+        .idle;
 
     if (
-      mode === "walk"
+      mode ===
+      "walk"
     ) {
       frameIndex =
-        UPSTREAM_CHARACTER.walk[
-          positiveModulo(
-            frame,
-            UPSTREAM_CHARACTER.walk.length,
-          )
-        ];
+        UPSTREAM_CHARACTER
+          .walk[
+            positiveModulo(
+              frame,
+              UPSTREAM_CHARACTER
+                .walk.length,
+            )
+          ];
     } else if (
-      mode === "type"
+      mode ===
+      "type"
     ) {
       frameIndex =
-        UPSTREAM_CHARACTER.type[
-          positiveModulo(
-            frame,
-            UPSTREAM_CHARACTER.type.length,
-          )
-        ];
+        UPSTREAM_CHARACTER
+          .type[
+            positiveModulo(
+              frame,
+              UPSTREAM_CHARACTER
+                .type.length,
+            )
+          ];
     } else if (
-      mode === "read"
+      mode ===
+      "read"
     ) {
       frameIndex =
-        UPSTREAM_CHARACTER.read[
-          positiveModulo(
-            frame,
-            UPSTREAM_CHARACTER.read.length,
-          )
-        ];
+        UPSTREAM_CHARACTER
+          .read[
+            positiveModulo(
+              frame,
+              UPSTREAM_CHARACTER
+                .read.length,
+            )
+          ];
     }
 
     const width =
@@ -711,10 +955,12 @@ export class PixelSpriteLibrary {
         .frameHeight;
 
     const drawWidth =
-      width * scale;
+      width *
+      scale;
 
     const drawHeight =
-      height * scale;
+      height *
+      scale;
 
     ctx.imageSmoothingEnabled =
       false;
@@ -723,7 +969,9 @@ export class PixelSpriteLibrary {
 
     if (mirror) {
       ctx.translate(
-        Math.round(x),
+        Math.round(
+          x,
+        ),
         0,
       );
 
@@ -742,11 +990,11 @@ export class PixelSpriteLibrary {
         height,
         Math.round(
           -drawWidth /
-          2,
+            2,
         ),
         Math.round(
           baselineY -
-          drawHeight,
+            drawHeight,
         ),
         drawWidth,
         drawHeight,
@@ -762,12 +1010,12 @@ export class PixelSpriteLibrary {
         height,
         Math.round(
           x -
-          drawWidth /
-            2,
+            drawWidth /
+              2,
         ),
         Math.round(
           baselineY -
-          drawHeight,
+            drawHeight,
         ),
         drawWidth,
         drawHeight,
@@ -789,8 +1037,10 @@ export class PixelSpriteLibrary {
     animationFrame:
       number,
   ): {
-    drawn: boolean;
-    depthY: number;
+    drawn:
+      boolean;
+    depthY:
+      number;
   } {
     const resolved =
       this.resolveFurniture(
@@ -827,7 +1077,8 @@ export class PixelSpriteLibrary {
     const {
       asset,
       mirrorX,
-    } = resolved;
+    } =
+      resolved;
 
     const x =
       placement.col *
@@ -853,7 +1104,7 @@ export class PixelSpriteLibrary {
     if (mirrorX) {
       ctx.translate(
         x +
-        asset.width,
+          asset.width,
         0,
       );
 
@@ -869,15 +1120,21 @@ export class PixelSpriteLibrary {
         asset.width,
         asset.height,
         0,
-        Math.round(y),
+        Math.round(
+          y,
+        ),
         asset.width,
         asset.height,
       );
     } else {
       ctx.drawImage(
         asset.image,
-        Math.round(x),
-        Math.round(y),
+        Math.round(
+          x,
+        ),
+        Math.round(
+          y,
+        ),
         asset.width,
         asset.height,
       );
@@ -898,10 +1155,14 @@ export class PixelSpriteLibrary {
   drawFloorTile(
     ctx:
       CanvasRenderingContext2D,
-    patternIndex: number,
-    tint: string,
-    x: number,
-    y: number,
+    patternIndex:
+      number,
+    tint:
+      string,
+    x:
+      number,
+    y:
+      number,
   ): boolean {
     if (
       this.floors.length ===
@@ -910,17 +1171,20 @@ export class PixelSpriteLibrary {
       return false;
     }
 
-    const index =
-      positiveModulo(
-        patternIndex,
-        this.floors.length,
-      );
-
     const source =
-      this.floors[index];
+      this.floors[
+        positiveModulo(
+          patternIndex,
+          this.floors.length,
+        )
+      ];
+
+    if (!source) {
+      return false;
+    }
 
     const cacheKey =
-      `${index}:${tint}`;
+      `${patternIndex}:${tint}`;
 
     let tinted =
       this.floorTintCache.get(
@@ -980,15 +1244,15 @@ export class PixelSpriteLibrary {
         let offset = 0;
         offset <
           image.data.length;
-        offset += 4
+        offset +=
+          4
       ) {
-        const alpha =
-          image.data[
-            offset + 3
-          ];
-
         if (
-          alpha === 0
+          image.data[
+            offset +
+              3
+          ] ===
+          0
         ) {
           continue;
         }
@@ -999,10 +1263,12 @@ export class PixelSpriteLibrary {
               offset
             ] +
             image.data[
-              offset + 1
+              offset +
+                1
             ] +
             image.data[
-              offset + 2
+              offset +
+                2
             ]
           ) /
           (
@@ -1027,7 +1293,8 @@ export class PixelSpriteLibrary {
           );
 
         image.data[
-          offset + 1
+          offset +
+            1
         ] =
           Math.min(
             255,
@@ -1038,7 +1305,8 @@ export class PixelSpriteLibrary {
           );
 
         image.data[
-          offset + 2
+          offset +
+            2
         ] =
           Math.min(
             255,
@@ -1066,8 +1334,12 @@ export class PixelSpriteLibrary {
 
     ctx.drawImage(
       tinted,
-      Math.round(x),
-      Math.round(y),
+      Math.round(
+        x,
+      ),
+      Math.round(
+        y,
+      ),
       16,
       16,
     );
@@ -1078,10 +1350,14 @@ export class PixelSpriteLibrary {
   drawWallTile(
     ctx:
       CanvasRenderingContext2D,
-    wallSet: number,
-    bitmask: number,
-    x: number,
-    tileBottomY: number,
+    wallSet:
+      number,
+    bitmask:
+      number,
+    x:
+      number,
+    tileBottomY:
+      number,
   ): boolean {
     if (
       this.walls.length ===
@@ -1097,6 +1373,10 @@ export class PixelSpriteLibrary {
           this.walls.length,
         )
       ];
+
+    if (!image) {
+      return false;
+    }
 
     const mask =
       Math.max(
@@ -1138,11 +1418,13 @@ export class PixelSpriteLibrary {
         .pieceWidth,
       UPSTREAM_WALL
         .pieceHeight,
-      Math.round(x),
+      Math.round(
+        x,
+      ),
       Math.round(
         tileBottomY -
-        UPSTREAM_WALL
-          .pieceHeight,
+          UPSTREAM_WALL
+            .pieceHeight,
       ),
       UPSTREAM_WALL
         .pieceWidth,
@@ -1156,10 +1438,14 @@ export class PixelSpriteLibrary {
   drawCarpetTile(
     ctx:
       CanvasRenderingContext2D,
-    carpetIndex: number,
-    marchingCase: number,
-    x: number,
-    y: number,
+    carpetIndex:
+      number,
+    marchingCase:
+      number,
+    x:
+      number,
+    y:
+      number,
   ): boolean {
     if (
       this.carpets.length ===
@@ -1175,6 +1461,10 @@ export class PixelSpriteLibrary {
           this.carpets.length,
         )
       ];
+
+    if (!image) {
+      return false;
+    }
 
     const value =
       Math.max(
@@ -1216,8 +1506,12 @@ export class PixelSpriteLibrary {
         .pieceWidth,
       UPSTREAM_CARPET
         .pieceHeight,
-      Math.round(x),
-      Math.round(y),
+      Math.round(
+        x,
+      ),
+      Math.round(
+        y,
+      ),
       16,
       16,
     );
@@ -1228,12 +1522,18 @@ export class PixelSpriteLibrary {
   drawPet(
     ctx:
       CanvasRenderingContext2D,
-    assetId: string,
-    mode: PetMode,
-    direction: OfficeDirection,
-    frame: number,
-    x: number,
-    baselineY: number,
+    assetId:
+      string,
+    mode:
+      PetMode,
+    direction:
+      OfficeDirection,
+    frame:
+      number,
+    x:
+      number,
+    baselineY:
+      number,
   ): boolean {
     const preferred =
       this.pets.get(
@@ -1261,16 +1561,22 @@ export class PixelSpriteLibrary {
         3,
       );
 
-    let sx = 0;
-    let sy = 0;
+    let sx =
+      0;
+
+    let sy =
+      0;
+
     let width =
       UPSTREAM_PET
         .smallFrameWidth;
+
     let mirror =
       false;
 
     if (
-      mode === "walk" &&
+      mode ===
+        "walk" &&
       (
         direction ===
           "left" ||
@@ -1295,11 +1601,12 @@ export class PixelSpriteLibrary {
         direction ===
         "left";
     } else if (
-      mode === "walk"
+      mode ===
+      "walk"
     ) {
       sy =
         direction ===
-          "up"
+        "up"
           ? UPSTREAM_PET
               .frameHeight
           : 0;
@@ -1310,7 +1617,8 @@ export class PixelSpriteLibrary {
           .smallFrameWidth;
     } else {
       const faceUp =
-        direction === "up";
+        direction ===
+        "up";
 
       sy =
         faceUp
@@ -1339,7 +1647,9 @@ export class PixelSpriteLibrary {
 
     if (mirror) {
       ctx.translate(
-        Math.round(x),
+        Math.round(
+          x,
+        ),
         0,
       );
 
@@ -1356,11 +1666,11 @@ export class PixelSpriteLibrary {
         height,
         Math.round(
           -width /
-          2,
+            2,
         ),
         Math.round(
           baselineY -
-          height,
+            height,
         ),
         width,
         height,
@@ -1374,12 +1684,12 @@ export class PixelSpriteLibrary {
         height,
         Math.round(
           x -
-          width /
-            2,
+            width /
+              2,
         ),
         Math.round(
           baselineY -
-          height,
+            height,
         ),
         width,
         height,
@@ -1392,17 +1702,21 @@ export class PixelSpriteLibrary {
   }
 
   hasFurniture(
-    groupId: string,
+    groupId:
+      string,
   ): boolean {
     return Boolean(
-      this.furniture.get(
-        groupId,
-      )?.length,
+      this.furniture
+        .get(
+          groupId,
+        )
+        ?.length,
     );
   }
 
   getIndex():
-    PixelAgentsAssetIndex | null {
+    PixelAgentsAssetIndex |
+    null {
     return this.index;
   }
 }
