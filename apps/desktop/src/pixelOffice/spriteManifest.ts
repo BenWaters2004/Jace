@@ -1,6 +1,7 @@
 import type {
   CharacterSpriteDefinition,
   FurnitureSpriteId,
+  PetSpriteDefinition,
 } from "./types";
 
 export const CHARACTER_SPRITE_DEFINITION:
@@ -18,6 +19,15 @@ export const CHARACTER_SPRITE_DEFINITION:
       read: 6,
       think: 7,
     },
+  };
+
+export const PET_SPRITE_DEFINITION:
+  PetSpriteDefinition = {
+    frameWidth: 16,
+    frameHeight: 16,
+    columns: 4,
+    walkRow: 0,
+    idleRow: 1,
   };
 
 export interface FurnitureSpriteDefinition {

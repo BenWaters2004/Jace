@@ -31,3 +31,11 @@ export const FURNITURE_ASSET_URL =
     "../assets/pixel-office/furniture/furniture.png",
     import.meta.url,
   ).href;
+
+export const PET_ASSET_URLS = {
+  cat:
+    new URL(
+      "../assets/pixel-office/pets/cat.png",
+      import.meta.url,
+    ).href,
+} as const;

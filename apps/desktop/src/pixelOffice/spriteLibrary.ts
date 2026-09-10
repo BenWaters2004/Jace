@@ -1,16 +1,19 @@
 import {
   CHARACTER_ASSET_URLS,
   FURNITURE_ASSET_URL,
+  PET_ASSET_URLS,
 } from "./assets";
 import {
   CHARACTER_SPRITE_DEFINITION,
   FURNITURE_FRAME_SIZE,
   FURNITURE_SPRITES,
+  PET_SPRITE_DEFINITION,
 } from "./spriteManifest";
 import type {
   CharacterMode,
   FurnitureSpriteId,
   OfficeDirection,
+  PetMode,
 } from "./types";
 
 type SpecialistId =
@@ -20,18 +23,24 @@ type SpecialistId =
   | "analyst"
   | "general";
 
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
+function loadImage(
+  url: string,
+): Promise<HTMLImageElement> {
+  return new Promise(
+    (resolve, reject) => {
+      const image = new Image();
 
-    image.onload = () => resolve(image);
-    image.onerror = () =>
-      reject(
-        new Error(`Could not load pixel-office asset: ${url}`),
-      );
+      image.onload = () => resolve(image);
+      image.onerror = () =>
+        reject(
+          new Error(
+            `Could not load pixel-office asset: ${url}`,
+          ),
+        );
 
-    image.src = url;
-  });
+      image.src = url;
+    },
+  );
 }
 
 function characterRow(
@@ -39,7 +48,8 @@ function characterRow(
   direction: OfficeDirection,
 ): number {
   if (mode === "walk") {
-    return CHARACTER_SPRITE_DEFINITION.rows[direction];
+    return CHARACTER_SPRITE_DEFINITION
+      .rows[direction];
   }
 
   if (mode === "type") {
@@ -58,15 +68,25 @@ function characterRow(
 }
 
 export class PixelSpriteLibrary {
-  private characters = new Map<string, HTMLImageElement>();
-  private furniture: HTMLImageElement | null = null;
-  private loading: Promise<void> | null = null;
+  private characters =
+    new Map<string, HTMLImageElement>();
+
+  private furniture:
+    HTMLImageElement | null = null;
+
+  private pet:
+    HTMLImageElement | null = null;
+
+  private loading:
+    Promise<void> | null = null;
 
   ready = false;
   error: string | null = null;
 
   load(): Promise<void> {
-    if (this.loading) return this.loading;
+    if (this.loading) {
+      return this.loading;
+    }
 
     this.loading = this.loadInternal();
     return this.loading;
@@ -74,14 +94,19 @@ export class PixelSpriteLibrary {
 
   private async loadInternal() {
     try {
-      const entries = Object.entries(
-        CHARACTER_ASSET_URLS,
-      ) as Array<[SpecialistId, string]>;
+      const entries =
+        Object.entries(
+          CHARACTER_ASSET_URLS,
+        ) as Array<
+          [SpecialistId, string]
+        >;
 
       const images = await Promise.all(
         entries.map(
-          async ([id, url]) =>
-            [id, await loadImage(url)] as const,
+          async ([id, url]) => [
+            id,
+            await loadImage(url),
+          ] as const,
         ),
       );
 
@@ -89,7 +114,15 @@ export class PixelSpriteLibrary {
         this.characters.set(id, image);
       }
 
-      this.furniture = await loadImage(FURNITURE_ASSET_URL);
+      this.furniture =
+        await loadImage(
+          FURNITURE_ASSET_URL,
+        );
+
+      this.pet =
+        await loadImage(
+          PET_ASSET_URLS.cat,
+        );
 
       this.ready = true;
       this.error = null;
@@ -118,10 +151,17 @@ export class PixelSpriteLibrary {
 
     if (!image) return false;
 
-    const definition = CHARACTER_SPRITE_DEFINITION;
-    const row = characterRow(mode, direction);
-    const frameCount = mode === "walk" ? 4 : 2;
-    const column = Math.abs(frame) % frameCount;
+    const definition =
+      CHARACTER_SPRITE_DEFINITION;
+
+    const row =
+      characterRow(mode, direction);
+
+    const frameCount =
+      mode === "walk" ? 4 : 2;
+
+    const column =
+      Math.abs(frame) % frameCount;
 
     ctx.imageSmoothingEnabled = false;
 
@@ -131,8 +171,65 @@ export class PixelSpriteLibrary {
       row * definition.frameHeight,
       definition.frameWidth,
       definition.frameHeight,
-      Math.round(x - (definition.frameWidth * scale) / 2),
-      Math.round(y - definition.frameHeight * scale + 4 * scale),
+      Math.round(
+        x -
+        (definition.frameWidth * scale) / 2,
+      ),
+      Math.round(
+        y -
+        definition.frameHeight * scale +
+        4 * scale,
+      ),
+      definition.frameWidth * scale,
+      definition.frameHeight * scale,
+    );
+
+    return true;
+  }
+
+  drawPet(
+    ctx: CanvasRenderingContext2D,
+    mode: PetMode,
+    frame: number,
+    x: number,
+    y: number,
+    scale = 1,
+  ): boolean {
+    if (!this.pet) {
+      return false;
+    }
+
+    const definition =
+      PET_SPRITE_DEFINITION;
+
+    const row =
+      mode === "walk"
+        ? definition.walkRow
+        : definition.idleRow;
+
+    const frameCount =
+      mode === "walk" ? 4 : 2;
+
+    const column =
+      Math.abs(frame) % frameCount;
+
+    ctx.imageSmoothingEnabled = false;
+
+    ctx.drawImage(
+      this.pet,
+      column * definition.frameWidth,
+      row * definition.frameHeight,
+      definition.frameWidth,
+      definition.frameHeight,
+      Math.round(
+        x -
+        (definition.frameWidth * scale) / 2,
+      ),
+      Math.round(
+        y -
+        definition.frameHeight * scale +
+        8 * scale,
+      ),
       definition.frameWidth * scale,
       definition.frameHeight * scale,
     );
@@ -147,20 +244,28 @@ export class PixelSpriteLibrary {
     y: number,
     scale = 1,
   ): boolean {
-    if (!this.furniture) return false;
+    if (!this.furniture) {
+      return false;
+    }
 
-    const definition = FURNITURE_SPRITES[id];
+    const definition =
+      FURNITURE_SPRITES[id];
 
     ctx.imageSmoothingEnabled = false;
 
     ctx.drawImage(
       this.furniture,
-      definition.index * FURNITURE_FRAME_SIZE,
+      definition.index *
+        FURNITURE_FRAME_SIZE,
       0,
       definition.width,
       definition.height,
-      Math.round(x - definition.anchorX * scale),
-      Math.round(y - definition.anchorY * scale),
+      Math.round(
+        x - definition.anchorX * scale,
+      ),
+      Math.round(
+        y - definition.anchorY * scale,
+      ),
       definition.width * scale,
       definition.height * scale,
     );

@@ -1,0 +1,56 @@
+.phase11-agent-office {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 380px;
+}
+
+.agent-office-stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.agent-task-inspector.overlay {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 12;
+  width: min(390px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  border: 1px solid rgba(108, 223, 214, 0.12);
+  border-radius: 10px;
+  background: rgba(5, 16, 17, 0.92);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+.agent-task-inspector.overlay pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.focus-office .phase11-agent-office {
+  height: 100%;
+  min-height: 0;
+}
+
+.focus-office .phase11-agent-office .agent-office-stage {
+  height: 100%;
+  min-height: 0;
+}
+
+.focus-office .phase11-agent-office .agent-task-inspector.overlay {
+  max-height: calc(100% - 24px);
+}
+
+@media (max-width: 880px) {
+  .agent-task-inspector.overlay {
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+}
