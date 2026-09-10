@@ -26,6 +26,16 @@ const ACTIVE_STATUSES = new Set([
   "waiting_permission",
 ]);
 
+const TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+]);
+
+/*
+ * Keep a finished task visibly attached to its worker for long enough that a
+ * quick local job cannot disappear before Jace finishes acknowledging it.
+ */
+const RECENT_TERMINAL_RETENTION_MS = 2 * 60 * 1000;
 const POLL_MS = 1000;
 
 export interface OfficeWorker {
@@ -33,6 +43,17 @@ export interface OfficeWorker {
   definition: AgentDefinition;
   task: AgentTask | null;
   overflowIndex: number;
+}
+
+function taskTimestamp(task: AgentTask): number {
+  const value =
+    task.completed_at ??
+    task.updated_at ??
+    task.started_at ??
+    task.created_at;
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 export function useAgentOffice() {
@@ -95,39 +116,65 @@ export function useAgentOffice() {
     [tasks],
   );
 
+  const recentTerminalTasks = useMemo(() => {
+    const now = Date.now();
+
+    return tasks.filter((task) => {
+      if (!TERMINAL_STATUSES.has(task.status)) return false;
+
+      const timestamp = taskTimestamp(task);
+      return timestamp > 0 && now - timestamp <= RECENT_TERMINAL_RETENTION_MS;
+    });
+  }, [tasks]);
+
   const workers = useMemo<OfficeWorker[]>(() => {
     const output: OfficeWorker[] = [];
 
     for (const definition of definitions) {
-      const matching = activeTasks
+      const matchingActive = activeTasks
         .filter((task) => task.agent_id === definition.id)
         .sort((a, b) => {
           if (a.priority !== b.priority) return b.priority - a.priority;
           return a.created_at.localeCompare(b.created_at);
         });
 
+      const matchingRecent = recentTerminalTasks
+        .filter((task) => task.agent_id === definition.id)
+        .sort((a, b) => taskTimestamp(b) - taskTimestamp(a));
+
+      /*
+       * Active work always wins. Otherwise retain the specialist's most recent
+       * completed/failed job for two minutes so the user can see the green tick,
+       * red failure state and click through to the result.
+       */
+      const primaryTask = matchingActive[0] ?? matchingRecent[0] ?? null;
+
       output.push({
         id: definition.id,
         definition,
-        task: matching[0] ?? null,
+        task: primaryTask,
         overflowIndex: 0,
       });
 
-      for (let index = 1; index < matching.length; index += 1) {
+      /*
+       * Overflow workers represent genuinely concurrent active tasks only.
+       * We do not spawn extra characters merely for historical results.
+       */
+      for (let index = 1; index < matchingActive.length; index += 1) {
         output.push({
-          id: `${definition.id}-overflow-${matching[index].id}`,
+          id: `${definition.id}-overflow-${matchingActive[index].id}`,
           definition: {
             ...definition,
             name: `${definition.name} ${index + 1}`,
           },
-          task: matching[index],
+          task: matchingActive[index],
           overflowIndex: index,
         });
       }
     }
 
     return output;
-  }, [activeTasks, definitions]);
+  }, [activeTasks, definitions, recentTerminalTasks]);
 
   const selectedTask = useMemo(
     () =>
@@ -175,6 +222,7 @@ export function useAgentOffice() {
     status,
     error,
     activeTasks,
+    recentTerminalTasks,
     workers,
     selectedTask,
     selectedTaskId,
