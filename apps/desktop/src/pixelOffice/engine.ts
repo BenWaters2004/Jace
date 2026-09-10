@@ -1,28 +1,52 @@
 import type { OfficeWorker } from "../agents/useAgentOffice";
 import type { AgentTask } from "../agents/types";
 import {
-  createJaceOfficeLayout,
+  buildBlockedTiles,
+  collectWalkableTiles,
   findPath,
-  getWalkableTiles,
+  loadOfficeLayout,
+  OFFICE_CAMERA_STORAGE_KEY,
+  resetOfficeLayout,
   TILE_SIZE,
   tileCenter,
 } from "./layout";
+import { PixelSpriteLibrary } from "./spriteLibrary";
 import type {
+  CameraState,
+  CharacterMode,
+  FurniturePlacement,
   OfficeCharacter,
-  OfficeCharacterMode,
   OfficeDirection,
   OfficeHit,
-  OfficeLayout,
-  OfficeViewport,
+  OfficeLayoutConfig,
+  OfficeSeat,
 } from "./types";
 
-const WALK_SPEED = 52;
-const WALK_FRAME_TIME = 0.13;
-const TYPE_FRAME_TIME = 0.18;
-const WANDER_MIN = 2.4;
-const WANDER_MAX = 6.0;
-const COMPLETE_HOLD = 3.5;
-const FAILED_HOLD = 5.0;
+const WALK_SPEED = 56;
+const WALK_FRAME_SECONDS = 0.13;
+const WORK_FRAME_SECONDS = 0.20;
+const WANDER_MIN_SECONDS = 2.2;
+const WANDER_MAX_SECONDS = 5.8;
+const TERMINAL_BUBBLE_SECONDS = 4.5;
+
+const READING_TOOLS = new Set([
+  "web_search",
+  "read_web_page",
+  "browser_read_page",
+  "search_memory",
+  "search_conversations",
+  "list_computer_workspaces",
+  "list_workspace_files",
+  "read_workspace_file",
+  "search_workspace_files",
+  "workspace_file_info",
+  "inspect_workspace_media",
+]);
+
+interface Renderable {
+  depth: number;
+  render: () => void;
+}
 
 function randomRange(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -40,14 +64,29 @@ function directionBetween(
   return "up";
 }
 
-function toolMode(task: AgentTask | null): OfficeCharacterMode {
+function extractCurrentTool(task: AgentTask | null): string | null {
+  if (!task) return null;
+
+  const activity = task.progress_message?.trim() ?? "";
+  const match = /^Using\s+(.+)$/i.exec(activity);
+
+  if (match?.[1]) return match[1].trim();
+
+  if (task.used_tools.length > 0) {
+    return task.used_tools[task.used_tools.length - 1];
+  }
+
+  return null;
+}
+
+function taskMode(task: AgentTask | null): CharacterMode {
   if (!task) return "idle";
 
   switch (task.status) {
     case "queued":
-      return "idle";
+      return "queued";
     case "running":
-      return "walk";
+      return "type";
     case "thinking":
       return "think";
     case "waiting_permission":
@@ -59,14 +98,16 @@ function toolMode(task: AgentTask | null): OfficeCharacterMode {
     case "cancelled":
       return "idle";
     case "using_tool": {
-      const active = task.progress_message?.toLowerCase() ?? "";
-      const tool = [...task.used_tools].at(-1)?.toLowerCase() ?? "";
+      const tool = extractCurrentTool(task);
 
       if (
-        active.includes("read") ||
-        active.includes("search") ||
-        tool.includes("read") ||
-        tool.includes("search")
+        tool &&
+        (
+          READING_TOOLS.has(tool) ||
+          tool.includes("read") ||
+          tool.includes("search") ||
+          tool.includes("list")
+        )
       ) {
         return "read";
       }
@@ -76,233 +117,370 @@ function toolMode(task: AgentTask | null): OfficeCharacterMode {
   }
 }
 
-function isWorkingMode(mode: OfficeCharacterMode): boolean {
-  return [
-    "type",
-    "read",
-    "think",
-    "wait",
-    "complete",
-    "failed",
-  ].includes(mode);
+function bubbleText(character: OfficeCharacter): string | null {
+  if (character.mode === "queued") return "QUEUED";
+  if (character.mode === "think") return "THINKING";
+  if (character.mode === "wait") return "PERMISSION";
+
+  if (character.mode === "complete") {
+    return character.bubbleTimer > 0 ? "DONE" : null;
+  }
+
+  if (character.mode === "failed") {
+    return character.bubbleTimer > 0 ? "FAILED" : null;
+  }
+
+  if (character.mode === "read") {
+    const tool = character.currentTool?.toLowerCase() ?? "";
+
+    if (tool.includes("web")) return "WEB";
+    if (tool.includes("memory")) return "MEMORY";
+    if (tool.includes("conversation")) return "HISTORY";
+    if (tool.includes("workspace")) return "FILES";
+
+    return "READING";
+  }
+
+  if (character.mode === "type") {
+    const tool = character.currentTool?.toLowerCase() ?? "";
+
+    if (tool.includes("command")) return "TERMINAL";
+    if (tool.includes("write")) return "WRITING";
+    if (tool.includes("replace")) return "EDITING";
+    if (tool.includes("move")) return "MOVING";
+    if (tool.includes("delete")) return "DELETING";
+
+    return character.taskId ? "WORKING" : null;
+  }
+
+  return null;
 }
 
-function characterColor(index: number): string {
-  const colors = [
-    "#50d3e0",
-    "#8f7cff",
-    "#62dda5",
-    "#efb85b",
-    "#72b8ff",
-    "#da78a7",
-    "#76d8ca",
-  ];
+function loadCamera(): CameraState {
+  try {
+    const raw = window.localStorage.getItem(OFFICE_CAMERA_STORAGE_KEY);
 
-  return colors[index % colors.length];
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<CameraState>;
+
+      if (
+        typeof parsed.x === "number" &&
+        typeof parsed.y === "number" &&
+        typeof parsed.zoom === "number"
+      ) {
+        return {
+          x: parsed.x,
+          y: parsed.y,
+          zoom: Math.max(0.8, Math.min(5, parsed.zoom)),
+        };
+      }
+    }
+  } catch {
+    // Camera persistence is best-effort.
+  }
+
+  return { x: 0, y: 0, zoom: 1 };
 }
 
 export class JacePixelOfficeEngine {
-  readonly layout: OfficeLayout;
-  readonly walkableTiles;
   readonly characters = new Map<string, OfficeCharacter>();
 
   selectedCharacterId: string | null = null;
   hoveredCharacterId: string | null = null;
   cameraFollowId: string | null = null;
 
-  viewport: OfficeViewport = {
-    x: 0,
-    y: 0,
-    zoom: 2,
-  };
+  private readonly canvas: HTMLCanvasElement;
+  private readonly ctx: CanvasRenderingContext2D;
+  private readonly sprites = new PixelSpriteLibrary();
 
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private layout: OfficeLayoutConfig;
+  private blocked: Set<string>;
+  private walkableTiles: Array<{ col: number; row: number }>;
+  private camera: CameraState = loadCamera();
+
   private animationFrame: number | null = null;
   private lastTime = 0;
   private disposed = false;
+  private fittedOnce = false;
 
   constructor(canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) throw new Error("Could not create Jace office canvas.");
+
+    if (!ctx) {
+      throw new Error(
+        "Could not initialise the Jace pixel office canvas.",
+      );
+    }
 
     this.canvas = canvas;
     this.ctx = ctx;
-    this.layout = createJaceOfficeLayout();
-    this.walkableTiles = getWalkableTiles(this.layout);
+    this.layout = loadOfficeLayout();
+    this.blocked = buildBlockedTiles(this.layout);
+    this.walkableTiles = collectWalkableTiles(
+      this.layout,
+      this.blocked,
+    );
+
+    void this.sprites.load();
   }
 
   start() {
-    if (this.animationFrame != null) return;
+    if (this.animationFrame !== null) return;
 
     this.lastTime = performance.now();
 
     const tick = (time: number) => {
       if (this.disposed) return;
 
-      const dt = Math.min((time - this.lastTime) / 1000, 0.1);
+      const dt = Math.min((time - this.lastTime) / 1000, 0.08);
       this.lastTime = time;
 
       this.update(dt);
       this.render();
 
-      this.animationFrame = requestAnimationFrame(tick);
+      this.animationFrame = window.requestAnimationFrame(tick);
     };
 
-    this.animationFrame = requestAnimationFrame(tick);
+    this.animationFrame = window.requestAnimationFrame(tick);
   }
 
   dispose() {
     this.disposed = true;
 
-    if (this.animationFrame != null) {
-      cancelAnimationFrame(this.animationFrame);
+    if (this.animationFrame !== null) {
+      window.cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
+    }
+
+    try {
+      window.localStorage.setItem(
+        OFFICE_CAMERA_STORAGE_KEY,
+        JSON.stringify(this.camera),
+      );
+    } catch {
+      // Best-effort persistence.
     }
 
     this.characters.clear();
   }
 
   resize(width: number, height: number, dpr: number) {
-    const safeWidth = Math.max(1, Math.floor(width * dpr));
-    const safeHeight = Math.max(1, Math.floor(height * dpr));
+    const pixelWidth = Math.max(1, Math.floor(width * dpr));
+    const pixelHeight = Math.max(1, Math.floor(height * dpr));
 
     if (
-      this.canvas.width !== safeWidth ||
-      this.canvas.height !== safeHeight
+      this.canvas.width !== pixelWidth ||
+      this.canvas.height !== pixelHeight
     ) {
-      this.canvas.width = safeWidth;
-      this.canvas.height = safeHeight;
+      this.canvas.width = pixelWidth;
+      this.canvas.height = pixelHeight;
       this.canvas.style.width = `${width}px`;
       this.canvas.style.height = `${height}px`;
     }
 
-    const worldWidth = this.layout.cols * TILE_SIZE;
-    const worldHeight = this.layout.rows * TILE_SIZE;
-
-    const fitX = width / worldWidth;
-    const fitY = height / worldHeight;
-    const fitted = Math.max(1, Math.floor(Math.min(fitX, fitY) * 2));
-
-    if (this.viewport.zoom < 1 || !Number.isFinite(this.viewport.zoom)) {
-      this.viewport.zoom = fitted;
+    if (!this.fittedOnce) {
+      this.fitToRoom(width, height);
+      this.fittedOnce = true;
     }
   }
 
+  resetLayout() {
+    this.layout = resetOfficeLayout();
+    this.blocked = buildBlockedTiles(this.layout);
+    this.walkableTiles = collectWalkableTiles(
+      this.layout,
+      this.blocked,
+    );
+
+    for (const character of this.characters.values()) {
+      character.path = [];
+      character.moveProgress = 0;
+    }
+
+    const rect = this.canvas.getBoundingClientRect();
+    this.fitToRoom(rect.width, rect.height);
+  }
+
+  fitToRoom(width?: number, height?: number) {
+    const rect = this.canvas.getBoundingClientRect();
+
+    const viewportWidth = width ?? rect.width;
+    const viewportHeight = height ?? rect.height;
+    const worldWidth = this.layout.cols * TILE_SIZE;
+    const worldHeight = this.layout.rows * TILE_SIZE;
+
+    const zoom = Math.max(
+      0.8,
+      Math.min(
+        3.5,
+        Math.min(
+          viewportWidth / worldWidth,
+          viewportHeight / worldHeight,
+        ) * 0.96,
+      ),
+    );
+
+    this.camera.zoom = zoom;
+    this.camera.x =
+      viewportWidth / (2 * zoom) - worldWidth / 2;
+    this.camera.y =
+      viewportHeight / (2 * zoom) - worldHeight / 2;
+
+    this.cameraFollowId = null;
+  }
+
+  private seatForWorker(worker: OfficeWorker): OfficeSeat {
+    if (worker.overflowIndex > 0) {
+      const overflow = this.layout.seats.find(
+        (seat) =>
+          seat.id ===
+          `overflow-${Math.min(worker.overflowIndex, 3)}`,
+      );
+
+      if (overflow) return overflow;
+    }
+
+    return (
+      this.layout.seats.find(
+        (seat) => seat.specialist === worker.definition.id,
+      ) ??
+      this.layout.seats[0]
+    );
+  }
+
   syncWorkers(workers: OfficeWorker[]) {
-    const activeIds = new Set<string>();
+    const keep = new Set<string>();
 
     workers.forEach((worker, index) => {
-      activeIds.add(worker.id);
+      keep.add(worker.id);
 
+      const seat = this.seatForWorker(worker);
       let character = this.characters.get(worker.id);
-      const seat =
-        this.layout.seats.find(
-          (candidate) => candidate.id === worker.definition.id,
-        ) ??
-        this.layout.seats[index % this.layout.seats.length];
 
       if (!character) {
-        const spawn = this.walkableTiles[
-          Math.floor(Math.random() * this.walkableTiles.length)
-        ] ?? { col: 2, row: 9 };
+        const spawn =
+          this.walkableTiles[
+            Math.floor(Math.random() * this.walkableTiles.length)
+          ] ?? { col: 2 + index, row: 10 };
 
         const center = tileCenter(spawn.col, spawn.row);
 
         character = {
           id: worker.id,
           workerId: worker.id,
+          specialistId: worker.definition.id,
           label: worker.definition.name,
-          accent: worker.definition.accent || characterColor(index),
+          accent: worker.definition.accent,
           mode: "idle",
+          desiredMode: "idle",
           direction: "down",
           x: center.x,
           y: center.y,
           tileCol: spawn.col,
           tileRow: spawn.row,
-          seatId: seat?.id ?? null,
           path: [],
           moveProgress: 0,
           frame: 0,
           frameTimer: 0,
-          idleTimer: randomRange(WANDER_MIN, WANDER_MAX),
+          idleTimer: randomRange(
+            WANDER_MIN_SECONDS,
+            WANDER_MAX_SECONDS,
+          ),
           bubbleTimer: 0,
+          seatId: seat.id,
           taskId: null,
           taskTitle: "",
           activity: "Standing by",
+          currentTool: null,
           progress: 0,
+          task: null,
         };
 
         this.characters.set(worker.id, character);
       }
 
+      const previousTaskId = character.taskId;
+      const previousDesired = character.desiredMode;
+
+      character.specialistId = worker.definition.id;
       character.label = worker.definition.name;
-      character.accent = worker.definition.accent || character.accent;
+      character.accent = worker.definition.accent;
+      character.seatId = seat.id;
+      character.task = worker.task;
       character.taskId = worker.task?.id ?? null;
       character.taskTitle = worker.task?.title ?? "";
       character.activity =
         worker.task?.progress_message ??
-        (worker.task
-          ? worker.task.status.replace(/_/g, " ")
-          : "Standing by");
+        (
+          worker.task
+            ? worker.task.status.replace(/_/g, " ")
+            : "Standing by"
+        );
+      character.currentTool = extractCurrentTool(worker.task);
       character.progress = worker.task?.progress ?? 0;
+      character.desiredMode = taskMode(worker.task);
 
-      const wantedMode = toolMode(worker.task);
+      const taskChanged = previousTaskId !== character.taskId;
 
-      if (worker.task && seat) {
-        character.seatId = seat.id;
+      if (
+        taskChanged &&
+        (
+          character.desiredMode === "complete" ||
+          character.desiredMode === "failed"
+        )
+      ) {
+        character.bubbleTimer = TERMINAL_BUBBLE_SECONDS;
+      }
 
-        const alreadyAtSeat =
-          character.tileCol === seat.col &&
-          character.tileRow === seat.row;
+      if (!worker.task) {
+        if (
+          previousTaskId !== null ||
+          previousDesired !== "idle"
+        ) {
+          character.desiredMode = "idle";
+          character.mode = "idle";
+          character.path = [];
+          character.idleTimer = randomRange(
+            WANDER_MIN_SECONDS,
+            WANDER_MAX_SECONDS,
+          );
+        }
 
-        if (!alreadyAtSeat && character.path.length === 0) {
+        return;
+      }
+
+      const atSeat =
+        character.tileCol === seat.col &&
+        character.tileRow === seat.row;
+
+      if (!atSeat) {
+        if (character.path.length === 0 || taskChanged) {
           character.path = findPath(
             this.layout,
+            this.blocked,
             character.tileCol,
             character.tileRow,
             seat.col,
             seat.row,
           );
 
-          if (character.path.length > 0) {
-            character.mode = "walk";
-          }
-        } else if (alreadyAtSeat && character.mode !== "walk") {
-          character.mode = wantedMode === "walk" ? "type" : wantedMode;
-          character.direction = seat.facing;
+          character.moveProgress = 0;
         }
-      } else if (!worker.task) {
-        if (isWorkingMode(character.mode)) {
-          character.mode = "idle";
-          character.bubbleTimer = 0;
-          character.idleTimer = randomRange(WANDER_MIN, WANDER_MAX);
+
+        if (character.path.length > 0) {
+          character.mode = "walk";
         }
-      }
-
-      if (wantedMode === "complete" && character.mode !== "walk") {
-        character.mode = "complete";
-        character.bubbleTimer = COMPLETE_HOLD;
-      }
-
-      if (wantedMode === "failed" && character.mode !== "walk") {
-        character.mode = "failed";
-        character.bubbleTimer = FAILED_HOLD;
-      }
-
-      if (
-        worker.task &&
-        character.mode !== "walk" &&
-        wantedMode !== "walk" &&
-        wantedMode !== "complete" &&
-        wantedMode !== "failed"
-      ) {
-        character.mode = wantedMode;
+      } else {
+        character.direction = seat.facing;
+        character.mode =
+          character.desiredMode === "walk"
+            ? "type"
+            : character.desiredMode;
       }
     });
 
     for (const id of this.characters.keys()) {
-      if (!activeIds.has(id)) {
+      if (!keep.has(id)) {
         this.characters.delete(id);
       }
     }
@@ -313,70 +491,57 @@ export class JacePixelOfficeEngine {
     this.cameraFollowId = id;
   }
 
-  clearCameraFollow() {
+  pan(dx: number, dy: number) {
+    this.camera.x += dx / this.camera.zoom;
+    this.camera.y += dy / this.camera.zoom;
     this.cameraFollowId = null;
   }
 
-  pan(dx: number, dy: number) {
-    this.viewport.x += dx / this.viewport.zoom;
-    this.viewport.y += dy / this.viewport.zoom;
-    this.clearCameraFollow();
-  }
-
-  zoomAt(
-    clientX: number,
-    clientY: number,
-    delta: number,
-  ) {
+  zoomAt(clientX: number, clientY: number, deltaY: number) {
     const rect = this.canvas.getBoundingClientRect();
-    const oldZoom = this.viewport.zoom;
-    const nextZoom = Math.min(
-      6,
-      Math.max(1, oldZoom + (delta > 0 ? -0.25 : 0.25)),
+
+    const previous = this.camera.zoom;
+    const next = Math.max(
+      0.8,
+      Math.min(5, previous * (deltaY > 0 ? 0.9 : 1.1)),
     );
 
-    if (nextZoom === oldZoom) return;
+    if (next === previous) return;
 
     const localX = clientX - rect.left;
     const localY = clientY - rect.top;
 
-    const worldX =
-      localX / oldZoom -
-      this.viewport.x;
-    const worldY =
-      localY / oldZoom -
-      this.viewport.y;
+    const worldX = localX / previous - this.camera.x;
+    const worldY = localY / previous - this.camera.y;
 
-    this.viewport.zoom = nextZoom;
-
-    this.viewport.x =
-      localX / nextZoom -
-      worldX;
-    this.viewport.y =
-      localY / nextZoom -
-      worldY;
+    this.camera.zoom = next;
+    this.camera.x = localX / next - worldX;
+    this.camera.y = localY / next - worldY;
+    this.cameraFollowId = null;
   }
 
   hitTest(clientX: number, clientY: number): OfficeHit | null {
     const rect = this.canvas.getBoundingClientRect();
+
     const x =
-      (clientX - rect.left) / this.viewport.zoom -
-      this.viewport.x;
+      (clientX - rect.left) / this.camera.zoom -
+      this.camera.x;
     const y =
-      (clientY - rect.top) / this.viewport.zoom -
-      this.viewport.y;
+      (clientY - rect.top) / this.camera.zoom -
+      this.camera.y;
 
-    const candidates = [...this.characters.values()]
-      .sort((a, b) => b.y - a.y);
+    const characters = [...this.characters.values()].sort(
+      (a, b) => b.y - a.y,
+    );
 
-    for (const character of candidates) {
+    for (const character of characters) {
       if (
-        x >= character.x - 9 &&
-        x <= character.x + 9 &&
-        y >= character.y - 26 &&
-        y <= character.y + 5
+        x >= character.x - 10 &&
+        x <= character.x + 10 &&
+        y >= character.y - 28 &&
+        y <= character.y + 8
       ) {
-        return { type: "character", id: character.id };
+        return { characterId: character.id };
       }
     }
 
@@ -395,17 +560,54 @@ export class JacePixelOfficeEngine {
       }
 
       if (character.mode === "walk") {
-        this.updateWalk(character, dt);
-      } else if (
+        this.updateWalking(character, dt);
+        continue;
+      }
+
+      if (character.taskId && character.path.length === 0) {
+        const seat = this.layout.seats.find(
+          (candidate) => candidate.id === character.seatId,
+        );
+
+        if (
+          seat &&
+          (
+            character.tileCol !== seat.col ||
+            character.tileRow !== seat.row
+          )
+        ) {
+          character.path = findPath(
+            this.layout,
+            this.blocked,
+            character.tileCol,
+            character.tileRow,
+            seat.col,
+            seat.row,
+          );
+
+          if (character.path.length > 0) {
+            character.mode = "walk";
+            continue;
+          }
+        }
+
+        character.mode = character.desiredMode;
+      }
+
+      if (
         character.mode === "type" ||
         character.mode === "read" ||
         character.mode === "think"
       ) {
-        if (character.frameTimer >= TYPE_FRAME_TIME) {
+        if (character.frameTimer >= WORK_FRAME_SECONDS) {
           character.frameTimer = 0;
           character.frame = (character.frame + 1) % 2;
         }
-      } else if (character.mode === "idle") {
+
+        continue;
+      }
+
+      if (character.mode === "idle") {
         this.updateIdle(character, dt);
       }
     }
@@ -413,8 +615,8 @@ export class JacePixelOfficeEngine {
     this.updateCamera(dt);
   }
 
-  private updateWalk(character: OfficeCharacter, dt: number) {
-    if (character.frameTimer >= WALK_FRAME_TIME) {
+  private updateWalking(character: OfficeCharacter, dt: number) {
+    if (character.frameTimer >= WALK_FRAME_SECONDS) {
       character.frameTimer = 0;
       character.frame = (character.frame + 1) % 4;
     }
@@ -422,16 +624,24 @@ export class JacePixelOfficeEngine {
     const next = character.path[0];
 
     if (!next) {
-      const seat = character.seatId
-        ? this.layout.seats.find((candidate) => candidate.id === character.seatId)
-        : null;
+      const seat = this.layout.seats.find(
+        (candidate) => candidate.id === character.seatId,
+      );
 
-      if (seat && character.taskId) {
-        character.mode = "type";
+      if (
+        character.taskId &&
+        seat &&
+        character.tileCol === seat.col &&
+        character.tileRow === seat.row
+      ) {
         character.direction = seat.facing;
+        character.mode = character.desiredMode;
       } else {
         character.mode = "idle";
-        character.idleTimer = randomRange(WANDER_MIN, WANDER_MAX);
+        character.idleTimer = randomRange(
+          WANDER_MIN_SECONDS,
+          WANDER_MAX_SECONDS,
+        );
       }
 
       return;
@@ -452,10 +662,10 @@ export class JacePixelOfficeEngine {
       character.tileRow,
     );
     const to = tileCenter(next.col, next.row);
-    const t = Math.min(character.moveProgress, 1);
+    const amount = Math.min(character.moveProgress, 1);
 
-    character.x = from.x + (to.x - from.x) * t;
-    character.y = from.y + (to.y - from.y) * t;
+    character.x = from.x + (to.x - from.x) * amount;
+    character.y = from.y + (to.y - from.y) * amount;
 
     if (character.moveProgress >= 1) {
       character.tileCol = next.col;
@@ -468,13 +678,14 @@ export class JacePixelOfficeEngine {
   }
 
   private updateIdle(character: OfficeCharacter, dt: number) {
-    if (character.taskId) {
-      return;
-    }
+    if (character.taskId) return;
 
     character.idleTimer -= dt;
 
-    if (character.idleTimer > 0 || this.walkableTiles.length === 0) {
+    if (
+      character.idleTimer > 0 ||
+      this.walkableTiles.length === 0
+    ) {
       return;
     }
 
@@ -485,6 +696,7 @@ export class JacePixelOfficeEngine {
 
     const path = findPath(
       this.layout,
+      this.blocked,
       character.tileCol,
       character.tileRow,
       target.col,
@@ -494,76 +706,78 @@ export class JacePixelOfficeEngine {
     if (path.length > 0) {
       character.path = path.slice(
         0,
-        Math.min(path.length, 2 + Math.floor(Math.random() * 5)),
+        Math.min(
+          path.length,
+          2 + Math.floor(Math.random() * 5),
+        ),
       );
+
       character.moveProgress = 0;
       character.mode = "walk";
     }
 
-    character.idleTimer = randomRange(WANDER_MIN, WANDER_MAX);
+    character.idleTimer = randomRange(
+      WANDER_MIN_SECONDS,
+      WANDER_MAX_SECONDS,
+    );
   }
 
   private updateCamera(dt: number) {
     if (!this.cameraFollowId) return;
 
     const character = this.characters.get(this.cameraFollowId);
-    if (!character) return;
+
+    if (!character) {
+      this.cameraFollowId = null;
+      return;
+    }
 
     const rect = this.canvas.getBoundingClientRect();
+
     const targetX =
-      rect.width / (2 * this.viewport.zoom) -
+      rect.width / (2 * this.camera.zoom) -
       character.x;
     const targetY =
-      rect.height / (2 * this.viewport.zoom) -
+      rect.height / (2 * this.camera.zoom) -
       character.y;
 
-    const factor = 1 - Math.exp(-7 * dt);
+    const factor = 1 - Math.exp(-6 * dt);
 
-    this.viewport.x +=
-      (targetX - this.viewport.x) * factor;
-    this.viewport.y +=
-      (targetY - this.viewport.y) * factor;
+    this.camera.x += (targetX - this.camera.x) * factor;
+    this.camera.y += (targetY - this.camera.y) * factor;
   }
 
   private render() {
     const ctx = this.ctx;
+    const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
 
-    const rect = this.canvas.getBoundingClientRect();
-
-    ctx.fillStyle = "#081313";
+    ctx.fillStyle = "#071112";
     ctx.fillRect(0, 0, rect.width, rect.height);
 
     ctx.save();
-    ctx.scale(this.viewport.zoom, this.viewport.zoom);
-    ctx.translate(this.viewport.x, this.viewport.y);
+    ctx.scale(this.camera.zoom, this.camera.zoom);
+    ctx.translate(this.camera.x, this.camera.y);
 
     this.renderRoom(ctx);
-
-    const entities = [...this.characters.values()].sort(
-      (a, b) => a.y - b.y,
-    );
-
-    for (const character of entities) {
-      this.renderCharacter(ctx, character);
-    }
+    this.renderDepthSortedEntities(ctx);
 
     ctx.restore();
 
-    this.renderHud(ctx, rect.width, rect.height);
+    this.renderOverlay(ctx, rect.width, rect.height);
   }
 
   private renderRoom(ctx: CanvasRenderingContext2D) {
     const width = this.layout.cols * TILE_SIZE;
     const height = this.layout.rows * TILE_SIZE;
 
-    ctx.fillStyle = "#173533";
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "#132d2c";
+    ctx.fillRect(0, 0, width, TILE_SIZE * 2);
 
-    // Floor.
-    ctx.fillStyle = "#274a45";
+    ctx.fillStyle = "#244641";
     ctx.fillRect(
       0,
       TILE_SIZE * 2,
@@ -576,7 +790,7 @@ export class JacePixelOfficeEngine {
         ctx.fillStyle =
           (col + row) % 2 === 0
             ? "#294d47"
-            : "#244640";
+            : "#254842";
 
         ctx.fillRect(
           col * TILE_SIZE,
@@ -595,71 +809,42 @@ export class JacePixelOfficeEngine {
       }
     }
 
-    // Rear wall.
-    ctx.fillStyle = "#15302f";
-    ctx.fillRect(0, 0, width, TILE_SIZE * 2);
+    ctx.fillStyle = "#071313";
+    ctx.fillRect(0, TILE_SIZE * 2 - 4, width, 4);
 
-    ctx.fillStyle = "#081515";
-    ctx.fillRect(
-      0,
-      TILE_SIZE * 2 - 3,
-      width,
-      3,
-    );
-
-    // JACE status board.
-    ctx.fillStyle = "#0b1c1c";
-    ctx.fillRect(width / 2 - 48, 10, 96, 27);
-    ctx.strokeStyle = "#39756e";
-    ctx.strokeRect(width / 2 - 48, 10, 96, 27);
-    ctx.fillStyle = "#7ce8d9";
-    ctx.font = "bold 8px monospace";
+    ctx.fillStyle = "#081919";
+    ctx.fillRect(width / 2 - 62, 8, 124, 29);
+    ctx.strokeStyle = "#326e68";
+    ctx.strokeRect(width / 2 - 62, 8, 124, 29);
+    ctx.fillStyle = "#83e5da";
+    ctx.font = "bold 8px 'Courier New', monospace";
     ctx.textAlign = "center";
-    ctx.fillText("J A C E  //  AGENT OPS", width / 2, 27);
+    ctx.fillText(
+      "J A C E  //  AGENT FLOOR",
+      width / 2,
+      26,
+    );
 
-    // Windows.
-    this.drawWindow(ctx, 48, 12);
-    this.drawWindow(ctx, width - 112, 12);
+    this.drawWindow(ctx, 42, 10);
+    this.drawWindow(ctx, width - 92, 10);
 
-    // Desks.
-    this.layout.seats.forEach((seat) => {
-      this.drawDesk(
-        ctx,
-        seat.col * TILE_SIZE,
-        (seat.row - 1) * TILE_SIZE,
+    for (const seat of this.layout.seats) {
+      if (!seat.specialist) continue;
+
+      const center = tileCenter(seat.col, seat.row - 1);
+
+      ctx.fillStyle = "rgba(7,18,18,0.82)";
+      ctx.fillRect(center.x - 25, center.y - 24, 50, 8);
+
+      ctx.fillStyle = "#6e9995";
+      ctx.font = "5px 'Courier New', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        seat.specialist.toUpperCase(),
+        center.x,
+        center.y - 18,
       );
-    });
-
-    // Server rack.
-    this.drawServerRack(ctx, TILE_SIZE, TILE_SIZE * 3);
-
-    // Storage rack.
-    this.drawStorage(ctx, width - TILE_SIZE * 2, TILE_SIZE * 3);
-
-    // Meeting table.
-    ctx.fillStyle = "#6d5037";
-    ctx.fillRect(
-      TILE_SIZE * 9,
-      TILE_SIZE * 10,
-      TILE_SIZE * 6,
-      11,
-    );
-    ctx.fillStyle = "#9a7250";
-    ctx.fillRect(
-      TILE_SIZE * 9,
-      TILE_SIZE * 10,
-      TILE_SIZE * 6,
-      3,
-    );
-
-    // Walkway stripe.
-    ctx.strokeStyle = "rgba(120,220,205,0.17)";
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(TILE_SIZE * 2, TILE_SIZE * 12.4);
-    ctx.lineTo(width - TILE_SIZE * 2, TILE_SIZE * 12.4);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    }
   }
 
   private drawWindow(
@@ -667,74 +852,78 @@ export class JacePixelOfficeEngine {
     x: number,
     y: number,
   ) {
-    ctx.fillStyle = "#081515";
-    ctx.fillRect(x, y, 50, 28);
-    ctx.fillStyle = "#173541";
-    ctx.fillRect(x + 3, y + 3, 44, 22);
+    ctx.fillStyle = "#071313";
+    ctx.fillRect(x, y, 46, 28);
+    ctx.fillStyle = "#153440";
+    ctx.fillRect(x + 3, y + 3, 40, 22);
 
-    ctx.fillStyle = "#59bfc6";
-    ctx.fillRect(x + 9, y + 8, 2, 2);
-    ctx.fillRect(x + 21, y + 13, 2, 2);
-    ctx.fillRect(x + 35, y + 6, 2, 2);
+    ctx.fillStyle = "#58bdc5";
+    ctx.fillRect(x + 8, y + 8, 2, 2);
+    ctx.fillRect(x + 22, y + 15, 2, 2);
+    ctx.fillRect(x + 34, y + 7, 2, 2);
 
-    ctx.fillStyle = "#081515";
-    ctx.fillRect(x + 24, y + 3, 2, 22);
-    ctx.fillRect(x + 3, y + 13, 44, 2);
+    ctx.fillStyle = "#071313";
+    ctx.fillRect(x + 22, y + 3, 2, 22);
+    ctx.fillRect(x + 3, y + 13, 40, 2);
   }
 
-  private drawDesk(
+  private renderDepthSortedEntities(
     ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
   ) {
-    ctx.fillStyle = "#0c1717";
-    ctx.fillRect(x + 4, y + 2, 16, 13);
+    const renderables: Renderable[] = [];
 
-    ctx.fillStyle = "#17433f";
-    ctx.fillRect(x + 7, y + 5, 10, 6);
+    for (const furniture of this.layout.furniture) {
+      if (furniture.wallMounted) {
+        this.drawFurniture(ctx, furniture);
+        continue;
+      }
 
-    ctx.fillStyle = "#65d8c7";
-    ctx.fillRect(x + 8, y + 6, 7, 1);
-    ctx.fillRect(x + 8, y + 8, 5, 1);
+      const center = tileCenter(
+        furniture.col,
+        furniture.row,
+      );
 
-    ctx.fillStyle = "#6d5037";
-    ctx.fillRect(x, y + 16, TILE_SIZE, 5);
+      renderables.push({
+        depth: center.y,
+        render: () => this.drawFurniture(ctx, furniture),
+      });
+    }
 
-    ctx.fillStyle = "#956f4b";
-    ctx.fillRect(x, y + 16, TILE_SIZE, 2);
+    for (const character of this.characters.values()) {
+      renderables.push({
+        depth: character.y + 1,
+        render: () => this.drawCharacter(ctx, character),
+      });
+    }
+
+    renderables
+      .sort((a, b) => a.depth - b.depth)
+      .forEach((item) => item.render());
   }
 
-  private drawServerRack(
+  private drawFurniture(
     ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
+    furniture: FurniturePlacement,
   ) {
-    ctx.fillStyle = "#0a1515";
-    ctx.fillRect(x, y, 18, 58);
+    const center = tileCenter(
+      furniture.col,
+      furniture.row,
+    );
 
-    for (let index = 0; index < 5; index += 1) {
-      ctx.fillStyle = "#183230";
-      ctx.fillRect(x + 3, y + 5 + index * 10, 12, 6);
-      ctx.fillStyle = index % 2 ? "#73d8a2" : "#58c9d2";
-      ctx.fillRect(x + 11, y + 7 + index * 10, 2, 2);
+    const drawn = this.sprites.drawFurniture(
+      ctx,
+      furniture.sprite,
+      center.x,
+      center.y + TILE_SIZE / 2,
+    );
+
+    if (!drawn) {
+      ctx.fillStyle = "#283d3b";
+      ctx.fillRect(center.x - 10, center.y - 10, 20, 20);
     }
   }
 
-  private drawStorage(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-  ) {
-    ctx.fillStyle = "#142322";
-    ctx.fillRect(x, y, 20, 54);
-    ctx.fillStyle = "#3a5752";
-
-    for (let row = 0; row < 4; row += 1) {
-      ctx.fillRect(x + 2, y + 6 + row * 12, 16, 2);
-    }
-  }
-
-  private renderCharacter(
+  private drawCharacter(
     ctx: CanvasRenderingContext2D,
     character: OfficeCharacter,
   ) {
@@ -743,233 +932,230 @@ export class JacePixelOfficeEngine {
     const hovered =
       character.id === this.hoveredCharacterId;
 
-    if (selected || hovered) {
-      ctx.fillStyle = selected
-        ? "rgba(105,231,210,0.18)"
-        : "rgba(255,255,255,0.08)";
-      ctx.beginPath();
-      ctx.ellipse(
-        character.x,
-        character.y + 2,
-        12,
-        5,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-    }
+    ctx.fillStyle =
+      selected
+        ? "rgba(100,232,208,0.24)"
+        : hovered
+          ? "rgba(255,255,255,0.10)"
+          : "rgba(0,0,0,0.16)";
 
-    ctx.save();
-    ctx.translate(
-      Math.round(character.x),
-      Math.round(character.y),
+    ctx.beginPath();
+    ctx.ellipse(
+      character.x,
+      character.y + 2,
+      selected ? 10 : 8,
+      selected ? 4 : 3,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+
+    const modeForSprite =
+      character.mode === "walk"
+        ? "walk"
+        : character.mode === "read"
+          ? "read"
+          : character.mode === "think"
+            ? "think"
+            : character.mode === "type"
+              ? "type"
+              : "idle";
+
+    const drawn = this.sprites.drawCharacter(
+      ctx,
+      character.specialistId,
+      modeForSprite,
+      character.direction,
+      character.frame,
+      character.x,
+      character.y,
     );
 
-    const bob =
-      character.mode === "walk"
-        ? character.frame % 2
-        : 0;
+    if (!drawn) {
+      ctx.fillStyle = character.accent;
+      ctx.fillRect(character.x - 6, character.y - 20, 12, 16);
 
-    ctx.translate(0, -bob);
-
-    // Legs.
-    ctx.fillStyle = "#18272d";
-    ctx.fillRect(-6, -7, 5, 8);
-    ctx.fillRect(2, -7, 5, 8);
-
-    // Shoes.
-    ctx.fillStyle = "#0b1113";
-    ctx.fillRect(-7, 0, 6, 3);
-    ctx.fillRect(2, 0, 6, 3);
-
-    // Body.
-    ctx.fillStyle = character.accent;
-    ctx.fillRect(-8, -20, 16, 14);
-
-    ctx.fillStyle = "rgba(0,0,0,0.15)";
-    ctx.fillRect(-8, -9, 16, 3);
-
-    // Arms / activity.
-    ctx.fillStyle = "#d4a077";
-
-    if (character.mode === "type") {
-      const alternate = character.frame % 2 === 0 ? 0 : 2;
-      ctx.fillRect(-11, -16 + alternate, 4, 9);
-      ctx.fillRect(8, -14 - alternate, 4, 9);
-    } else if (character.mode === "read") {
-      ctx.fillRect(-11, -17, 4, 10);
-      ctx.fillRect(8, -17, 4, 10);
-      ctx.fillStyle = "#d9e9df";
-      ctx.fillRect(-6, -10, 12, 7);
-      ctx.fillStyle = "#63897e";
-      ctx.fillRect(0, -10, 1, 7);
-    } else {
-      ctx.fillRect(-11, -18, 4, 10);
-      ctx.fillRect(8, -18, 4, 10);
+      ctx.fillStyle = "#d4a078";
+      ctx.fillRect(character.x - 5, character.y - 28, 10, 8);
     }
 
-    // Head.
-    ctx.fillStyle = "#d4a077";
-    ctx.fillRect(-6, -31, 12, 11);
+    const bubble = bubbleText(character);
 
-    // Hair.
-    ctx.fillStyle = "#2d211b";
-    ctx.fillRect(-7, -34, 14, 5);
-    ctx.fillRect(-7, -31, 3, 5);
-
-    // Eyes.
-    ctx.fillStyle = "#101616";
-    if (character.direction !== "left") {
-      ctx.fillRect(2, -27, 1, 1);
-    }
-    if (character.direction !== "right") {
-      ctx.fillRect(-3, -27, 1, 1);
+    if (bubble) {
+      this.drawSpeechBubble(ctx, character, bubble);
     }
 
-    // Tool bubbles.
-    if (character.mode === "think") {
-      this.drawBubble(ctx, "…", "#e5f1e9");
-    } else if (character.mode === "wait") {
-      this.drawBubble(ctx, "!", "#efbc4c");
-    } else if (
-      character.mode === "complete" &&
-      character.bubbleTimer > 0
-    ) {
-      this.drawBubble(ctx, "✓", "#73dfa8");
-    } else if (
-      character.mode === "failed" &&
-      character.bubbleTimer > 0
-    ) {
-      this.drawBubble(ctx, "×", "#e5767e");
+    this.drawCharacterLabel(ctx, character, selected);
+  }
+
+  private drawSpeechBubble(
+    ctx: CanvasRenderingContext2D,
+    character: OfficeCharacter,
+    text: string,
+  ) {
+    ctx.font = "bold 5px 'Courier New', monospace";
+
+    const width = Math.max(
+      20,
+      ctx.measureText(text).width + 8,
+    );
+
+    const x = character.x - width / 2;
+    const y = character.y - 42;
+
+    let background = "#dbece6";
+
+    if (character.mode === "wait") {
+      background = "#e3ae43";
+    } else if (character.mode === "complete") {
+      background = "#6edca7";
+    } else if (character.mode === "failed") {
+      background = "#df747c";
     }
 
-    ctx.restore();
+    ctx.fillStyle = "#071111";
+    ctx.fillRect(x - 2, y - 2, width + 4, 11);
 
-    // Name and live activity.
+    ctx.fillStyle = background;
+    ctx.fillRect(x, y, width, 7);
+    ctx.fillRect(character.x - 2, y + 7, 4, 3);
+
+    ctx.fillStyle = "#101818";
     ctx.textAlign = "center";
-    ctx.font = "7px monospace";
+    ctx.fillText(text, character.x, y + 5);
+  }
 
-    const nameWidth = Math.max(
-      58,
+  private drawCharacterLabel(
+    ctx: CanvasRenderingContext2D,
+    character: OfficeCharacter,
+    selected: boolean,
+  ) {
+    ctx.font = "6px 'Courier New', monospace";
+
+    const labelWidth = Math.max(
+      52,
       ctx.measureText(character.label).width + 8,
     );
 
-    ctx.fillStyle = "rgba(5,15,16,0.88)";
-    ctx.fillRect(
-      character.x - nameWidth / 2,
-      character.y + 7,
-      nameWidth,
-      character.taskId ? 22 : 13,
-    );
+    const labelX = character.x - labelWidth / 2;
+    const labelY = character.y + 8;
+    const height = character.taskId ? 20 : 11;
+
+    ctx.fillStyle = "rgba(4,14,15,0.90)";
+    ctx.fillRect(labelX, labelY, labelWidth, height);
 
     ctx.strokeStyle =
-      character.id === this.selectedCharacterId
+      selected
         ? character.accent
-        : "rgba(100,205,205,0.13)";
-    ctx.strokeRect(
-      character.x - nameWidth / 2,
-      character.y + 7,
-      nameWidth,
-      character.taskId ? 22 : 13,
-    );
+        : "rgba(112,211,203,0.14)";
 
-    ctx.fillStyle = "#d9eeee";
+    ctx.strokeRect(labelX, labelY, labelWidth, height);
+
+    ctx.fillStyle = "#d4ece9";
+    ctx.textAlign = "center";
     ctx.fillText(
       character.label,
       character.x,
-      character.y + 16,
+      labelY + 7,
     );
 
     if (character.taskId) {
       const activity =
-        character.activity.length > 18
-          ? `${character.activity.slice(0, 17)}…`
+        character.activity.length > 20
+          ? `${character.activity.slice(0, 19)}…`
           : character.activity;
 
-      ctx.fillStyle = "#8caeaa";
-      ctx.font = "6px monospace";
+      ctx.fillStyle = "#7ca09c";
+      ctx.font = "5px 'Courier New', monospace";
       ctx.fillText(
         activity,
         character.x,
-        character.y + 24,
+        labelY + 13,
       );
 
       ctx.fillStyle = "rgba(255,255,255,0.08)";
       ctx.fillRect(
-        character.x - nameWidth / 2 + 3,
-        character.y + 27,
-        nameWidth - 6,
+        labelX + 3,
+        labelY + 16,
+        labelWidth - 6,
         2,
       );
+
       ctx.fillStyle = character.accent;
       ctx.fillRect(
-        character.x - nameWidth / 2 + 3,
-        character.y + 27,
-        (nameWidth - 6) *
+        labelX + 3,
+        labelY + 16,
+        (labelWidth - 6) *
           Math.max(0, Math.min(1, character.progress)),
         2,
       );
     }
   }
 
-  private drawBubble(
-    ctx: CanvasRenderingContext2D,
-    text: string,
-    background: string,
-  ) {
-    ctx.fillStyle = "#091212";
-    ctx.fillRect(7, -46, 18, 15);
-    ctx.fillStyle = background;
-    ctx.fillRect(9, -44, 14, 11);
-    ctx.fillRect(10, -32, 4, 3);
-
-    ctx.fillStyle = "#101616";
-    ctx.font = "bold 9px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(text, 16, -35);
-  }
-
-  private renderHud(
+  private renderOverlay(
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
   ) {
-    const selected = this.selectedCharacterId
-      ? this.characters.get(this.selectedCharacterId)
-      : null;
-
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
+    const selected =
+      this.selectedCharacterId
+        ? this.characters.get(this.selectedCharacterId)
+        : null;
+
     if (selected) {
-      ctx.fillStyle = "rgba(4,12,13,0.88)";
-      ctx.fillRect(10, height - 40, Math.min(width - 20, 320), 28);
-      ctx.strokeStyle = "rgba(100,220,213,0.18)";
-      ctx.strokeRect(10, height - 40, Math.min(width - 20, 320), 28);
+      const panelWidth = Math.min(width - 24, 340);
+
+      ctx.fillStyle = "rgba(4,13,14,0.90)";
+      ctx.fillRect(12, height - 45, panelWidth, 31);
+
+      ctx.strokeStyle = "rgba(104,224,211,0.18)";
+      ctx.strokeRect(12, height - 45, panelWidth, 31);
 
       ctx.textAlign = "left";
-      ctx.fillStyle = "#d8efec";
-      ctx.font = "bold 10px monospace";
-      ctx.fillText(selected.label, 18, height - 27);
-
-      ctx.fillStyle = "#7ea29e";
-      ctx.font = "8px monospace";
+      ctx.fillStyle = "#d9efec";
+      ctx.font = "bold 9px 'Courier New', monospace";
       ctx.fillText(
-        selected.taskId
-          ? selected.taskTitle.slice(0, 48)
+        selected.label,
+        20,
+        height - 31,
+      );
+
+      ctx.fillStyle = "#739c98";
+      ctx.font = "7px 'Courier New', monospace";
+      ctx.fillText(
+        selected.taskTitle
+          ? selected.taskTitle.slice(0, 52)
           : "Standing by",
-        18,
-        height - 16,
+        20,
+        height - 19,
       );
     }
 
     ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(180,220,215,0.38)";
-    ctx.font = "7px monospace";
+    ctx.fillStyle = "rgba(177,215,211,0.36)";
+    ctx.font = "6px 'Courier New', monospace";
     ctx.fillText(
-      "drag: pan  •  wheel: zoom  •  click: follow",
+      "DRAG PAN  •  WHEEL ZOOM  •  CLICK FOLLOW",
       width - 12,
-      height - 10,
+      height - 8,
     );
+
+    if (!this.sprites.ready) {
+      ctx.textAlign = "left";
+      ctx.fillStyle =
+        this.sprites.error
+          ? "#dc7a80"
+          : "rgba(125,221,211,0.58)";
+      ctx.fillText(
+        this.sprites.error
+          ? "SPRITE LOAD ERROR"
+          : "LOADING PIXEL ASSETS…",
+        12,
+        14,
+      );
+    }
   }
 }

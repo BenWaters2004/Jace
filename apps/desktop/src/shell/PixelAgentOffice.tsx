@@ -13,7 +13,9 @@ export function PixelAgentOffice(props: {
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<JacePixelOfficeEngine | null>(null);
+
   const workersRef = useRef(props.workers);
+  const selectTaskRef = useRef(props.onSelectTask);
 
   useEffect(() => {
     workersRef.current = props.workers;
@@ -21,17 +23,33 @@ export function PixelAgentOffice(props: {
   }, [props.workers]);
 
   useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const worker = workersRef.current.find(
+      (candidate) =>
+        candidate.task?.id === props.selectedTaskId,
+    );
+
+    engine.setSelected(worker?.id ?? null);
+  }, [props.selectedTaskId]);
+
+  useEffect(() => {
+    selectTaskRef.current = props.onSelectTask;
+  }, [props.onSelectTask]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const engine = new JacePixelOfficeEngine(canvas);
     engineRef.current = engine;
-
     engine.syncWorkers(workersRef.current);
     engine.start();
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
+
       engine.resize(
         rect.width,
         rect.height,
@@ -41,26 +59,31 @@ export function PixelAgentOffice(props: {
 
     resize();
 
-    const observer = new ResizeObserver(resize);
-    observer.observe(canvas);
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(canvas);
 
     let dragging = false;
+    let moved = false;
     let lastX = 0;
     let lastY = 0;
-    let moved = false;
 
     const pointerDown = (event: PointerEvent) => {
       dragging = true;
       moved = false;
       lastX = event.clientX;
       lastY = event.clientY;
+
       canvas.setPointerCapture(event.pointerId);
     };
 
     const pointerMove = (event: PointerEvent) => {
-      const hit = engine.hitTest(event.clientX, event.clientY);
+      const hit = engine.hitTest(
+        event.clientX,
+        event.clientY,
+      );
+
       engine.hoveredCharacterId =
-        hit?.type === "character" ? hit.id : null;
+        hit?.characterId ?? null;
 
       if (!dragging) return;
 
@@ -83,27 +106,31 @@ export function PixelAgentOffice(props: {
       }
 
       if (!moved) {
-        const hit = engine.hitTest(event.clientX, event.clientY);
+        const hit = engine.hitTest(
+          event.clientX,
+          event.clientY,
+        );
 
-        if (hit?.type === "character") {
-          const character = engine.characters.get(hit.id);
-
-          engine.setSelected(
-            engine.selectedCharacterId === hit.id
-              ? null
-              : hit.id,
+        if (hit) {
+          const character = engine.characters.get(
+            hit.characterId,
           );
 
-          props.onSelectTask(
-            character?.taskId
-              ? character.taskId === props.selectedTaskId
-                ? null
-                : character.taskId
+          const nextSelected =
+            engine.selectedCharacterId === hit.characterId
+              ? null
+              : hit.characterId;
+
+          engine.setSelected(nextSelected);
+
+          selectTaskRef.current(
+            nextSelected && character?.taskId
+              ? character.taskId
               : null,
           );
         } else {
           engine.setSelected(null);
-          props.onSelectTask(null);
+          selectTaskRef.current(null);
         }
       }
 
@@ -113,6 +140,7 @@ export function PixelAgentOffice(props: {
 
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
+
       engine.zoomAt(
         event.clientX,
         event.clientY,
@@ -120,47 +148,56 @@ export function PixelAgentOffice(props: {
       );
     };
 
+    const doubleClick = () => {
+      engine.fitToRoom();
+    };
+
     canvas.addEventListener("pointerdown", pointerDown);
     canvas.addEventListener("pointermove", pointerMove);
     canvas.addEventListener("pointerup", pointerUp);
     canvas.addEventListener("pointercancel", pointerUp);
     canvas.addEventListener("wheel", wheel, { passive: false });
+    canvas.addEventListener("dblclick", doubleClick);
 
     return () => {
-      observer.disconnect();
+      resizeObserver.disconnect();
+
       canvas.removeEventListener("pointerdown", pointerDown);
       canvas.removeEventListener("pointermove", pointerMove);
       canvas.removeEventListener("pointerup", pointerUp);
       canvas.removeEventListener("pointercancel", pointerUp);
       canvas.removeEventListener("wheel", wheel);
+      canvas.removeEventListener("dblclick", doubleClick);
+
       engine.dispose();
       engineRef.current = null;
     };
-  }, [props.onSelectTask, props.selectedTaskId]);
-
-  useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine) return;
-
-    const worker = props.workers.find(
-      (candidate) =>
-        candidate.task?.id === props.selectedTaskId,
-    );
-
-    if (!worker) {
-      engine.setSelected(null);
-      return;
-    }
-
-    engine.setSelected(worker.id);
-  }, [props.selectedTaskId, props.workers]);
+  }, []);
 
   return (
     <div className="jace-canvas-office">
+      <div className="jace-canvas-office-actions">
+        <button
+          type="button"
+          onClick={() => engineRef.current?.fitToRoom()}
+          title="Fit whole office"
+        >
+          FIT
+        </button>
+
+        <button
+          type="button"
+          onClick={() => engineRef.current?.resetLayout()}
+          title="Reset office layout"
+        >
+          RESET
+        </button>
+      </div>
+
       <canvas
         ref={canvasRef}
         className="jace-canvas-office-surface"
-        aria-label="Jace live agent office"
+        aria-label="Jace live pixel agent office"
       />
     </div>
   );

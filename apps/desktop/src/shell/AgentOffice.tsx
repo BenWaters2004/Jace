@@ -2,20 +2,30 @@ import type { ToolActivity } from "../types";
 import { useAgentOffice } from "../agents/useAgentOffice";
 import { PixelAgentOffice } from "./PixelAgentOffice";
 import "./AgentOffice.css";
+import "./AgentOfficeRealtime.css";
 
-function formatElapsed(start: string | null, end: string | null): string {
+function formatElapsed(
+  start: string | null,
+  end: string | null,
+): string {
   if (!start) return "—";
 
   const startMs = new Date(start).getTime();
   const endMs = end ? new Date(end).getTime() : Date.now();
-  const seconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
+
+  const seconds = Math.max(
+    0,
+    Math.floor((endMs - startMs) / 1000),
+  );
 
   if (seconds < 60) return `${seconds}s`;
 
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
 
-  if (minutes < 60) return `${minutes}m ${remainder}s`;
+  if (minutes < 60) {
+    return `${minutes}m ${remainder}s`;
+  }
 
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${minutes % 60}m`;
@@ -25,9 +35,6 @@ export function AgentOffice(props: {
   activities: ToolActivity[];
   onExpand: () => void;
 }) {
-  // `activities` remains in the public component contract because CommandCenter
-  // already supplies it. Phase 11B now renders real background agent tasks
-  // instead of inferring pretend agents from primary-chat tool calls.
   void props.activities;
 
   const office = useAgentOffice();
@@ -40,9 +47,10 @@ export function AgentOffice(props: {
       <div className="cc-panel-topline agent-office-topline">
         <div>
           <span className="cc-kicker">Jace office</span>
+
           <strong>
             {office.error
-              ? "Agent office unavailable"
+              ? "Agent office degraded"
               : busyCount > 0
                 ? `${busyCount} background job${busyCount === 1 ? "" : "s"} active`
                 : "Agents standing by"}
@@ -50,13 +58,32 @@ export function AgentOffice(props: {
         </div>
 
         <div className="agent-office-actions">
+          <span
+            className={`agent-live-pill ${
+              office.realtimeConnected
+                ? "live"
+                : "reconnecting"
+            }`}
+            title={
+              office.realtimeConnected
+                ? "Agent office is receiving runtime events"
+                : "Runtime WebSocket reconnecting; SQLite remains authoritative"
+            }
+          >
+            <i />
+            {office.realtimeConnected ? "LIVE" : "SYNC"}
+          </span>
+
           {office.status && (
             <span
               className={`agent-manager-pill ${
-                office.status.manager_running ? "online" : "offline"
+                office.status.manager_running
+                  ? "online"
+                  : "offline"
               }`}
             >
-              {office.status.manager_running ? "●" : "○"} {workerCount} worker
+              {office.status.manager_running ? "●" : "○"}{" "}
+              {workerCount} worker
               {workerCount === 1 ? "" : "s"}
             </span>
           )}
@@ -71,11 +98,34 @@ export function AgentOffice(props: {
         </div>
       </div>
 
-      {office.error ? (
+      {office.notice && (
+        <div className={`agent-office-notice ${office.notice.kind}`}>
+          <span>
+            {office.notice.kind === "completed" ? "✓" : "×"}
+          </span>
+
+          <div>
+            <strong>
+              {office.notice.task.agent_name}{" "}
+              {office.notice.kind === "completed"
+                ? "finished"
+                : "failed"}
+            </strong>
+
+            <small>{office.notice.task.title}</small>
+          </div>
+        </div>
+      )}
+
+      {office.error && office.tasks.length === 0 ? (
         <div className="agent-office-error">
-          <strong>Could not connect to background agents</strong>
+          <strong>Could not synchronise agents</strong>
           <span>{office.error}</span>
-          <button type="button" onClick={() => void office.refresh()}>
+
+          <button
+            type="button"
+            onClick={() => void office.refresh()}
+          >
             Retry
           </button>
         </div>
@@ -105,12 +155,16 @@ export function AgentOffice(props: {
               </div>
 
               <div className="agent-task-meta">
-                <span className={`agent-task-status ${office.selectedTask.status}`}>
+                <span
+                  className={`agent-task-status ${office.selectedTask.status}`}
+                >
                   {office.selectedTask.status.replace(/_/g, " ")}
                 </span>
+
                 <span>
                   {Math.round(office.selectedTask.progress * 100)}%
                 </span>
+
                 <span>
                   {formatElapsed(
                     office.selectedTask.started_at,
@@ -160,7 +214,9 @@ export function AgentOffice(props: {
                   <button
                     type="button"
                     className="danger"
-                    onClick={() => void office.cancel(office.selectedTask!.id)}
+                    onClick={() =>
+                      void office.cancel(office.selectedTask!.id)
+                    }
                   >
                     Cancel job
                   </button>
@@ -171,7 +227,9 @@ export function AgentOffice(props: {
                 ) && (
                   <button
                     type="button"
-                    onClick={() => void office.retry(office.selectedTask!.id)}
+                    onClick={() =>
+                      void office.retry(office.selectedTask!.id)
+                    }
                   >
                     Retry job
                   </button>

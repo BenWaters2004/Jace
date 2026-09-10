@@ -1,8 +1,15 @@
-export type OfficeDirection = "up" | "down" | "left" | "right";
+import type { AgentTask } from "../agents/types";
 
-export type OfficeCharacterMode =
+export type OfficeDirection =
+  | "up"
+  | "down"
+  | "left"
+  | "right";
+
+export type CharacterMode =
   | "idle"
   | "walk"
+  | "queued"
   | "type"
   | "read"
   | "think"
@@ -10,7 +17,7 @@ export type OfficeCharacterMode =
   | "complete"
   | "failed";
 
-export interface OfficeTile {
+export interface OfficePoint {
   col: number;
   row: number;
 }
@@ -20,14 +27,61 @@ export interface OfficeSeat {
   col: number;
   row: number;
   facing: OfficeDirection;
+  specialist?: string;
+}
+
+export type FurnitureSpriteId =
+  | "desk"
+  | "chair"
+  | "server"
+  | "shelf"
+  | "plant"
+  | "cabinet"
+  | "coffee"
+  | "meeting_table"
+  | "printer"
+  | "lamp"
+  | "rug";
+
+export interface FurniturePlacement {
+  id: string;
+  sprite: FurnitureSpriteId;
+  col: number;
+  row: number;
+  widthTiles?: number;
+  heightTiles?: number;
+  blocks?: boolean;
+  wallMounted?: boolean;
+}
+
+export interface OfficeLayoutConfig {
+  version: number;
+  cols: number;
+  rows: number;
+  seats: OfficeSeat[];
+  furniture: FurniturePlacement[];
+}
+
+export interface CharacterSpriteDefinition {
+  frameWidth: number;
+  frameHeight: number;
+  columns: number;
+  rows: Record<
+    "down" | "left" | "right" | "up" | "idle" |
+    "type" | "read" | "think",
+    number
+  >;
 }
 
 export interface OfficeCharacter {
   id: string;
   workerId: string;
+  specialistId: string;
   label: string;
   accent: string;
-  mode: OfficeCharacterMode;
+
+  mode: CharacterMode;
+  desiredMode: CharacterMode;
   direction: OfficeDirection;
 
   x: number;
@@ -35,8 +89,7 @@ export interface OfficeCharacter {
   tileCol: number;
   tileRow: number;
 
-  seatId: string | null;
-  path: OfficeTile[];
+  path: OfficePoint[];
   moveProgress: number;
 
   frame: number;
@@ -44,26 +97,21 @@ export interface OfficeCharacter {
   idleTimer: number;
   bubbleTimer: number;
 
+  seatId: string;
   taskId: string | null;
   taskTitle: string;
   activity: string;
+  currentTool: string | null;
   progress: number;
+  task: AgentTask | null;
 }
 
-export interface OfficeViewport {
+export interface CameraState {
   x: number;
   y: number;
   zoom: number;
 }
 
-export interface OfficeLayout {
-  cols: number;
-  rows: number;
-  seats: OfficeSeat[];
-  blocked: Set<string>;
-}
-
 export interface OfficeHit {
-  type: "character";
-  id: string;
+  characterId: string;
 }

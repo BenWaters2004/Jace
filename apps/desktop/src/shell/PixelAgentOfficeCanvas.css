@@ -4,9 +4,32 @@
   min-height: 260px;
   height: 100%;
   overflow: hidden;
-  background: #081313;
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(67, 163, 153, 0.08),
+      transparent 42%
+    ),
+    #071112;
   border-top: 1px solid rgba(104, 216, 217, 0.08);
   image-rendering: pixelated;
+}
+
+.jace-canvas-office::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.012) 0,
+      rgba(255, 255, 255, 0.012) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  mix-blend-mode: soft-light;
+  opacity: 0.32;
 }
 
 .jace-canvas-office-surface {
@@ -17,14 +40,50 @@
   touch-action: none;
   cursor: crosshair;
   image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .jace-canvas-office-surface:active {
   cursor: grabbing;
 }
 
+.jace-canvas-office-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 8;
+  display: flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.jace-canvas-office-actions button {
+  min-width: 34px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid rgba(107, 218, 211, 0.15);
+  border-radius: 2px;
+  background: rgba(5, 16, 17, 0.84);
+  color: rgba(177, 224, 219, 0.58);
+  font: 700 7px/1 "Courier New", monospace;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.jace-canvas-office-actions button:hover {
+  border-color: rgba(112, 229, 219, 0.34);
+  color: #bcece6;
+  background: rgba(7, 25, 25, 0.94);
+}
+
 .focus-office .jace-canvas-office,
 .focus-office .jace-canvas-office-surface {
   min-height: 0;
   height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jace-canvas-office::after {
+    display: none;
+  }
 }

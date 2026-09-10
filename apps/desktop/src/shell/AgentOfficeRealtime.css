@@ -1,0 +1,119 @@
+.agent-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid rgba(98, 212, 204, 0.13);
+  border-radius: 4px;
+  background: rgba(4, 15, 16, 0.70);
+  color: rgba(177, 218, 214, 0.52);
+  font: 700 8px/1 "Courier New", monospace;
+  letter-spacing: 0.09em;
+}
+
+.agent-live-pill i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.agent-live-pill.live {
+  color: #6fe0bd;
+}
+
+.agent-live-pill.live i {
+  box-shadow: 0 0 8px rgba(111, 224, 189, 0.65);
+  animation: agent-live-pulse 1.8s ease-in-out infinite;
+}
+
+.agent-live-pill.reconnecting {
+  color: #dfb66b;
+}
+
+.agent-office-notice {
+  position: absolute;
+  top: 46px;
+  left: 50%;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 28px);
+  padding: 7px 10px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(110, 222, 190, 0.18);
+  border-radius: 3px;
+  background: rgba(5, 18, 18, 0.94);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.30);
+  pointer-events: none;
+  animation: agent-notice-enter 180ms ease-out;
+}
+
+.agent-office-notice > span {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid currentColor;
+  font: 700 10px/1 monospace;
+}
+
+.agent-office-notice > div {
+  min-width: 0;
+}
+
+.agent-office-notice strong,
+.agent-office-notice small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-office-notice strong {
+  color: rgba(225, 243, 240, 0.90);
+  font-size: 10px;
+}
+
+.agent-office-notice small {
+  margin-top: 2px;
+  color: rgba(186, 214, 211, 0.58);
+  font-size: 8px;
+}
+
+.agent-office-notice.completed {
+  color: #6fdda9;
+}
+
+.agent-office-notice.failed {
+  border-color: rgba(226, 111, 118, 0.20);
+  color: #e7777d;
+}
+
+@keyframes agent-live-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@keyframes agent-notice-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-live-pill.live i,
+  .agent-office-notice {
+    animation: none;
+  }
+}

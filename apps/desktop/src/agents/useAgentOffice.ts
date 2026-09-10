@@ -9,6 +9,7 @@ import {
   cancelAgentTask,
   getAgentDefinitions,
   getAgentStatus,
+  getAgentTask,
   getAgentTasks,
   retryAgentTask,
 } from "./api";
@@ -17,6 +18,11 @@ import type {
   AgentStatus,
   AgentTask,
 } from "./types";
+import {
+  runtimeTransportConnected,
+  subscribeRuntimeEvents,
+  type RuntimeEvent,
+} from "../shell/runtime";
 
 const ACTIVE_STATUSES = new Set([
   "queued",
@@ -32,7 +38,6 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 const RECENT_TERMINAL_RETENTION_MS = 2 * 60 * 1000;
-const POLL_MS = 1000;
 
 export const AGENT_TERMINAL_BROWSER_EVENT =
   "jace:agent-task-terminal";
@@ -42,6 +47,11 @@ export interface OfficeWorker {
   definition: AgentDefinition;
   task: AgentTask | null;
   overflowIndex: number;
+}
+
+export interface AgentOfficeNotice {
+  task: AgentTask;
+  kind: "completed" | "failed";
 }
 
 function taskTimestamp(task: AgentTask): number {
@@ -55,71 +65,137 @@ function taskTimestamp(task: AgentTask): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function sortNewestFirst(tasks: AgentTask[]): AgentTask[] {
+  return [...tasks].sort(
+    (a, b) => taskTimestamp(b) - taskTimestamp(a),
+  );
+}
+
+function isAgentTaskEvent(event: RuntimeEvent): boolean {
+  return (
+    event.type === "agent.task.queued" ||
+    event.type === "agent.task.changed" ||
+    event.type === "agent.task.completed" ||
+    event.type === "agent.task.failed"
+  );
+}
+
 export function useAgentOffice() {
-  const [definitions, setDefinitions] = useState<AgentDefinition[]>([]);
-  const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [status, setStatus] = useState<AgentStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [definitions, setDefinitions] =
+    useState<AgentDefinition[]>([]);
+  const [tasks, setTasks] =
+    useState<AgentTask[]>([]);
+  const [status, setStatus] =
+    useState<AgentStatus | null>(null);
+  const [error, setError] =
+    useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] =
+    useState<string | null>(null);
+  const [realtimeConnected, setRealtimeConnected] =
+    useState(runtimeTransportConnected());
+  const [notice, setNotice] =
+    useState<AgentOfficeNotice | null>(null);
+  const [clock, setClock] =
+    useState<number>(() => Date.now());
 
   const mountedRef = useRef(true);
-  const requestRunningRef = useRef(false);
-  const statusSnapshotRef = useRef<Map<string, string>>(new Map());
-  const officePrimedRef = useRef(false);
+  const hydrateRunningRef = useRef(false);
+  const hydrateAgainRef = useRef(false);
+  const statusSnapshotRef =
+    useRef<Map<string, string>>(new Map());
+  const primedRef = useRef(false);
+  const latestSequenceRef = useRef<number | null>(null);
+  const taskRequestSequenceRef =
+    useRef<Map<string, number>>(new Map());
+  const noticeTimerRef = useRef<number | null>(null);
 
-  const publishTerminalTransitions = useCallback(
-    (nextTasks: AgentTask[]) => {
-      if (!officePrimedRef.current) {
-        statusSnapshotRef.current = new Map(
-          nextTasks.map((task) => [task.id, task.status]),
-        );
-        officePrimedRef.current = true;
+  const publishTerminalTransition = useCallback(
+    (task: AgentTask, previousStatus?: string) => {
+      if (
+        !TERMINAL_STATUSES.has(task.status) ||
+        previousStatus === task.status
+      ) {
         return;
       }
 
-      const nextSnapshot = new Map<string, string>();
+      window.dispatchEvent(
+        new CustomEvent<AgentTask>(
+          AGENT_TERMINAL_BROWSER_EVENT,
+          { detail: task },
+        ),
+      );
 
-      for (const task of nextTasks) {
-        const previousStatus = statusSnapshotRef.current.get(task.id);
-        nextSnapshot.set(task.id, task.status);
+      setNotice({
+        task,
+        kind:
+          task.status === "failed"
+            ? "failed"
+            : "completed",
+      });
 
-        if (
-          TERMINAL_STATUSES.has(task.status) &&
-          previousStatus !== task.status
-        ) {
-          window.dispatchEvent(
-            new CustomEvent<AgentTask>(
-              AGENT_TERMINAL_BROWSER_EVENT,
-              { detail: task },
-            ),
-          );
-        }
+      if (noticeTimerRef.current !== null) {
+        window.clearTimeout(noticeTimerRef.current);
       }
 
-      statusSnapshotRef.current = nextSnapshot;
+      noticeTimerRef.current = window.setTimeout(() => {
+        setNotice(null);
+        noticeTimerRef.current = null;
+      }, 6500);
     },
     [],
   );
 
-  const refresh = useCallback(async () => {
-    if (requestRunningRef.current) return;
+  const replaceSnapshot = useCallback(
+    (nextTasks: AgentTask[]) => {
+      const ordered = sortNewestFirst(nextTasks);
 
-    requestRunningRef.current = true;
+      if (!primedRef.current) {
+        statusSnapshotRef.current = new Map(
+          ordered.map((task) => [task.id, task.status]),
+        );
+        primedRef.current = true;
+        setTasks(ordered);
+        return;
+      }
+
+      const previous = statusSnapshotRef.current;
+      const nextStatuses = new Map<string, string>();
+
+      for (const task of ordered) {
+        const previousStatus = previous.get(task.id);
+        nextStatuses.set(task.id, task.status);
+        publishTerminalTransition(task, previousStatus);
+      }
+
+      statusSnapshotRef.current = nextStatuses;
+      setTasks(ordered);
+    },
+    [publishTerminalTransition],
+  );
+
+  const hydrate = useCallback(async () => {
+    if (hydrateRunningRef.current) {
+      hydrateAgainRef.current = true;
+      return;
+    }
+
+    hydrateRunningRef.current = true;
 
     try {
-      const [definitionResponse, taskResponse, statusResponse] =
-        await Promise.all([
-          getAgentDefinitions(),
-          getAgentTasks(100),
-          getAgentStatus(),
-        ]);
+      const [
+        definitionResponse,
+        taskResponse,
+        statusResponse,
+      ] = await Promise.all([
+        getAgentDefinitions(),
+        getAgentTasks(100),
+        getAgentStatus(),
+      ]);
 
       if (!mountedRef.current) return;
 
-      publishTerminalTransitions(taskResponse.tasks);
-
       setDefinitions(definitionResponse.agents);
-      setTasks(taskResponse.tasks);
+      replaceSnapshot(taskResponse.tasks);
       setStatus(statusResponse);
       setError(null);
     } catch (nextError) {
@@ -128,45 +204,180 @@ export function useAgentOffice() {
       setError(
         nextError instanceof Error
           ? nextError.message
-          : "Could not read the Jace agent office.",
+          : "Could not synchronise the Jace agent office.",
       );
     } finally {
-      requestRunningRef.current = false;
+      hydrateRunningRef.current = false;
+
+      if (hydrateAgainRef.current) {
+        hydrateAgainRef.current = false;
+        void hydrate();
+      }
     }
-  }, [publishTerminalTransitions]);
+  }, [replaceSnapshot]);
+
+  const refreshTask = useCallback(
+    async (
+      taskId: string,
+      eventSequence: number,
+    ) => {
+      const previousRequested =
+        taskRequestSequenceRef.current.get(taskId) ?? -1;
+
+      if (eventSequence < previousRequested) {
+        return;
+      }
+
+      taskRequestSequenceRef.current.set(
+        taskId,
+        eventSequence,
+      );
+
+      try {
+        const task = await getAgentTask(taskId);
+
+        if (!mountedRef.current) return;
+
+        const latestRequested =
+          taskRequestSequenceRef.current.get(taskId) ?? eventSequence;
+
+        if (eventSequence < latestRequested) {
+          return;
+        }
+
+        setTasks((current) => {
+          const previousTask =
+            current.find((item) => item.id === task.id) ?? null;
+          const previousStatus =
+            previousTask?.status ??
+            statusSnapshotRef.current.get(task.id);
+
+          statusSnapshotRef.current.set(
+            task.id,
+            task.status,
+          );
+
+          publishTerminalTransition(
+            task,
+            previousStatus,
+          );
+
+          return sortNewestFirst([
+            task,
+            ...current.filter(
+              (item) => item.id !== task.id,
+            ),
+          ]);
+        });
+
+        setError(null);
+      } catch (nextError) {
+        if (!mountedRef.current) return;
+
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Could not refresh an agent task.",
+        );
+      }
+    },
+    [publishTerminalTransition],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
-    void refresh();
+    void hydrate();
 
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, POLL_MS);
+    const unsubscribe = subscribeRuntimeEvents(
+      (event) => {
+        if (event.type === "runtime.transport.connected") {
+          setRealtimeConnected(true);
+          return;
+        }
+
+        if (event.type === "runtime.transport.disconnected") {
+          setRealtimeConnected(false);
+          return;
+        }
+
+        if (event.type === "runtime.snapshot") {
+          setRealtimeConnected(true);
+          latestSequenceRef.current =
+            typeof event.sequence === "number"
+              ? event.sequence
+              : null;
+          void hydrate();
+          return;
+        }
+
+        if (typeof event.sequence === "number") {
+          const previous = latestSequenceRef.current;
+
+          if (
+            previous !== null &&
+            event.sequence > previous + 1
+          ) {
+            void hydrate();
+          }
+
+          latestSequenceRef.current = event.sequence;
+        }
+
+        if (
+          isAgentTaskEvent(event) &&
+          typeof event.task_id === "string"
+        ) {
+          void refreshTask(
+            event.task_id,
+            event.sequence ?? Date.now(),
+          );
+        }
+      },
+    );
 
     return () => {
       mountedRef.current = false;
-      window.clearInterval(timer);
+      unsubscribe();
+
+      if (noticeTimerRef.current !== null) {
+        window.clearTimeout(noticeTimerRef.current);
+      }
     };
-  }, [refresh]);
+  }, [hydrate, refreshTask]);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setClock(Date.now()),
+      10_000,
+    );
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   const activeTasks = useMemo(
-    () => tasks.filter((task) => ACTIVE_STATUSES.has(task.status)),
+    () =>
+      tasks.filter((task) =>
+        ACTIVE_STATUSES.has(task.status),
+      ),
     [tasks],
   );
 
-  const recentTerminalTasks = useMemo(() => {
-    const now = Date.now();
+  const recentTerminalTasks = useMemo(
+    () =>
+      tasks.filter((task) => {
+        if (!TERMINAL_STATUSES.has(task.status)) {
+          return false;
+        }
 
-    return tasks.filter((task) => {
-      if (!TERMINAL_STATUSES.has(task.status)) return false;
+        const timestamp = taskTimestamp(task);
 
-      const timestamp = taskTimestamp(task);
-      return (
-        timestamp > 0 &&
-        now - timestamp <= RECENT_TERMINAL_RETENTION_MS
-      );
-    });
-  }, [tasks]);
+        return (
+          timestamp > 0 &&
+          clock - timestamp <= RECENT_TERMINAL_RETENTION_MS
+        );
+      }),
+    [clock, tasks],
+  );
 
   const workers = useMemo<OfficeWorker[]>(() => {
     const output: OfficeWorker[] = [];
@@ -175,7 +386,10 @@ export function useAgentOffice() {
       const matchingActive = activeTasks
         .filter((task) => task.agent_id === definition.id)
         .sort((a, b) => {
-          if (a.priority !== b.priority) return b.priority - a.priority;
+          if (a.priority !== b.priority) {
+            return b.priority - a.priority;
+          }
+
           return a.created_at.localeCompare(b.created_at);
         });
 
@@ -183,19 +397,21 @@ export function useAgentOffice() {
         .filter((task) => task.agent_id === definition.id)
         .sort((a, b) => taskTimestamp(b) - taskTimestamp(a));
 
-      const primaryTask =
-        matchingActive[0] ??
-        matchingRecent[0] ??
-        null;
-
       output.push({
         id: definition.id,
         definition,
-        task: primaryTask,
+        task:
+          matchingActive[0] ??
+          matchingRecent[0] ??
+          null,
         overflowIndex: 0,
       });
 
-      for (let index = 1; index < matchingActive.length; index += 1) {
+      for (
+        let index = 1;
+        index < matchingActive.length;
+        index += 1
+      ) {
         output.push({
           id: `${definition.id}-overflow-${matchingActive[index].id}`,
           definition: {
@@ -209,7 +425,11 @@ export function useAgentOffice() {
     }
 
     return output;
-  }, [activeTasks, definitions, recentTerminalTasks]);
+  }, [
+    activeTasks,
+    definitions,
+    recentTerminalTasks,
+  ]);
 
   const selectedTask = useMemo(
     () =>
@@ -219,11 +439,33 @@ export function useAgentOffice() {
     [selectedTaskId, tasks],
   );
 
+  const derivedStatus = useMemo<AgentStatus | null>(() => {
+    if (!status) return null;
+
+    return {
+      ...status,
+      active_tasks: activeTasks.filter(
+        (task) => task.status !== "queued",
+      ).length,
+      queued_tasks: activeTasks.filter(
+        (task) => task.status === "queued",
+      ).length,
+    };
+  }, [activeTasks, status]);
+
   const cancel = useCallback(
     async (taskId: string) => {
       try {
-        await cancelAgentTask(taskId);
-        await refresh();
+        const task = await cancelAgentTask(taskId);
+
+        setTasks((current) =>
+          sortNewestFirst([
+            task,
+            ...current.filter((item) => item.id !== task.id),
+          ]),
+        );
+
+        setError(null);
       } catch (nextError) {
         setError(
           nextError instanceof Error
@@ -232,14 +474,27 @@ export function useAgentOffice() {
         );
       }
     },
-    [refresh],
+    [],
   );
 
   const retry = useCallback(
     async (taskId: string) => {
       try {
-        await retryAgentTask(taskId);
-        await refresh();
+        const task = await retryAgentTask(taskId);
+
+        setTasks((current) =>
+          sortNewestFirst([
+            task,
+            ...current.filter((item) => item.id !== task.id),
+          ]),
+        );
+
+        statusSnapshotRef.current.set(
+          task.id,
+          task.status,
+        );
+
+        setError(null);
       } catch (nextError) {
         setError(
           nextError instanceof Error
@@ -248,21 +503,23 @@ export function useAgentOffice() {
         );
       }
     },
-    [refresh],
+    [],
   );
 
   return {
     definitions,
     tasks,
-    status,
+    status: derivedStatus,
     error,
+    realtimeConnected,
+    notice,
     activeTasks,
     recentTerminalTasks,
     workers,
     selectedTask,
     selectedTaskId,
     setSelectedTaskId,
-    refresh,
+    refresh: hydrate,
     cancel,
     retry,
   };
