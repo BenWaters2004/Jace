@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from jace.agents import start_agent_manager, stop_agent_manager
 from jace.ai.client import close_ollama_client
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError, warm_model
 from jace.automations.scheduler import start_automation_scheduler, stop_automation_scheduler
+from jace.api.agents import router as agents_router
 from jace.api.attachments import router as attachments_router
 from jace.api.automations import router as automations_router
 from jace.api.chat import router as chat_router
@@ -22,9 +24,9 @@ from jace.api.voice import router as voice_router
 from jace.config import settings
 from jace.database import SessionLocal, close_database, init_database
 from jace.db.settings import get_or_create_assistant_settings
+from jace.runtime import runtime_events
 from jace.tools import ensure_tools_registered
 from jace.tools.permissions import ensure_tool_permissions
-from jace.runtime import runtime_events
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -35,9 +37,13 @@ async def lifespan(app: FastAPI):
     del app
 
     ensure_tools_registered()
+
+    # Importing the agents API above loads the Phase 11A SQLAlchemy models before
+    # create_all() runs, so the new local agent tables are created automatically.
     await init_database()
 
     preload_model_name = settings.default_model
+
     async with SessionLocal() as session:
         await ensure_tool_permissions(session)
         profile = await get_or_create_assistant_settings(session)
@@ -50,15 +56,27 @@ async def lifespan(app: FastAPI):
             await warm_model(preload_model_name)
             logger.info("Jace model preload complete: %s", preload_model_name)
         except (OllamaUnavailableError, OllamaRequestError) as exc:
-            # The app should still start if Ollama is temporarily unavailable.
+            # Jace should still start if Ollama is temporarily unavailable.
             logger.warning("Jace model preload skipped: %s", exc)
 
     await start_automation_scheduler()
-    await runtime_events.publish("jace.state.changed", state="idle", reason="backend_ready")
+    await start_agent_manager()
+
+    await runtime_events.publish(
+        "jace.state.changed",
+        state="idle",
+        reason="backend_ready",
+    )
 
     yield
 
-    await runtime_events.publish("jace.state.changed", state="offline", reason="backend_stopping")
+    await runtime_events.publish(
+        "jace.state.changed",
+        state="offline",
+        reason="backend_stopping",
+    )
+
+    await stop_agent_manager()
     await stop_automation_scheduler()
     await close_ollama_client()
     await close_database()
@@ -89,6 +107,7 @@ app.include_router(system_router)
 app.include_router(voice_router)
 app.include_router(attachments_router)
 app.include_router(automations_router)
+app.include_router(agents_router)
 app.include_router(settings_router)
 app.include_router(memories_router)
 app.include_router(runtime_router)

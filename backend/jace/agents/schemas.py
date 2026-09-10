@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+AgentTaskStatus = Literal[
+    "queued",
+    "running",
+    "thinking",
+    "using_tool",
+    "waiting_permission",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+ReasoningMode = Literal["fast", "balanced", "deep"]
+
+
+class AgentDefinitionResponse(BaseModel):
+    id: str
+    name: str
+    role: str
+    description: str
+    default_tools: list[str]
+    optional_tools: list[str]
+    accent: str
+    glyph: str
+
+
+class AgentDefinitionListResponse(BaseModel):
+    agents: list[AgentDefinitionResponse]
+
+
+class AgentTaskCreate(BaseModel):
+    agent_id: str = Field(default="general", min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=200)
+    instruction: str = Field(min_length=1, max_length=30_000)
+    conversation_id: str | None = Field(default=None, max_length=36)
+    parent_task_id: str | None = Field(default=None, max_length=36)
+    priority: int = Field(default=0, ge=-10, le=10)
+    model: str | None = Field(default=None, max_length=200)
+    reasoning_mode: ReasoningMode = "balanced"
+
+    # None = use that specialist's safe default capabilities.
+    # [] = deliberately run with no tools.
+    allowed_tools: list[str] | None = Field(default=None, max_length=40)
+
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentTaskEventResponse(BaseModel):
+    id: str
+    task_id: str
+    event_type: str
+    message: str
+    data: dict[str, Any]
+    created_at: datetime
+
+
+class AgentTaskResponse(BaseModel):
+    id: str
+    conversation_id: str | None
+    parent_task_id: str | None
+    agent_id: str
+    agent_name: str
+    agent_role: str
+    accent: str
+    glyph: str
+
+    title: str
+    instruction: str
+    status: AgentTaskStatus
+    priority: int
+    progress: float
+    progress_message: str | None
+
+    model: str | None
+    reasoning_mode: str
+    allowed_tools: list[str]
+    used_tools: list[str]
+    metadata: dict[str, Any]
+
+    result: str | None
+    error: str | None
+    cancel_requested: bool
+
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class AgentTaskListResponse(BaseModel):
+    tasks: list[AgentTaskResponse]
+
+
+class AgentTaskEventsResponse(BaseModel):
+    events: list[AgentTaskEventResponse]
+
+
+class AgentStatusResponse(BaseModel):
+    enabled: bool
+    manager_running: bool
+    workers: int
+    active_tasks: int
+    queued_tasks: int
+    counts: dict[str, int]
