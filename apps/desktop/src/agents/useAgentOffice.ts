@@ -31,12 +31,11 @@ const TERMINAL_STATUSES = new Set([
   "failed",
 ]);
 
-/*
- * Keep a finished task visibly attached to its worker for long enough that a
- * quick local job cannot disappear before Jace finishes acknowledging it.
- */
 const RECENT_TERMINAL_RETENTION_MS = 2 * 60 * 1000;
 const POLL_MS = 1000;
+
+export const AGENT_TERMINAL_BROWSER_EVENT =
+  "jace:agent-task-terminal";
 
 export interface OfficeWorker {
   id: string;
@@ -62,8 +61,45 @@ export function useAgentOffice() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
   const mountedRef = useRef(true);
   const requestRunningRef = useRef(false);
+  const statusSnapshotRef = useRef<Map<string, string>>(new Map());
+  const officePrimedRef = useRef(false);
+
+  const publishTerminalTransitions = useCallback(
+    (nextTasks: AgentTask[]) => {
+      if (!officePrimedRef.current) {
+        statusSnapshotRef.current = new Map(
+          nextTasks.map((task) => [task.id, task.status]),
+        );
+        officePrimedRef.current = true;
+        return;
+      }
+
+      const nextSnapshot = new Map<string, string>();
+
+      for (const task of nextTasks) {
+        const previousStatus = statusSnapshotRef.current.get(task.id);
+        nextSnapshot.set(task.id, task.status);
+
+        if (
+          TERMINAL_STATUSES.has(task.status) &&
+          previousStatus !== task.status
+        ) {
+          window.dispatchEvent(
+            new CustomEvent<AgentTask>(
+              AGENT_TERMINAL_BROWSER_EVENT,
+              { detail: task },
+            ),
+          );
+        }
+      }
+
+      statusSnapshotRef.current = nextSnapshot;
+    },
+    [],
+  );
 
   const refresh = useCallback(async () => {
     if (requestRunningRef.current) return;
@@ -80,6 +116,8 @@ export function useAgentOffice() {
 
       if (!mountedRef.current) return;
 
+      publishTerminalTransitions(taskResponse.tasks);
+
       setDefinitions(definitionResponse.agents);
       setTasks(taskResponse.tasks);
       setStatus(statusResponse);
@@ -95,7 +133,7 @@ export function useAgentOffice() {
     } finally {
       requestRunningRef.current = false;
     }
-  }, []);
+  }, [publishTerminalTransitions]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -123,7 +161,10 @@ export function useAgentOffice() {
       if (!TERMINAL_STATUSES.has(task.status)) return false;
 
       const timestamp = taskTimestamp(task);
-      return timestamp > 0 && now - timestamp <= RECENT_TERMINAL_RETENTION_MS;
+      return (
+        timestamp > 0 &&
+        now - timestamp <= RECENT_TERMINAL_RETENTION_MS
+      );
     });
   }, [tasks]);
 
@@ -142,12 +183,10 @@ export function useAgentOffice() {
         .filter((task) => task.agent_id === definition.id)
         .sort((a, b) => taskTimestamp(b) - taskTimestamp(a));
 
-      /*
-       * Active work always wins. Otherwise retain the specialist's most recent
-       * completed/failed job for two minutes so the user can see the green tick,
-       * red failure state and click through to the result.
-       */
-      const primaryTask = matchingActive[0] ?? matchingRecent[0] ?? null;
+      const primaryTask =
+        matchingActive[0] ??
+        matchingRecent[0] ??
+        null;
 
       output.push({
         id: definition.id,
@@ -156,10 +195,6 @@ export function useAgentOffice() {
         overflowIndex: 0,
       });
 
-      /*
-       * Overflow workers represent genuinely concurrent active tasks only.
-       * We do not spawn extra characters merely for historical results.
-       */
       for (let index = 1; index < matchingActive.length; index += 1) {
         output.push({
           id: `${definition.id}-overflow-${matchingActive[index].id}`,

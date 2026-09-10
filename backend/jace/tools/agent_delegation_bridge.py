@@ -13,7 +13,7 @@ from jace.tools.agent_routing import (
 logger = logging.getLogger("uvicorn.error")
 
 
-async def _execute_forced_tool(
+async def _run_tool(
     *,
     call: dict[str, Any],
     conversation_id: str | None,
@@ -21,7 +21,7 @@ async def _execute_forced_tool(
 ):
     from jace.tools.agent import _execute_tool_call
 
-    private_message: dict[str, Any] | None = None
+    tool_message: dict[str, Any] | None = None
     public_summary = ""
 
     async for event in _execute_tool_call(
@@ -30,7 +30,7 @@ async def _execute_forced_tool(
         user_message=user_message,
     ):
         if event.get("type") == "_tool_message":
-            private_message = event.get("message")
+            tool_message = event.get("message")
             continue
 
         if event.get("type") == "tool_result":
@@ -38,54 +38,40 @@ async def _execute_forced_tool(
 
         yield event
 
-    return_value = {
-        "tool_message": private_message,
-        "summary": public_summary,
-    }
     yield {
-        "type": "_forced_tool_complete",
-        "value": return_value,
-    }
-
-
-async def _run_forced_call_and_capture(
-    *,
-    call: dict[str, Any],
-    conversation_id: str | None,
-    user_message: str,
-):
-    tool_message: dict[str, Any] | None = None
-    public_summary = ""
-
-    async for event in _execute_forced_tool(
-        call=call,
-        conversation_id=conversation_id,
-        user_message=user_message,
-    ):
-        if event.get("type") == "_forced_tool_complete":
-            value = event.get("value") or {}
-            tool_message = value.get("tool_message")
-            public_summary = str(value.get("summary") or "")
-            continue
-
-        yield event
-
-    yield {
-        "type": "_forced_capture",
+        "type": "_jace_forced_tool_capture",
         "tool_message": tool_message,
         "summary": public_summary,
     }
 
 
-def wrap_stream_agent(base_stream_agent: Callable[..., AsyncIterator[dict[str, Any]]]):
+def _direct_done_metrics() -> dict[str, Any]:
+    return {
+        "total_duration": None,
+        "load_duration": None,
+        "prompt_eval_count": None,
+        "prompt_eval_cached_count": None,
+        "prompt_eval_duration": None,
+        "eval_count": None,
+        "eval_duration": None,
+        "model_turns": 0,
+        "tool_calls": 1,
+    }
+
+
+def wrap_stream_agent(
+    base_stream_agent: Callable[..., AsyncIterator[dict[str, Any]]],
+):
     """
-    Deterministic bridge for two operations that must not be left to a small
-    local model's discretion:
+    Explicit delegation and result retrieval are application actions, not guesses.
 
-    1. Explicitly requested background delegation.
-    2. Explicitly requested retrieval/status of an existing background job.
+    Delegation:
+      execute the real tool first, then let Jace phrase a short acknowledgement.
 
-    Both still execute through Jace's existing tool permission and audit layer.
+    Result/status lookup:
+      execute the real tool and stream its authoritative content DIRECTLY to chat.
+      Do not pass it through another model turn, because a small model can ignore
+      the supplied result and hallucinate that the agent is unavailable.
     """
 
     async def stream_agent_with_delegation(
@@ -140,29 +126,31 @@ def wrap_stream_agent(base_stream_agent: Callable[..., AsyncIterator[dict[str, A
 
         if tool_name == "delegate_agent_task":
             logger.info(
-                "Deterministic background delegation requested: agent=%s title=%r conversation=%s",
+                "Deterministic background delegation requested: "
+                "agent=%s title=%r conversation=%s",
                 arguments.get("agent_id"),
                 arguments.get("title"),
                 conversation_id,
             )
         else:
             logger.info(
-                "Deterministic agent result lookup requested: agent=%s conversation=%s",
+                "Deterministic agent result lookup requested: "
+                "agent=%s conversation=%s",
                 arguments.get("agent_id") or "latest",
                 conversation_id,
             )
 
         tool_message: dict[str, Any] | None = None
-        public_result_summary = ""
+        public_summary = ""
 
-        async for event in _run_forced_call_and_capture(
+        async for event in _run_tool(
             call=forced_call,
             conversation_id=conversation_id,
             user_message=user_message,
         ):
-            if event.get("type") == "_forced_capture":
+            if event.get("type") == "_jace_forced_tool_capture":
                 tool_message = event.get("tool_message")
-                public_result_summary = str(event.get("summary") or "")
+                public_summary = str(event.get("summary") or "")
                 continue
 
             yield event
@@ -171,50 +159,51 @@ def wrap_stream_agent(base_stream_agent: Callable[..., AsyncIterator[dict[str, A
             tool_message = {
                 "role": "tool",
                 "tool_name": tool_name,
-                "content": (
-                    f"The deterministic {tool_name} operation did not return a tool result. "
-                    "Do not claim that it succeeded."
-                ),
+                "content": f"{tool_name} did not return a result.",
             }
 
-        tool_content = str(tool_message.get("content") or "")
+        tool_content = str(tool_message.get("content") or "").strip()
 
-        if tool_name == "delegate_agent_task":
-            logger.info(
-                "Deterministic background delegation resolved: %s",
-                (public_result_summary or tool_content).replace("\n", " ")[:700],
-            )
-
-            forced_context = (
-                "\n\nDETERMINISTIC AGENT DELEGATION\n"
-                "Jace has already processed the user's explicit background-agent request "
-                "through the application's real delegation and permission system. Do NOT "
-                "try to delegate it again and do NOT claim a task exists unless the result "
-                "below says it was created.\n\n"
-                f"APPLICATION RESULT:\n{tool_content}\n\n"
-                "Respond naturally and briefly using that real result. If the task was "
-                "created, say it is running asynchronously and the main conversation can "
-                "continue. If it was denied or failed, say so accurately.\n"
-                "END DETERMINISTIC AGENT DELEGATION"
-            )
-        else:
+        # ------------------------------------------------------------------
+        # RESULT LOOKUPS ARE FINAL APPLICATION DATA.
+        # ------------------------------------------------------------------
+        if tool_name == "get_latest_agent_result":
             logger.info(
                 "Deterministic agent result lookup resolved: %s",
-                (public_result_summary or tool_content).replace("\n", " ")[:900],
+                (public_summary or tool_content).replace("\n", " ")[:1200],
             )
 
-            forced_context = (
-                "\n\nDETERMINISTIC AGENT RESULT\n"
-                "The application has already retrieved the real persisted background-agent "
-                "record requested by the user. This data is authoritative. Do NOT claim "
-                "that the agent is unavailable, that its output is inaccessible, that it "
-                "must write to a memory vault, or that the user needs to provide the output.\n\n"
-                f"APPLICATION RESULT:\n{tool_content}\n\n"
-                "Answer the user's question directly from this result. If it is still "
-                "running, report its actual status. If it failed, report the actual error. "
-                "If it completed, summarise/communicate its real findings naturally.\n"
-                "END DETERMINISTIC AGENT RESULT"
-            )
+            answer = tool_content or "No agent result was returned."
+
+            # This becomes a normal assistant chat message via api/chat.py.
+            # No second Ollama generation can overwrite or contradict it.
+            yield {"type": "token", "content": answer}
+            yield {
+                "type": "agent_done",
+                "model": model,
+                "done_reason": "application_result",
+                "metrics": _direct_done_metrics(),
+            }
+            return
+
+        # ------------------------------------------------------------------
+        # DELEGATION IS REAL, THEN JACE MAY PHRASE THE ACKNOWLEDGEMENT.
+        # ------------------------------------------------------------------
+        logger.info(
+            "Deterministic background delegation resolved: %s",
+            (public_summary or tool_content).replace("\n", " ")[:900],
+        )
+
+        forced_context = (
+            "\n\nDETERMINISTIC AGENT DELEGATION\n"
+            "The application has already processed the user's background-agent request. "
+            "The following is the authoritative application result:\n\n"
+            f"{tool_content}\n\n"
+            "Acknowledge it briefly and naturally. Do not perform the delegated task "
+            "yourself. Do not wait for the background specialist. Do not launch another "
+            "copy of the task. The main conversation remains available.\n"
+            "END DETERMINISTIC AGENT DELEGATION"
+        )
 
         async for event in base_stream_agent(
             model=model,
@@ -224,8 +213,6 @@ def wrap_stream_agent(base_stream_agent: Callable[..., AsyncIterator[dict[str, A
             temperature=temperature,
             conversation_id=conversation_id,
             user_message=user_message,
-            # The required operation already happened. Removing tools prevents
-            # duplicate delegation/lookups and forces a user-facing answer.
             tool_names=[],
             current_images=current_images,
             attachment_context=attachment_context,
@@ -237,5 +224,9 @@ def wrap_stream_agent(base_stream_agent: Callable[..., AsyncIterator[dict[str, A
 
             yield event
 
-    setattr(stream_agent_with_delegation, "_jace_agent_delegation_bridge", True)
+    setattr(
+        stream_agent_with_delegation,
+        "_jace_agent_delegation_bridge",
+        True,
+    )
     return stream_agent_with_delegation

@@ -1,6 +1,8 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -11,7 +13,7 @@ import type {
   KeyboardEvent,
   UIEvent,
 } from "react";
-import { attachmentContentUrl } from "../api";
+import { attachmentContentUrl, getConversation } from "../api";
 import type {
   AttachmentRecord,
   ChatMessage,
@@ -21,6 +23,10 @@ import type {
   ReasoningMode,
   ToolActivity,
 } from "../types";
+import type { AgentTask } from "../agents/types";
+import {
+  AGENT_TERMINAL_BROWSER_EVENT,
+} from "../agents/useAgentOffice";
 import "./ChatView.css";
 
 interface ChatViewProps {
@@ -133,6 +139,52 @@ function MessageAttachment({ attachment }: { attachment: AttachmentRecord }) {
   );
 }
 
+
+function agentHandoffContent(task: AgentTask): string {
+  if (task.status === "completed") {
+    return (
+      `${task.agent_name} finished the background task “${task.title}”.\n\n` +
+      (task.result || "The agent completed but returned no textual result.")
+    );
+  }
+
+  return (
+    `${task.agent_name} failed the background task “${task.title}”.\n\n` +
+    (task.error || "No error detail was recorded.")
+  );
+}
+
+function conversationIdFromMessages(messages: ChatMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const id = messages[index].conversation_id;
+    if (id) return id;
+  }
+
+  return null;
+}
+
+function persistedAgentMessages(
+  conversation: Awaited<ReturnType<typeof getConversation>>,
+): ChatMessage[] {
+  return conversation.messages
+    .filter(
+      (message) =>
+        message.role === "assistant" &&
+        Boolean(message.model?.startsWith("agent:")),
+    )
+    .map((message) => ({
+      id: message.id,
+      conversation_id: message.conversation_id,
+      role: message.role,
+      content: message.content,
+      status: message.status,
+      model: message.model,
+      created_at: message.created_at,
+      stopped: message.status === "stopped",
+      attachments: message.attachments,
+    }));
+}
+
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -145,6 +197,132 @@ export function ChatView(props: ChatViewProps) {
   const conversationKeyRef = useRef<string | null>(null);
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [liveAgentHandoffs, setLiveAgentHandoffs] = useState<ChatMessage[]>([]);
+  const [persistedHandoffs, setPersistedHandoffs] = useState<ChatMessage[]>([]);
+
+  const currentConversationId = useMemo(
+    () => conversationIdFromMessages(props.messages),
+    [props.messages],
+  );
+
+  const refreshPersistedAgentHandoffs = useCallback(
+    async (conversationId: string) => {
+      try {
+        const conversation = await getConversation(conversationId);
+        setPersistedHandoffs(persistedAgentMessages(conversation));
+      } catch {
+        // The main App still owns authoritative chat error handling. A missed
+        // background refresh must never interfere with the composer.
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setLiveAgentHandoffs([]);
+    setPersistedHandoffs([]);
+
+    if (!currentConversationId || props.isGenerating) return;
+
+    void refreshPersistedAgentHandoffs(currentConversationId);
+  }, [
+    currentConversationId,
+    props.isGenerating,
+    refreshPersistedAgentHandoffs,
+  ]);
+
+  useEffect(() => {
+    const handleTerminalTask = (event: Event) => {
+      const task = (event as CustomEvent<AgentTask>).detail;
+
+      if (
+        !task ||
+        !task.conversation_id ||
+        task.conversation_id !== currentConversationId
+      ) {
+        return;
+      }
+
+      const content = agentHandoffContent(task);
+
+      setLiveAgentHandoffs((current) => {
+        if (current.some((message) => message.id === `agent-handoff-${task.id}`)) {
+          return current;
+        }
+
+        return [
+          ...current,
+          {
+            id: `agent-handoff-${task.id}`,
+            conversation_id: task.conversation_id ?? undefined,
+            role: "assistant",
+            content,
+            status: "complete",
+            model: `agent:${task.agent_id}`,
+            created_at: task.completed_at ?? task.updated_at,
+          },
+        ];
+      });
+
+      // The backend persists the same handoff into the real conversation.
+      // Refresh shortly afterwards so the local bubble is replaced by the
+      // database-backed message automatically.
+      window.setTimeout(() => {
+        if (task.conversation_id) {
+          void refreshPersistedAgentHandoffs(task.conversation_id);
+        }
+      }, 300);
+    };
+
+    window.addEventListener(
+      AGENT_TERMINAL_BROWSER_EVENT,
+      handleTerminalTask,
+    );
+
+    return () => {
+      window.removeEventListener(
+        AGENT_TERMINAL_BROWSER_EVENT,
+        handleTerminalTask,
+      );
+    };
+  }, [currentConversationId, refreshPersistedAgentHandoffs]);
+
+  const displayedMessages = useMemo(() => {
+    const output = [...props.messages];
+    const seenIds = new Set(output.map((message) => message.id));
+    const seenContent = new Set(
+      output
+        .filter(
+          (message) =>
+            message.role === "assistant" &&
+            Boolean(message.model?.startsWith("agent:")),
+        )
+        .map((message) => message.content),
+    );
+
+    const candidates = [
+      ...persistedHandoffs,
+      ...liveAgentHandoffs,
+    ];
+
+    candidates
+      .sort((a, b) =>
+        String(a.created_at ?? "").localeCompare(
+          String(b.created_at ?? ""),
+        ),
+      )
+      .forEach((message) => {
+        if (seenIds.has(message.id) || seenContent.has(message.content)) {
+          return;
+        }
+
+        output.push(message);
+        seenIds.add(message.id);
+        seenContent.add(message.content);
+      });
+
+    return output;
+  }, [liveAgentHandoffs, persistedHandoffs, props.messages]);
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -226,7 +404,7 @@ export function ChatView(props: ChatViewProps) {
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [conversationKey, props.messages, scrollToBottom]);
+  }, [conversationKey, displayedMessages, scrollToBottom]);
 
   const canSend =
     props.online &&
@@ -329,7 +507,7 @@ export function ChatView(props: ChatViewProps) {
           className="chat-scroll chat-scroll-bottom"
           onScroll={handleChatScroll}
         >
-          {props.messages.length === 0 ? (
+          {displayedMessages.length === 0 ? (
             <div className="welcome-panel">
               <div className="welcome-mark">J</div>
               <h2>How can I help?</h2>
@@ -372,11 +550,15 @@ export function ChatView(props: ChatViewProps) {
             </div>
           ) : (
             <div className="messages chat-messages-bottom">
-              {props.messages.map((message) => (
+              {displayedMessages.map((message) => (
                 <article
                   key={message.id}
                   className={`message ${message.role} ${
                     message.isStreaming ? "streaming" : ""
+                  } ${
+                    message.model?.startsWith("agent:")
+                      ? "agent-handoff-message"
+                      : ""
                   }`}
                 >
                   <div className="message-avatar">
@@ -389,7 +571,9 @@ export function ChatView(props: ChatViewProps) {
                     <div className="message-author">
                       {message.role === "user"
                         ? props.userName
-                        : props.assistantName}
+                        : message.model?.startsWith("agent:")
+                          ? `${props.assistantName} · Agent Handoff`
+                          : props.assistantName}
                     </div>
 
                     {message.attachments &&

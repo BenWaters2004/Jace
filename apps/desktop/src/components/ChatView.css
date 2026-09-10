@@ -132,3 +132,20 @@
     transition: none;
   }
 }
+
+
+/* Phase 11B.1.4 — persisted background-agent handoff in normal chat. */
+.chat-shell .message.agent-handoff-message .message-body {
+  border-left: 2px solid rgba(105, 224, 190, 0.48);
+  padding-left: 12px;
+}
+
+.chat-shell .message.agent-handoff-message .message-author {
+  color: rgba(116, 228, 197, 0.86);
+}
+
+.chat-shell .message.agent-handoff-message .message-avatar {
+  box-shadow:
+    inset 0 0 0 1px rgba(103, 227, 191, 0.24),
+    0 0 18px rgba(77, 209, 171, 0.08);
+}

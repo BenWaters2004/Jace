@@ -4,13 +4,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from jace.agents.definitions import get_agent_definition, list_agent_definitions
+from jace.agents.definitions import get_agent_definition
 from jace.agents.manager import agent_manager
 from jace.agents.service import (
     create_task,
     get_task,
     list_tasks,
-    request_cancel,
     task_allowed_tools,
     task_used_tools,
 )
@@ -30,61 +29,27 @@ class DelegateAgentTaskInput(BaseModel):
             "and comparison; general=other independent background work."
         )
     )
-    title: str = Field(
-        min_length=1,
-        max_length=200,
-        description="Short human-readable task title for the office and task history.",
-    )
+    title: str = Field(min_length=1, max_length=200)
     instruction: str = Field(
         min_length=1,
         max_length=30_000,
         description=(
-            "Complete instruction for the background specialist. Include enough context "
-            "for the agent to work independently without asking the user questions."
+            "The work the specialist itself must perform. Do not phrase this as a request "
+            "for the specialist to create or contact another agent."
         ),
     )
-    priority: int = Field(
-        default=0,
-        ge=-10,
-        le=10,
-        description="Priority from -10 (lowest) to 10 (highest). Usually leave at 0.",
-    )
-    reasoning_mode: ReasoningMode = Field(
-        default="balanced",
-        description="Reasoning mode for the delegated agent.",
-    )
-    allowed_tools: list[str] | None = Field(
-        default=None,
-        max_length=40,
-        description=(
-            "Optional exact tool capability scope. Omit to use the specialist's safe "
-            "default tool set. Only request optional write/execute tools when the user's "
-            "task genuinely requires them; the delegation approval covers this scope."
-        ),
-    )
+    priority: int = Field(default=0, ge=-10, le=10)
+    reasoning_mode: ReasoningMode = "balanced"
+    allowed_tools: list[str] | None = Field(default=None, max_length=40)
 
 
 class AgentTaskIdInput(BaseModel):
-    task_id: str = Field(
-        min_length=1,
-        max_length=36,
-        description="Exact background task ID returned by a delegation/list/check call.",
-    )
+    task_id: str = Field(min_length=1, max_length=36)
 
 
 class ListAgentTasksInput(BaseModel):
-    status: str | None = Field(
-        default=None,
-        max_length=30,
-        description=(
-            "Optional status filter such as queued, running, thinking, using_tool, "
-            "waiting_permission, completed, failed or cancelled."
-        ),
-    )
-    agent_id: AgentKind | None = Field(
-        default=None,
-        description="Optional specialist filter.",
-    )
+    status: str | None = Field(default=None, max_length=30)
+    agent_id: AgentKind | None = None
     limit: int = Field(default=10, ge=1, le=30)
 
 
@@ -92,8 +57,8 @@ class LatestAgentResultInput(BaseModel):
     agent_id: AgentKind | None = Field(
         default=None,
         description=(
-            "Optional specialist filter. Omit when the user says 'the agent', "
-            "'background job', or otherwise refers to the most recent delegated task."
+            "Optional specialist filter. Omit for natural references such as "
+            "'the agent' or 'what did it find?'."
         ),
     )
 
@@ -129,6 +94,33 @@ def _task_summary(row, *, include_result: bool = False) -> dict[str, Any]:
     return summary
 
 
+def _user_ready_task_result(row, *, scope: str | None = None) -> str:
+    label = _agent_label(row.agent_id)
+    scope_text = f" ({scope})" if scope else ""
+
+    if row.status == "completed":
+        return (
+            f"{label} completed “{row.title}”{scope_text}.\n\n"
+            f"{row.result or 'The agent completed but returned no textual result.'}"
+        )
+
+    if row.status == "failed":
+        return (
+            f"{label} failed “{row.title}”{scope_text}.\n\n"
+            f"{row.error or 'No error detail was recorded.'}"
+        )
+
+    if row.status == "cancelled":
+        return f"{label} task “{row.title}” was cancelled{scope_text}."
+
+    return (
+        f"{label} is still working on “{row.title}”{scope_text}.\n\n"
+        f"Status: {row.status.replace('_', ' ')}\n"
+        f"Progress: {round(float(row.progress or 0.0) * 100)}%\n"
+        f"Current activity: {row.progress_message or row.status}"
+    )
+
+
 async def _delegate(
     payload: DelegateAgentTaskInput,
     context: ToolContext,
@@ -153,6 +145,7 @@ async def _delegate(
             metadata={
                 "source": "primary_jace",
                 "delegated_from_conversation": context.conversation_id,
+                "original_request": context.user_message,
             },
         )
     except ValueError as exc:
@@ -174,14 +167,9 @@ async def _delegate(
 
     return ToolExecutionResult(
         content=(
-            "Background task created successfully.\n"
-            f"task_id: {row.id}\n"
-            f"agent: {definition.name}\n"
-            f"title: {row.title}\n"
-            "status: queued\n"
-            f"allowed_tools: {capability_text}\n\n"
-            "The task is asynchronous. Do not wait for it before continuing the "
-            "conversation. Use check_agent_task later when its result is needed."
+            f"I've dispatched the {definition.name} to “{row.title}”. "
+            "The task is queued in the background and the main conversation can continue. "
+            f"Task ID: {row.id}."
         ),
         display=display,
         metadata={
@@ -200,32 +188,12 @@ async def _check(
     if row is None:
         raise ToolError("Background agent task not found.")
 
-    summary = _task_summary(row, include_result=True)
-
-    if row.status == "completed":
-        content = (
-            f"{_agent_label(row.agent_id)} completed '{row.title}'.\n"
-            f"Task ID: {row.id}\n\n"
-            f"RESULT\n{row.result or 'No textual result was returned.'}\nEND RESULT"
-        )
-    elif row.status == "failed":
-        content = (
-            f"{_agent_label(row.agent_id)} failed '{row.title}'.\n"
-            f"Task ID: {row.id}\n"
-            f"Error: {row.error or 'Unknown failure'}"
-        )
-    else:
-        content = (
-            f"{_agent_label(row.agent_id)} task '{row.title}' is {row.status}.\n"
-            f"Task ID: {row.id}\n"
-            f"Progress: {round(float(row.progress or 0.0) * 100)}%\n"
-            f"Current activity: {row.progress_message or row.status}"
-        )
+    content = _user_ready_task_result(row)
 
     return ToolExecutionResult(
         content=content,
         display=content[:1500],
-        metadata=summary,
+        metadata=_task_summary(row, include_result=True),
     )
 
 
@@ -276,13 +244,6 @@ async def _latest_result(
     payload: LatestAgentResultInput,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    """
-    Resolve conversational references such as "the agent" without forcing the
-    small local model to remember a UUID or perform a list -> check sequence.
-
-    Prefer tasks originating from the current conversation. Only fall back to
-    global recent tasks when the conversation has no delegated work at all.
-    """
     rows = await list_tasks(
         context.session,
         agent_id=payload.agent_id,
@@ -290,7 +251,7 @@ async def _latest_result(
         limit=25,
     )
 
-    scope = "current conversation"
+    scope = "this conversation"
 
     if not rows and context.conversation_id:
         rows = await list_tasks(
@@ -308,65 +269,21 @@ async def _latest_result(
             else ""
         )
         return ToolExecutionResult(
-            content=(
-                f"No background agent task{specialist} was found. "
-                "Do not invent an agent result."
-            ),
+            content=f"No background agent task{specialist} was found.",
             display="No matching background agent task found.",
             metadata={"task": None, "scope": scope},
         )
 
-    # list_tasks() is newest-first. The most recently delegated task is the
-    # user's natural referent for phrases like "the agent" or "what did it find?"
     row = rows[0]
-    summary = _task_summary(row, include_result=True)
-
-    if row.status == "completed":
-        content = (
-            f"Most recent background task from {scope}:\n"
-            f"Agent: {_agent_label(row.agent_id)}\n"
-            f"Title: {row.title}\n"
-            f"Task ID: {row.id}\n"
-            "Status: completed\n\n"
-            f"RESULT\n{row.result or 'No textual result was returned.'}\nEND RESULT\n\n"
-            "This is the real persisted agent result. Use it to answer the user directly."
-        )
-    elif row.status == "failed":
-        content = (
-            f"Most recent background task from {scope}:\n"
-            f"Agent: {_agent_label(row.agent_id)}\n"
-            f"Title: {row.title}\n"
-            f"Task ID: {row.id}\n"
-            "Status: failed\n"
-            f"Error: {row.error or 'Unknown failure'}\n\n"
-            "Tell the user the actual failure rather than claiming the agent is unavailable."
-        )
-    elif row.status == "cancelled":
-        content = (
-            f"Most recent background task from {scope}:\n"
-            f"Agent: {_agent_label(row.agent_id)}\n"
-            f"Title: {row.title}\n"
-            f"Task ID: {row.id}\n"
-            "Status: cancelled\n\n"
-            "Tell the user this task was cancelled."
-        )
-    else:
-        content = (
-            f"Most recent background task from {scope}:\n"
-            f"Agent: {_agent_label(row.agent_id)}\n"
-            f"Title: {row.title}\n"
-            f"Task ID: {row.id}\n"
-            f"Status: {row.status}\n"
-            f"Progress: {round(float(row.progress or 0.0) * 100)}%\n"
-            f"Current activity: {row.progress_message or row.status}\n\n"
-            "The task has not produced a final result yet. Report its real current "
-            "status and do not invent findings."
-        )
+    content = _user_ready_task_result(row, scope=scope)
 
     return ToolExecutionResult(
         content=content,
         display=content[:1500],
-        metadata={"task": summary, "scope": scope},
+        metadata={
+            "task": _task_summary(row, include_result=True),
+            "scope": scope,
+        },
     )
 
 
@@ -380,9 +297,7 @@ async def _cancel(
 
     if row.status in {"completed", "failed", "cancelled"}:
         return ToolExecutionResult(
-            content=(
-                f"Task {row.id} is already {row.status}; no cancellation was necessary."
-            ),
+            content=f"{row.title} is already {row.status}.",
             display=f"{row.title}: already {row.status}",
         )
 
@@ -394,7 +309,7 @@ async def _cancel(
     return ToolExecutionResult(
         content=(
             f"Cancellation requested for {_agent_label(row.agent_id)} task "
-            f"'{row.title}'. Task ID: {row.id}. Current status: {status}."
+            f"“{row.title}”. Current status: {status}."
         ),
         display=f"Cancellation requested: {row.title}",
         metadata={"task_id": row.id, "status": status},
@@ -407,13 +322,8 @@ def register_agent_orchestration_tools() -> None:
             name="delegate_agent_task",
             label="Delegate background task",
             description=(
-                "Delegate an independent task to a persistent Jace specialist so the "
-                "primary conversation can continue immediately. Use this when the user "
-                "explicitly asks for an agent/background task, or when substantial "
-                "independent research, code inspection, file analysis, or comparison can "
-                "run separately. Do NOT use for trivial questions or tiny actions that "
-                "Jace can finish immediately. This call itself is approval-gated because "
-                "it creates autonomous background work and may grant a scoped tool set."
+                "Delegate independent work to a persistent Jace specialist while the "
+                "primary conversation remains available."
             ),
             category="Agents",
             risk="execute",
@@ -427,10 +337,7 @@ def register_agent_orchestration_tools() -> None:
         ToolDefinition(
             name="check_agent_task",
             label="Check agent task",
-            description=(
-                "Check one exact background agent task and retrieve its complete result "
-                "when finished. Use an exact task ID returned by delegation or task listing."
-            ),
+            description="Read the real status/result of one exact background task.",
             category="Agents",
             risk="read",
             default_permission="allow",
@@ -443,11 +350,7 @@ def register_agent_orchestration_tools() -> None:
         ToolDefinition(
             name="list_agent_tasks",
             label="List agent tasks",
-            description=(
-                "List recent Jace background-agent tasks, their IDs, specialists, status "
-                "and short result/error previews. Use this when the user asks what agents "
-                "are doing or when you need to recover a task ID."
-            ),
+            description="List recent Jace background tasks and their states.",
             category="Agents",
             risk="read",
             default_permission="allow",
@@ -461,12 +364,8 @@ def register_agent_orchestration_tools() -> None:
             name="get_latest_agent_result",
             label="Get latest agent result",
             description=(
-                "Retrieve the most recent real background-agent task/result, preferring "
-                "the current conversation. Use this when the user says 'the agent', "
-                "'what did the agent find?', 'what did it find?', 'what came back?', "
-                "or asks for the result without supplying a task ID. Call this tool "
-                "instead of claiming that agent output is unavailable or stored in an "
-                "unknown/shared memory location."
+                "Read the most recent real persisted background-agent result, preferring "
+                "the current conversation."
             ),
             category="Agents",
             risk="read",
@@ -480,9 +379,7 @@ def register_agent_orchestration_tools() -> None:
         ToolDefinition(
             name="cancel_agent_task",
             label="Cancel agent task",
-            description=(
-                "Request cancellation of an exact running or queued background agent task."
-            ),
+            description="Cancel one queued/running background agent task.",
             category="Agents",
             risk="write",
             default_permission="ask",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from jace.agents.config import agent_settings
@@ -10,12 +11,14 @@ from jace.agents.models import AgentTask
 from jace.agents.service import (
     get_task,
     task_allowed_tools,
+    task_metadata,
     update_task_state,
 )
-from jace.ai.engine import OllamaRequestError, OllamaUnavailableError, stream_chat
+from jace.ai.engine import stream_chat
 from jace.database import SessionLocal
-from jace.db.conversations import get_conversation, model_history
+from jace.db.conversations import add_message, get_conversation, model_history
 from jace.db.settings import get_or_create_assistant_settings
+from jace.performance import chat_activity
 from jace.runtime import runtime_events
 from jace.tools import ensure_tools_registered
 from jace.tools.base import ToolContext, ToolError
@@ -25,6 +28,9 @@ from jace.tools.permissions import (
     update_tool_audit,
 )
 from jace.tools.registry import registry
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class AgentTaskCancelled(Exception):
@@ -76,7 +82,12 @@ def _dedupe_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
-async def _publish_task(task: AgentTask, *, event: str = "agent.task.changed") -> None:
+async def _publish_task(
+    task: AgentTask,
+    *,
+    event: str = "agent.task.changed",
+    **extra: Any,
+) -> None:
     await runtime_events.publish(
         event,
         task_id=task.id,
@@ -85,6 +96,7 @@ async def _publish_task(task: AgentTask, *, event: str = "agent.task.changed") -
         progress=task.progress,
         progress_message=task.progress_message,
         conversation_id=task.conversation_id,
+        **extra,
     )
 
 
@@ -136,9 +148,6 @@ async def _effective_tool_names(task: AgentTask) -> list[str]:
             if tool is None:
                 continue
 
-            # A global deny is always final. A task-specific allowed_tools list is
-            # the explicit capability grant for this background run, equivalent
-            # to the pre-approved scope used by Jace automations.
             if await get_tool_permission(session, name) == "deny":
                 continue
 
@@ -172,7 +181,9 @@ async def _execute_tool(
         return {
             "role": "tool",
             "tool_name": tool_name,
-            "content": "Tool denied: this background task was not granted that capability.",
+            "content": (
+                "Tool denied: this background task was not granted that capability."
+            ),
         }
 
     async with SessionLocal() as session:
@@ -227,6 +238,7 @@ async def _execute_tool(
                 "tool_name": tool_name,
                 "content": content,
             }
+
             if result.images:
                 message["images"] = result.images
 
@@ -285,8 +297,27 @@ async def _conversation_context(task: AgentTask) -> list[dict[str, Any]]:
             max_chars=8_000,
         )
 
-    # Tool-call structures from the primary chat are not needed by a background
-    # specialist. Give it only the user-visible conversational context.
+    # The user's orchestration command and Jace's acknowledgement are not task
+    # context. Feeding them to the specialist caused responses such as
+    # "I don't have access to an Analyst Agent" because the Analyst believed it
+    # was being asked to launch another Analyst.
+    original_request = str(task_metadata(task).get("original_request") or "").strip()
+
+    if original_request:
+        origin_index: int | None = None
+
+        for index in range(len(history) - 1, -1, -1):
+            item = history[index]
+            if (
+                item.get("role") == "user"
+                and str(item.get("content") or "").strip() == original_request
+            ):
+                origin_index = index
+                break
+
+        if origin_index is not None:
+            history = history[:origin_index]
+
     return [
         {
             "role": item["role"],
@@ -295,6 +326,150 @@ async def _conversation_context(task: AgentTask) -> list[dict[str, Any]]:
         for item in history
         if item.get("role") in {"user", "assistant"}
     ]
+
+
+async def _background_model_turn(
+    *,
+    task_id: str,
+    cancel_event: asyncio.Event,
+    model: str,
+    messages: list[dict[str, Any]],
+    system_prompt: str,
+    reasoning_mode: str,
+    temperature: float,
+    tools: list[dict[str, Any]] | None,
+    progress: float,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """
+    Give interactive Jace priority over background Ollama inference.
+
+    A background task waits until chat is idle before starting a model turn. If
+    the user starts speaking/chatting while the specialist is generating, the
+    partial background turn is discarded and its Ollama stream is closed. The
+    specialist resumes from the same stable context once Jace is idle again.
+
+    Tool calls are only executed *after* a complete model turn, so yielding here
+    cannot duplicate a side effect.
+    """
+
+    while True:
+        if cancel_event.is_set():
+            raise AgentTaskCancelled()
+
+        await chat_activity.wait_for_idle(0.18)
+
+        if cancel_event.is_set():
+            raise AgentTaskCancelled()
+
+        content_parts: list[str] = []
+        raw_calls: list[dict[str, Any]] = []
+        yielded_to_foreground = False
+
+        stream = stream_chat(
+            model=model,
+            messages=messages,
+            system_prompt=system_prompt,
+            reasoning_mode=reasoning_mode,
+            temperature=temperature,
+            tools=tools,
+        )
+
+        try:
+            async for chunk in stream:
+                if cancel_event.is_set():
+                    raise AgentTaskCancelled()
+
+                # A new interactive request started after this background turn
+                # began. Release Ollama to foreground Jace.
+                if chat_activity.active > 0:
+                    yielded_to_foreground = True
+                    break
+
+                message = chunk.get("message") or {}
+
+                content = message.get("content") or ""
+                if content:
+                    content_parts.append(content)
+
+                calls = message.get("tool_calls") or []
+                if isinstance(calls, list):
+                    raw_calls.extend(
+                        item for item in calls if isinstance(item, dict)
+                    )
+        finally:
+            try:
+                await stream.aclose()
+            except Exception:
+                pass
+
+        if not yielded_to_foreground:
+            return content_parts, raw_calls
+
+        await _set_state(
+            task_id,
+            status="running",
+            progress=progress,
+            message="Paused while Jace responds",
+            event_type="yielded_to_foreground",
+            event_message="Background inference yielded to the primary conversation.",
+        )
+
+        logger.info(
+            "Agent task %s yielded Ollama to foreground Jace.",
+            task_id,
+        )
+
+
+async def _persist_completion_handoff(
+    *,
+    task_id: str,
+    agent_name: str,
+    agent_id: str,
+    result: str,
+) -> str | None:
+    """
+    Persist the specialist result into the originating conversation.
+
+    This is the real shared handoff. It means the next primary Jace turn sees
+    the result through normal conversation history even if no result tool is
+    needed.
+    """
+
+    async with SessionLocal() as session:
+        task = await get_task(session, task_id)
+        if task is None or not task.conversation_id:
+            return None
+
+        metadata = task_metadata(task)
+        existing_id = metadata.get("handoff_message_id")
+        if isinstance(existing_id, str) and existing_id:
+            return existing_id
+
+        conversation = await get_conversation(session, task.conversation_id)
+        if conversation is None:
+            return None
+
+        content = (
+            f"{agent_name} finished the background task “{task.title}”.\n\n"
+            f"{result}"
+        ).strip()
+
+        message = await add_message(
+            session,
+            conversation=conversation,
+            role="assistant",
+            content=content,
+            status="complete",
+            model=f"agent:{agent_id}",
+        )
+
+        # add_message commits. Mark the task after the message exists so a
+        # restart cannot produce duplicate handoffs.
+        metadata["handoff_message_id"] = message.id
+        task.metadata_json = json.dumps(metadata, ensure_ascii=False)
+        await session.commit()
+
+        return message.id
 
 
 async def execute_agent_task(
@@ -308,6 +483,7 @@ async def execute_agent_task(
         task = await get_task(session, task_id)
         if task is None:
             return
+
         if task.cancel_requested or cancel_event.is_set():
             raise AgentTaskCancelled()
 
@@ -320,7 +496,15 @@ async def execute_agent_task(
         temperature = profile.temperature
         reasoning_mode = task.reasoning_mode
 
-    await _set_state(
+    # The task was delegated from an active chat request. Do not let the
+    # background worker seize the same local model before Jace has acknowledged
+    # the delegation and returned to idle.
+    await chat_activity.wait_for_idle(0.18)
+
+    if cancel_event.is_set():
+        raise AgentTaskCancelled()
+
+    task = await _set_state(
         task_id,
         status="running",
         progress=0.08,
@@ -340,11 +524,14 @@ async def execute_agent_task(
         {
             "role": "user",
             "content": (
-                "BACKGROUND TASK\n"
-                f"Title: {task.title}\n"
-                f"Assigned specialist: {definition.name}\n\n"
-                f"Instruction:\n{task.instruction}\n"
-                "END BACKGROUND TASK"
+                "BACKGROUND SPECIALIST ASSIGNMENT\n"
+                f"You are the assigned specialist: {definition.name}.\n"
+                "Do NOT create, call, delegate to, or wait for another agent. "
+                "You are the worker who must perform this task.\n\n"
+                f"Task: {task.title}\n"
+                f"Instruction: {task.instruction}\n"
+                "Return your findings as a handoff to Jace.\n"
+                "END BACKGROUND SPECIALIST ASSIGNMENT"
             ),
         },
     ]
@@ -368,30 +555,17 @@ async def execute_agent_task(
             event_data={"step": step + 1},
         )
 
-        content_parts: list[str] = []
-        raw_calls: list[dict[str, Any]] = []
-
-        async for chunk in stream_chat(
+        content_parts, raw_calls = await _background_model_turn(
+            task_id=task_id,
+            cancel_event=cancel_event,
             model=model,
             messages=messages,
             system_prompt=definition.system_prompt,
             reasoning_mode=reasoning_mode,
             temperature=temperature,
             tools=tool_schemas or None,
-        ):
-            if cancel_event.is_set():
-                raise AgentTaskCancelled()
-
-            message = chunk.get("message") or {}
-            content = message.get("content") or ""
-            if content:
-                content_parts.append(content)
-
-            calls = message.get("tool_calls") or []
-            if isinstance(calls, list):
-                raw_calls.extend(
-                    item for item in calls if isinstance(item, dict)
-                )
+            progress=step_progress,
+        )
 
         calls = _dedupe_tool_calls(raw_calls)
 
@@ -430,11 +604,12 @@ async def execute_agent_task(
                 },
             )
 
-            current_task: AgentTask
             async with SessionLocal() as session:
                 current_task = await get_task(session, task_id)
                 if current_task is None:
-                    raise RuntimeError("Agent task disappeared during tool execution.")
+                    raise RuntimeError(
+                        "Agent task disappeared during tool execution."
+                    )
 
             tool_message = await _execute_tool(
                 task=current_task,
@@ -446,7 +621,7 @@ async def execute_agent_task(
             async with SessionLocal() as session:
                 current_task = await get_task(session, task_id)
                 if current_task is not None:
-                    await update_task_state(
+                    current_task = await update_task_state(
                         session,
                         current_task,
                         status="thinking",
@@ -457,35 +632,32 @@ async def execute_agent_task(
                         event_message=f"{name} returned to {definition.name}.",
                         event_data_value={"tool_name": name},
                     )
-                    await _publish_task(current_task)
+
+            if current_task is not None:
+                await _publish_task(current_task)
 
     else:
         if cancel_event.is_set():
             raise AgentTaskCancelled()
 
-        # Force one final non-tool turn after the capability-step budget.
-        parts: list[str] = []
         final_prompt = (
             definition.system_prompt
             + "\n\nTOOL LIMIT REACHED\n"
-            + "Do not call another tool. Return the best final handoff using the "
-            + "information already gathered.\nEND TOOL LIMIT REACHED"
+            + "Do not call another tool. Return the best final handoff using "
+            + "the information already gathered.\nEND TOOL LIMIT REACHED"
         )
 
-        async for chunk in stream_chat(
+        parts, _ = await _background_model_turn(
+            task_id=task_id,
+            cancel_event=cancel_event,
             model=model,
             messages=messages,
             system_prompt=final_prompt,
             reasoning_mode=reasoning_mode,
             temperature=temperature,
             tools=None,
-        ):
-            if cancel_event.is_set():
-                raise AgentTaskCancelled()
-
-            content = (chunk.get("message") or {}).get("content") or ""
-            if content:
-                parts.append(content)
+            progress=0.90,
+        )
 
         final_text = "".join(parts).strip()
 
@@ -510,7 +682,22 @@ async def execute_agent_task(
             completed=True,
             event_type="completed",
             event_message=f"{definition.name} completed the task.",
-            event_data_value={"used_tools": sorted(set(used_tools)), "model": model},
+            event_data_value={
+                "used_tools": sorted(set(used_tools)),
+                "model": model,
+            },
         )
 
-    await _publish_task(current, event="agent.task.completed")
+    handoff_message_id = await _persist_completion_handoff(
+        task_id=task_id,
+        agent_name=definition.name,
+        agent_id=definition.id,
+        result=final_text,
+    )
+
+    await _publish_task(
+        current,
+        event="agent.task.completed",
+        handoff_message_id=handoff_message_id,
+        result_preview=final_text[:1000],
+    )

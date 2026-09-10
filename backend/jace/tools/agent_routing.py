@@ -35,6 +35,11 @@ _NAMED_AGENT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("general", r"\bgeneral\s+agent\b"),
 )
 
+_AGENT_NAME_PATTERN = (
+    r"(?:research|researcher|code|coding|developer|software|"
+    r"file|files|filesystem|analyst|analysis|general)\s+agent"
+)
+
 
 def _named_agent(lowered: str) -> str | None:
     for agent_id, pattern in _NAMED_AGENT_PATTERNS:
@@ -79,27 +84,121 @@ def _choose_agent(lowered: str) -> str:
     return "general"
 
 
-def _delegation_title(message: str, agent_id: str) -> str:
-    text = " ".join(message.strip().split())
+def _clean_delegated_instruction(message: str) -> str:
+    """
+    Convert conversational orchestration wording into the actual specialist task.
 
-    patterns = (
-        r"^(?:jace[,:\s]+)?",
-        r"^(?:please\s+)?(?:have|ask|get|send|delegate|use|run)\s+",
-        r"^(?:the\s+)?(?:research|researcher|code|coding|developer|software|"
-        r"file|files|filesystem|analyst|analysis|general)\s+agent\s+",
-        r"^(?:to\s+)?",
-    )
+    Example:
+      "Jace, have the Analyst Agent explain DNS caching in the background.
+       Keep this conversation free while it works."
 
-    title = text
-    for pattern in patterns:
-        title = re.sub(pattern, "", title, count=1, flags=re.IGNORECASE).strip()
+    becomes:
+      "Explain DNS caching."
 
-    title = re.sub(
-        r"\b(?:in|as)\s+(?:a\s+)?background(?:\s+(?:task|job))?\b.*$",
+    This matters because the background specialist must not receive an instruction
+    telling it to create/call another Analyst Agent.
+    """
+
+    text = " ".join((message or "").strip().split())
+    if not text:
+        return text
+
+    # Remove direct address to Jace.
+    text = re.sub(
+        r"^(?:hey\s+)?jace[\s,:;-]*",
         "",
-        title,
+        text,
         flags=re.IGNORECASE,
-    ).strip(" .,:;-")
+    ).strip()
+
+    # "Have/ask/get the Analyst Agent [to] ..."
+    text = re.sub(
+        rf"^(?:please\s+)?(?:have|ask|get)\s+(?:the\s+)?{_AGENT_NAME_PATTERN}"
+        rf"\s+(?:to\s+)?",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # "Delegate X to the Analyst Agent" is harder to invert safely, so preserve X
+    # while removing only a common leading delegation wrapper.
+    text = re.sub(
+        rf"^(?:please\s+)?delegate\s+(?:this|that|it|the task|the job)\s+to\s+"
+        rf"(?:the\s+)?{_AGENT_NAME_PATTERN}\s*(?:to\s+)?",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # "Send this to the Research Agent to ..."
+    text = re.sub(
+        rf"^(?:please\s+)?send\s+(?:this|that|it|the task|the job)\s+to\s+"
+        rf"(?:the\s+)?{_AGENT_NAME_PATTERN}\s*(?:to\s+)?",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # "Use the Code Agent to ..."
+    text = re.sub(
+        rf"^(?:please\s+)?use\s+(?:the\s+)?{_AGENT_NAME_PATTERN}\s+(?:to|for)\s+",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Remove the orchestration-only tail. Everything after these phrases is about
+    # how Jace should schedule the work, not what the specialist should do.
+    text = re.sub(
+        r"\s*(?:[,;.-]\s*)?"
+        r"(?:in|as)\s+(?:(?:a|the)\s+)?background(?:\s+(?:task|job))?"
+        r"(?:[.!?].*)?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    text = re.sub(
+        r"\s*(?:[,;.-]\s*)?"
+        r"(?:while\s+(?:we|you|i)\s+(?:continue|carry on|keep working|talk)"
+        r"|keep\s+(?:this|the)\s+(?:chat|conversation)\s+free"
+        r"|without\s+blocking\s+(?:this|the)?\s*(?:chat|conversation))"
+        r".*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # The previous removal can expose a trailing "in the background" phrase,
+    # so normalise that orchestration tail one final time.
+    text = re.sub(
+        r"\s*(?:[,;.-]\s*)?"
+        r"(?:in|as)\s+(?:(?:a|the)\s+)?background(?:\s+(?:task|job))?"
+        r"[.!?]*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    text = text.strip(" \t\r\n,;:-")
+
+    if not text:
+        return "Complete the delegated background task described by the user's request."
+
+    # Give the specialist a clean imperative sentence.
+    text = text[0].upper() + text[1:]
+    if text[-1] not in ".!?":
+        text += "."
+
+    return text
+
+
+def _delegation_title(instruction: str, agent_id: str) -> str:
+    title = " ".join(instruction.strip().split()).strip(" .,:;-")
 
     if not title:
         friendly = {
@@ -152,7 +251,7 @@ def parse_explicit_delegation(message: str) -> ExplicitDelegationPlan | None:
             r"in the background|background task|background job|"
             r"while (?:we|you|i) (?:continue|carry on|keep working|talk)|"
             r"without blocking (?:the )?(?:chat|conversation)|"
-            r"keep (?:the )?(?:chat|conversation) free"
+            r"keep (?:this|the )?(?:chat|conversation) free"
             r")\b",
             lowered,
         )
@@ -191,21 +290,18 @@ def parse_explicit_delegation(message: str) -> ExplicitDelegationPlan | None:
             return None
 
     agent_id = _choose_agent(lowered)
+    instruction = _clean_delegated_instruction(text)
 
     return ExplicitDelegationPlan(
         agent_id=agent_id,
-        title=_delegation_title(text, agent_id),
-        instruction=text,
+        title=_delegation_title(instruction, agent_id),
+        instruction=instruction,
     )
 
 
 def parse_agent_result_followup(message: str) -> AgentResultPlan | None:
     """
     Resolve natural follow-ups referring to an existing agent task.
-
-    These are deterministic because a small local model should never be
-    permitted to answer "I cannot access the agent" when Jace has a real
-    persisted result API available.
     """
 
     text = " ".join((message or "").strip().split())
@@ -337,10 +433,6 @@ def build_forced_agent_result_call(
 def extend_agent_tool_route(
     base_router: Callable[[str], set[str]],
 ) -> Callable[[str], set[str]]:
-    """
-    Extend Jace's mature smart router with agent delegation/result language.
-    """
-
     def route(message: str) -> set[str]:
         selected = set(base_router(message))
 
