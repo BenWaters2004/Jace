@@ -1,29 +1,25 @@
 /* --------------------------------------------------------------------------
-   Phase 10B.3.2 — JACE PCB Core
+   JACE core — lit PCB board
 
-   Direction based on the supplied reference:
-   - dense dark-green PCB background
-   - mostly green, low-contrast copper traces
-   - not every trace radiates from or touches the central processor
-   - only moving data packets are multi-coloured
-   - packets carry a short glowing tail
-   - central processor keeps one footprint in every state
-   - central text scales from the processor itself, not from viewport width
-   - activity is communicated by packet direction, lit vias/components/pins,
-     scanning and light intensity rather than changing processor geometry
+   Palette sampled directly from the reference frame:
+     board corners        rgb(2, 10, 5)
+     board mid tone       rgb(6, 27, 20)
+     copper traces        pale grey-green, low alpha
+     centre halo          warm olive-gold, peaking near rgb(121, 131, 85)
+     nameplate top bevel  rgb(250, 249, 188)
+     nameplate interior   rgb(3, 13, 6)
+
+   The halo is the dominant light source: everything else on the board is
+   deliberately low contrast so the centre reads as lit rather than drawn.
    -------------------------------------------------------------------------- */
 
-.pcb-core-panel {
-  --pcb-black: #010704;
-  --pcb-deep: #03110b;
-  --pcb-base: #061b12;
-  --pcb-mid: #0a2a1c;
-  --pcb-mask: #0d3524;
-  --pcb-copper: #356f55;
-  --pcb-copper-soft: #2d5d48;
-  --pcb-copper-bright: #559878;
-  --pcb-text: #91d5b4;
-  --pcb-text-bright: #bdffdc;
+.cc-panel.jc-panel {
+  --jc-black: #010603;
+  --jc-deep: #020a06;
+  --jc-base: #061b14;
+  --jc-copper: 152, 198, 172;
+  --jc-warm: 214, 198, 116;
+  --jc-plate-lit: 250, 249, 188;
 
   --packet-cyan: #72f2ff;
   --packet-blue: #65adff;
@@ -32,771 +28,532 @@
   --packet-mint: #71ffc5;
   --packet-danger: #ff6f82;
 
+  display: block;
+  padding: 0;
   isolation: isolate;
   overflow: hidden;
-  background: #020c08;
-  border-color: rgba(84, 151, 113, 0.25);
+  background: var(--jc-deep);
+  border-color: rgba(84, 151, 113, 0.16);
 }
 
-.pcb-core-topline {
-  position: relative;
-  z-index: 30;
-  flex: 0 0 auto;
-  background:
-    linear-gradient(90deg, rgba(2, 14, 9, 0.99), rgba(5, 27, 18, 0.97), rgba(2, 14, 9, 0.99));
-  border-bottom-color: rgba(83, 153, 114, 0.19);
+.cc-panel.jc-panel::before {
+  display: none;
 }
 
-.pcb-core-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pcb-link-light {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 7px;
-  border: 1px solid rgba(89, 156, 119, 0.22);
-  border-radius: 2px;
-  background: rgba(1, 13, 8, 0.62);
-  color: #638a75;
-  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: 0.1em;
-}
-
-.pcb-link-light.online {
-  color: #8ce1b7;
-  border-color: rgba(105, 202, 151, 0.27);
-  text-shadow: 0 0 7px rgba(105, 230, 165, 0.18);
-}
-
-.pcb-link-light.fallback {
-  color: #d2af69;
-  border-color: rgba(216, 171, 83, 0.25);
-}
-
-.pcb-core-stage {
+.jc-stage {
   --voice-level: 0;
+  --halo: 1;
   position: relative;
+  width: 100%;
+  height: 100%;
   min-height: 0;
-  flex: 1;
   overflow: hidden;
   contain: paint;
   background:
-    radial-gradient(ellipse at 50% 49%, rgba(86, 133, 73, 0.17), transparent 31%),
-    radial-gradient(circle at 25% 31%, rgba(19, 70, 47, 0.18), transparent 24%),
-    radial-gradient(circle at 78% 74%, rgba(18, 62, 43, 0.14), transparent 27%),
-    linear-gradient(180deg, #071f15 0%, #061a12 40%, #05170f 100%);
+    radial-gradient(ellipse 58% 62% at 50% 50%, #071f16 0%, #04140e 55%, #020a06 100%);
 }
 
-.pcb-substrate,
-.pcb-fibreglass,
-.pcb-grain,
-.pcb-hub-aura,
-.pcb-state-scan,
-.pcb-board-vignette {
+.jc-substrate,
+.jc-weave,
+.jc-glow-warm,
+.jc-glow-cool,
+.jc-scan,
+.jc-vignette {
   position: absolute;
+  inset: 0;
   pointer-events: none;
 }
 
-/* Uneven solder-mask tone like the reference image. */
-.pcb-substrate {
-  inset: 0;
-  z-index: 0;
-  background:
-    linear-gradient(104deg, transparent 0 20%, rgba(106, 158, 119, 0.015) 20.3% 20.7%, transparent 21% 66%, rgba(255, 255, 255, 0.012) 66.2% 66.5%, transparent 66.8%),
-    radial-gradient(ellipse at 46% 54%, rgba(94, 123, 61, 0.1), transparent 29%),
-    radial-gradient(ellipse at 80% 15%, rgba(8, 49, 33, 0.22), transparent 28%),
-    linear-gradient(24deg, rgba(0, 0, 0, 0.1), transparent 35% 65%, rgba(0, 0, 0, 0.12));
-  opacity: 0.95;
-}
-
-/* Fine woven PCB/fibreglass texture. */
-.pcb-fibreglass {
-  inset: 0;
+/* Uneven solder-mask tone. Very low contrast on purpose. */
+.jc-substrate {
   z-index: 1;
-  opacity: 0.19;
-  background-image:
-    linear-gradient(rgba(129, 197, 154, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(129, 197, 154, 0.035) 1px, transparent 1px),
-    linear-gradient(45deg, rgba(0, 0, 0, 0.08) 25%, transparent 25% 75%, rgba(0, 0, 0, 0.08) 75%),
-    linear-gradient(-45deg, rgba(112, 177, 136, 0.018) 25%, transparent 25% 75%, rgba(112, 177, 136, 0.018) 75%);
-  background-size: 31px 31px, 31px 31px, 7px 7px, 7px 7px;
+  background:
+    radial-gradient(ellipse 30% 34% at 28% 26%, rgba(24, 68, 50, 0.2), transparent 70%),
+    radial-gradient(ellipse 26% 30% at 76% 74%, rgba(16, 54, 40, 0.16), transparent 70%),
+    linear-gradient(112deg, transparent 0 34%, rgba(120, 176, 140, 0.02) 34.2% 34.6%, transparent 35% 100%);
 }
 
-.pcb-grain {
-  inset: -20px;
+/* Fine woven fibreglass texture. */
+.jc-weave {
   z-index: 2;
-  opacity: 0.18;
-  mix-blend-mode: screen;
+  opacity: 0.16;
   background-image:
-    radial-gradient(circle at 11% 19%, rgba(202, 255, 221, 0.15) 0 0.65px, transparent 0.9px),
-    radial-gradient(circle at 67% 63%, rgba(153, 224, 182, 0.12) 0 0.7px, transparent 1px),
-    radial-gradient(circle at 42% 35%, rgba(146, 214, 176, 0.1) 0 0.6px, transparent 0.95px);
-  background-size: 47px 43px, 63px 57px, 37px 41px;
-  animation: pcb-grain-drift 18s linear infinite;
+    repeating-linear-gradient(0deg, rgba(150, 200, 172, 0.05) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(150, 200, 172, 0.04) 0 1px, transparent 1px 4px);
 }
 
-.pcb-board-svg {
+.jc-board {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 3;
   width: 100%;
   height: 100%;
-  overflow: visible;
 }
 
 /* --------------------------------------------------------------------------
-   Copper / traces
+   Copper
    -------------------------------------------------------------------------- */
 
-.pcb-ambient-traces path,
-.pcb-trace-underlay,
-.pcb-trace,
-.pcb-board-marks path {
+.jc-trace,
+.jc-bus,
+.jc-signal,
+.jc-accent,
+.jc-chip-pin,
+.jc-cap-gloss {
   fill: none;
-  stroke-linecap: square;
+  stroke-linecap: butt;
   stroke-linejoin: miter;
   vector-effect: non-scaling-stroke;
 }
 
-.pcb-ambient-traces path {
-  stroke: rgba(58, 120, 88, 0.34);
+.jc-trace {
+  stroke: rgba(var(--jc-copper), 0.13);
   stroke-width: 1;
 }
 
-.pcb-ambient-traces path:nth-child(3n) {
-  stroke: rgba(67, 134, 98, 0.26);
+.jc-trace.w-1 {
+  stroke: rgba(var(--jc-copper), 0.1);
   stroke-width: 1.2;
 }
 
-.pcb-ambient-traces path:nth-child(5n) {
-  stroke: rgba(81, 142, 108, 0.2);
-  stroke-width: 1.5;
+.jc-trace.w-2 {
+  stroke: rgba(var(--jc-copper), 0.16);
+  stroke-width: 1.6;
 }
 
-.pcb-trace-underlay {
-  stroke: rgba(64, 143, 99, 0.24);
-  stroke-width: 4.5;
-  opacity: 0.13;
-  filter: blur(1.1px);
-}
-
-.pcb-trace {
-  stroke: rgba(66, 145, 105, 0.58);
-  stroke-width: 1.15;
-}
-
-.pcb-signal-route.local-bus .pcb-trace {
-  stroke: rgba(62, 132, 96, 0.44);
-}
-
-.pcb-board-marks path {
-  stroke: rgba(91, 165, 123, 0.38);
-  stroke-width: 1;
-}
-
-/* --------------------------------------------------------------------------
-   Vias, chips and passives
-   -------------------------------------------------------------------------- */
-
-.pcb-via-ring {
-  fill: rgba(3, 18, 11, 0.87);
-  stroke: rgba(100, 169, 129, 0.28);
-  stroke-width: 0.9;
-  vector-effect: non-scaling-stroke;
-}
-
-.pcb-via-hole {
-  fill: rgba(95, 161, 125, 0.38);
-}
-
-.pcb-chip-shadow {
-  fill: rgba(0, 6, 4, 0.7);
-  stroke: rgba(44, 98, 70, 0.18);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.pcb-chip-body {
-  fill: rgba(2, 11, 7, 0.94);
-  stroke: rgba(75, 139, 103, 0.4);
+.jc-bus {
+  stroke: rgba(var(--jc-copper), 0.11);
   stroke-width: 1.1;
-  vector-effect: non-scaling-stroke;
 }
 
-.pcb-chip-die {
-  fill: rgba(3, 20, 13, 0.94);
-  stroke: rgba(59, 112, 83, 0.3);
-  stroke-width: 0.8;
-  vector-effect: non-scaling-stroke;
+.jc-signal {
+  stroke: rgba(var(--jc-copper), 0.2);
+  stroke-width: 1.2;
 }
 
-.pcb-chip-pin {
-  stroke: rgba(93, 158, 123, 0.34);
+.jc-pads circle {
+  fill: none;
+  stroke: rgba(var(--jc-copper), 0.22);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
-.pcb-passives rect {
-  fill: rgba(8, 30, 19, 0.96);
-  stroke: rgba(86, 151, 115, 0.32);
+.jc-passives rect {
+  fill: rgba(6, 20, 14, 0.9);
+  stroke: rgba(var(--jc-copper), 0.28);
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.jc-chip-body {
+  fill: rgba(4, 14, 10, 0.86);
+  stroke: rgba(var(--jc-copper), 0.3);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.jc-chip-inner {
+  fill: none;
+  stroke: rgba(var(--jc-copper), 0.16);
   stroke-width: 0.8;
   vector-effect: non-scaling-stroke;
 }
 
-/* --------------------------------------------------------------------------
-   Data packets — colour belongs here, not on the copper underneath.
-   -------------------------------------------------------------------------- */
-
-.packet-cyan circle { fill: var(--packet-cyan); }
-.packet-blue circle { fill: var(--packet-blue); }
-.packet-violet circle { fill: var(--packet-violet); }
-.packet-amber circle { fill: var(--packet-amber); }
-.packet-mint circle { fill: var(--packet-mint); }
-.packet-danger circle { fill: var(--packet-danger); }
-
-.pcb-packet-head {
-  opacity: 1;
+.jc-chip-pin {
+  stroke: rgba(var(--jc-copper), 0.22);
+  stroke-width: 0.9;
 }
 
-.pcb-packet-tail {
-  opacity: 0.4;
+.jc-cap-body {
+  fill: rgba(5, 16, 11, 0.94);
+  stroke: rgba(var(--jc-copper), 0.34);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
-.state-idle .pcb-packet {
-  opacity: 0.5;
+.jc-cap-gloss {
+  stroke: rgba(196, 232, 210, 0.4);
+  stroke-width: 1.1;
+  stroke-linecap: round;
 }
 
-.state-listening .pcb-packet,
-.state-speaking .pcb-packet,
-.state-thinking .pcb-packet,
-.state-working .pcb-packet {
-  opacity: 1;
+/* Sparse static colour. */
+.jc-accent {
+  stroke-width: 1.4;
+  opacity: 0.85;
 }
 
-.state-waiting_permission .pcb-packet {
-  opacity: 0.75;
-}
+.jc-accent.tone-rose { stroke: #e2607f; }
+.jc-accent.tone-ice { stroke: #6fd4e6; }
+.jc-accent.tone-gold { stroke: #e2b95e; }
+.jc-accent.tone-ember { stroke: #e26a58; }
+.jc-accent.tone-mint { stroke: #74dfa6; }
 
 /* --------------------------------------------------------------------------
-   Central processor
-
-   The processor is always exactly 37% x 20% of the board. The corresponding
-   signal routes use x=315..685 and y=240..360 in the 1000x600 SVG, so routes
-   that are intended to touch it stay aligned in normal and fullscreen modes.
+   Packets
    -------------------------------------------------------------------------- */
 
-.pcb-hub-aura {
+.jc-packets { z-index: 4; }
+.jc-packet-head { filter: brightness(1.35); }
+
+.jc-packet-cyan circle { fill: var(--packet-cyan); }
+.jc-packet-blue circle { fill: var(--packet-blue); }
+.jc-packet-violet circle { fill: var(--packet-violet); }
+.jc-packet-amber circle { fill: var(--packet-amber); }
+.jc-packet-mint circle { fill: var(--packet-mint); }
+.jc-packet-danger circle { fill: var(--packet-danger); }
+
+/* --------------------------------------------------------------------------
+   Light
+
+   Screen blending is what makes these read as emitted light sitting on top of
+   the copper rather than as painted shapes.
+   -------------------------------------------------------------------------- */
+
+.jc-glow-warm {
   z-index: 6;
-  left: 50%;
-  top: 50%;
-  width: 49%;
-  height: 35%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(ellipse, rgba(160, 185, 78, 0.12), rgba(68, 148, 96, 0.07) 42%, transparent 72%);
-  filter: blur(26px);
-  opacity: 0.52;
+  mix-blend-mode: screen;
+  opacity: calc(var(--halo) * (0.86 + var(--voice-level) * 0.34));
+  background:
+    radial-gradient(ellipse 40% 34% at 50% 50%, rgba(var(--jc-warm), 0.5) 0%, rgba(168, 158, 74, 0.26) 32%, rgba(96, 108, 48, 0.1) 58%, transparent 76%),
+    radial-gradient(ellipse 20% 46% at 50% 50%, rgba(var(--jc-warm), 0.22), transparent 70%);
+  filter: blur(14px);
+  transition: opacity 380ms ease;
 }
 
-.pcb-core-hub {
-  --hub-light: rgba(105, 205, 150, 0.12);
+.jc-glow-cool {
+  z-index: 6;
+  mix-blend-mode: screen;
+  opacity: 0.5;
+  background: radial-gradient(ellipse 15% 19% at 41% 70%, rgba(66, 190, 186, 0.34), transparent 72%);
+  filter: blur(16px);
+  transition: opacity 380ms ease;
+}
+
+.jc-scan {
+  z-index: 7;
+  opacity: 0;
+  mix-blend-mode: screen;
+  background: linear-gradient(180deg, transparent, rgba(150, 232, 190, 0.05) 48%, transparent);
+}
+
+.jc-vignette {
+  z-index: 12;
+  background:
+    radial-gradient(ellipse 74% 78% at 50% 50%, transparent 40%, rgba(1, 7, 4, 0.5) 76%, rgba(1, 5, 3, 0.94) 100%);
+}
+
+/* --------------------------------------------------------------------------
+   Nameplate
+
+   Proportions come from the reference: 26.8% of stage width, 18% of height,
+   centred. The frame is a bevel lit from above, so the top edge is close to
+   white and the sides fall away to a dim olive.
+   -------------------------------------------------------------------------- */
+
+.jc-plate {
   position: absolute;
   z-index: 14;
   left: 50%;
   top: 50%;
-  width: 37%;
-  height: 20%;
-  min-width: 0;
-  min-height: 0;
+  width: 26.8%;
+  height: 18%;
+  min-width: 132px;
   transform: translate(-50%, -50%);
   container-type: inline-size;
-  border: 1px solid rgba(100, 173, 129, 0.53);
-  border-radius: 3px;
-  background:
-    linear-gradient(180deg, rgba(2, 15, 9, 0.98), rgba(1, 10, 6, 0.99)),
-    #020b07;
-  box-shadow:
-    0 0 0 2px rgba(0, 6, 4, 0.82),
-    0 0 0 5px rgba(64, 121, 87, 0.08),
-    0 0 28px var(--hub-light),
-    inset 0 0 28px rgba(77, 161, 111, 0.04);
-  overflow: visible;
 }
 
-.pcb-core-hub-inner {
+.jc-plate::before {
+  content: "";
   position: absolute;
-  inset: 5px;
-  z-index: 2;
+  inset: -60% -34%;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(var(--jc-warm), 0.34), rgba(150, 150, 70, 0.13) 46%, transparent 72%);
+  filter: blur(18px);
+  opacity: calc(0.8 + var(--voice-level) * 0.4);
+  transition: opacity 300ms ease;
+}
+
+.jc-plate-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 5px;
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(var(--jc-plate-lit), 0.96) 0%,
+      rgba(196, 192, 128, 0.7) 14%,
+      rgba(104, 114, 74, 0.58) 44%,
+      rgba(120, 126, 82, 0.6) 62%,
+      rgba(206, 200, 140, 0.82) 92%,
+      rgba(232, 228, 168, 0.9) 100%
+    );
+  box-shadow:
+    0 0 0 1px rgba(0, 6, 3, 0.6),
+    0 0 26px rgba(var(--jc-warm), calc(0.2 + var(--voice-level) * 0.22)),
+    0 0 70px rgba(var(--jc-warm), 0.12);
+  transition: box-shadow 300ms ease;
+}
+
+/* Sides of the bevel catch far less light than the top and bottom. */
+.jc-plate-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(4, 12, 8, 0.5) 0%, transparent 7%, transparent 93%, rgba(4, 12, 8, 0.45) 100%);
+}
+
+.jc-plate-screen {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  border: 1px solid rgba(49, 104, 73, 0.42);
-  border-radius: 2px;
-  background:
-    radial-gradient(ellipse at 50% 50%, rgba(47, 101, 67, 0.06), transparent 65%),
-    linear-gradient(180deg, rgba(2, 13, 8, 0.97), rgba(1, 9, 5, 0.98));
-}
-
-.pcb-hub-sheen {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.pcb-hub-sheen::before {
-  content: "";
-  position: absolute;
-  left: -45%;
-  top: 0;
-  width: 35%;
+  width: 100%;
   height: 100%;
-  transform: skewX(-18deg);
-  background: linear-gradient(90deg, transparent, rgba(147, 255, 195, 0.045), transparent);
-  opacity: 0;
+  overflow: hidden;
+  border: 1px solid rgba(74, 116, 98, 0.5);
+  border-radius: 4px;
+  background:
+    radial-gradient(ellipse 70% 90% at 50% 50%, rgba(18, 46, 32, 0.5), transparent 70%),
+    linear-gradient(180deg, #030f08, #020a05);
+  box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.9);
 }
 
-/* Main text uses container-width units. This is the important fullscreen fix. */
-.pcb-core-title {
+.jc-plate-text {
   display: block;
-  max-width: 92%;
-  color: var(--pcb-text-bright);
+  max-width: 94%;
+  color: #dcfbe8;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: clamp(14px, 11cqw, 64px);
-  font-weight: 800;
+  font-size: clamp(11px, 11.5cqw, 62px);
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: 0.23em;
+  letter-spacing: 0.2em;
   text-align: center;
-  text-indent: 0.23em;
+  text-indent: 0.2em;
   text-transform: uppercase;
   white-space: nowrap;
   text-shadow:
-    0 0 6px rgba(142, 255, 193, 0.3),
-    0 0 18px rgba(92, 226, 154, 0.13);
+    0 0 8px rgba(168, 255, 208, 0.42),
+    0 0 22px rgba(96, 226, 158, 0.2),
+    0 0 46px rgba(70, 200, 132, 0.12);
 }
 
-.pcb-core-title.thinking-data {
-  font-size: clamp(8px, 5.2cqw, 38px);
-  letter-spacing: 0.11em;
-  text-indent: 0.11em;
-  animation: pcb-thinking-text 180ms steps(2, end) infinite;
+.jc-plate-text.is-data {
+  font-size: clamp(8px, 5.6cqw, 34px);
+  letter-spacing: 0.1em;
+  text-indent: 0.1em;
+  animation: jc-flicker 180ms steps(2, end) infinite;
 }
 
-/* Processor edge pins. */
-.pcb-hub-pins {
+/* Short bright stubs where the board meets the plate. */
+.jc-plate-stub {
   position: absolute;
-  z-index: 4;
-  display: flex;
+  z-index: 2;
+  background: rgba(var(--jc-plate-lit), 0.5);
   pointer-events: none;
 }
 
-.pcb-hub-pins i {
-  --pin-index: 0;
-  display: block;
-  flex: 1 1 auto;
-  background: rgba(88, 153, 117, 0.5);
-  box-shadow: 0 0 0 rgba(123, 255, 184, 0);
-}
-
-.pcb-hub-pins-top,
-.pcb-hub-pins-bottom {
-  left: 12px;
-  right: 12px;
-  height: 5px;
-  gap: 3px;
-}
-
-.pcb-hub-pins-top { top: -8px; }
-.pcb-hub-pins-bottom { bottom: -8px; }
-
-.pcb-hub-pins-top i,
-.pcb-hub-pins-bottom i {
-  min-width: 2px;
-  height: 5px;
-}
-
-.pcb-hub-pins-left,
-.pcb-hub-pins-right {
-  top: 10px;
-  bottom: 10px;
-  width: 5px;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.pcb-hub-pins-left { left: -8px; }
-.pcb-hub-pins-right { right: -8px; }
-
-.pcb-hub-pins-left i,
-.pcb-hub-pins-right i {
-  width: 5px;
-  min-height: 2px;
-}
+.stub-top { left: 50%; top: -9px; width: 1px; height: 9px; }
+.stub-bottom { left: 42%; bottom: -9px; width: 1px; height: 9px; }
+.stub-left { left: -10px; top: 62%; width: 10px; height: 1px; }
+.stub-right { right: -10px; top: 34%; width: 10px; height: 1px; }
 
 /* --------------------------------------------------------------------------
-   State behaviour
+   Corner HUD
    -------------------------------------------------------------------------- */
 
-.state-idle .pcb-core-hub {
-  animation: pcb-idle-breathe 4.8s ease-in-out infinite;
+.jc-hud {
+  position: absolute;
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.state-idle .pcb-hub-aura {
-  animation: pcb-aura-idle 5.2s ease-in-out infinite;
+.jc-hud strong {
+  color: #c9e8d6;
+  margin-right: -0.34em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(120, 226, 170, 0.3);
 }
 
-.state-listening .pcb-core-hub {
-  --hub-light: rgba(88, 226, 151, calc(0.09 + (var(--voice-level, 0) * 0.18)));
-  border-color: rgba(112, 205, 151, calc(0.54 + (var(--voice-level, 0) * 0.3)));
-}
-
-.state-listening .pcb-hub-aura {
-  opacity: calc(0.52 + (var(--voice-level, 0) * 0.25));
-  filter: blur(calc(24px + (var(--voice-level, 0) * 8px)));
-}
-
-.state-listening .pcb-hub-pins i:nth-child(3n + 1),
-.state-listening .pcb-chip:nth-child(2n) .pcb-chip-pin,
-.state-listening .pcb-vias g:nth-child(7n) .pcb-via-hole {
-  animation: pcb-pin-spark 0.76s ease-in-out infinite;
-}
-
-.state-transcribing .pcb-state-scan {
-  opacity: 1;
-  animation: pcb-scan-down 1.05s linear infinite;
-}
-
-.state-transcribing .pcb-vias g:nth-child(5n) .pcb-via-hole,
-.state-transcribing .pcb-chip:nth-child(3n + 1) .pcb-chip-pin {
-  animation: pcb-pin-spark 0.48s steps(2, end) infinite;
-}
-
-.state-thinking .pcb-core-hub {
-  --hub-light: rgba(84, 219, 146, 0.19);
-  border-color: rgba(109, 206, 151, 0.72);
-  animation: pcb-thinking-hub 0.88s ease-in-out infinite;
-}
-
-.state-thinking .pcb-hub-sheen::before {
-  opacity: 1;
-  animation: pcb-sheen-pass 1.25s linear infinite;
-}
-
-.state-thinking .pcb-vias g:nth-child(3n) .pcb-via-hole,
-.state-thinking .pcb-vias g:nth-child(7n + 1) .pcb-via-hole,
-.state-thinking .pcb-chip:nth-child(2n + 1) .pcb-chip-pin,
-.state-thinking .pcb-chip:nth-child(3n) .pcb-chip-die {
-  animation: pcb-pin-spark 0.35s steps(2, end) infinite;
-}
-
-.state-thinking .pcb-ambient-traces path:nth-child(4n),
-.state-thinking .pcb-trace {
-  stroke: rgba(75, 158, 114, 0.68);
-}
-
-.state-speaking .pcb-core-hub {
-  --hub-light: rgba(82, 225, 152, calc(0.11 + (var(--voice-level, 0) * 0.24)));
-  border-color: rgba(118, 225, 166, calc(0.58 + (var(--voice-level, 0) * 0.3)));
-  animation: pcb-speaking-pulse 0.68s ease-in-out infinite;
-}
-
-.state-speaking .pcb-hub-aura {
-  opacity: calc(0.57 + (var(--voice-level, 0) * 0.28));
-}
-
-.state-speaking .pcb-hub-pins i:nth-child(2n),
-.state-speaking .pcb-chip:nth-child(odd) .pcb-chip-pin,
-.state-speaking .pcb-vias g:nth-child(6n + 2) .pcb-via-hole {
-  animation: pcb-pin-spark 0.58s ease-in-out infinite;
-}
-
-.state-working .pcb-core-hub {
-  --hub-light: rgba(87, 205, 143, 0.18);
-  border-color: rgba(108, 200, 150, 0.68);
-  animation: pcb-working-pulse 1.15s ease-in-out infinite;
-}
-
-.state-working .pcb-chip:nth-child(2n) .pcb-chip-body,
-.state-working .pcb-chip:nth-child(3n + 1) .pcb-chip-die,
-.state-working .pcb-vias g:nth-child(4n) .pcb-via-hole {
-  animation: pcb-component-live 0.85s ease-in-out infinite;
-}
-
-.state-waiting_permission .pcb-core-hub {
-  --hub-light: rgba(255, 187, 75, 0.15);
-  border-color: rgba(228, 179, 84, 0.7);
-  animation: pcb-permission-pulse 1.5s ease-in-out infinite;
-}
-
-.state-waiting_permission .pcb-hub-pins i:nth-child(4n),
-.state-waiting_permission .pcb-vias g:nth-child(9n) .pcb-via-hole {
-  background: rgba(231, 182, 82, 0.62);
-  animation: pcb-amber-spark 1.05s ease-in-out infinite;
-}
-
-.state-warning .pcb-core-hub {
-  --hub-light: rgba(255, 82, 104, 0.15);
-  border-color: rgba(232, 91, 108, 0.72);
-  animation: pcb-warning-pulse 0.72s ease-in-out infinite;
-}
-
-.state-warning .pcb-core-title {
-  color: #ffb1ba;
-  text-shadow: 0 0 8px rgba(255, 93, 113, 0.35);
-}
-
-.state-offline .pcb-core-stage {
-  filter: saturate(0.38) brightness(0.72);
-}
-
-.state-offline .pcb-packets,
-.state-offline .pcb-hub-aura {
-  opacity: 0.08;
-}
-
-/* Moving scan used only for transcription. */
-.pcb-state-scan {
-  z-index: 12;
-  left: 0;
-  right: 0;
-  top: -2px;
-  height: 1px;
-  opacity: 0;
-  background: linear-gradient(90deg, transparent 8%, rgba(111, 218, 158, 0.12), rgba(170, 255, 206, 0.72), rgba(111, 218, 158, 0.12), transparent 92%);
-  box-shadow: 0 0 13px rgba(112, 240, 170, 0.16);
-}
-
-.pcb-board-vignette {
-  inset: 0;
-  z-index: 20;
-  box-shadow:
-    inset 0 0 58px rgba(0, 0, 0, 0.48),
-    inset 0 0 128px rgba(0, 0, 0, 0.31);
-}
-
-.pcb-core-footer {
-  position: relative;
-  z-index: 30;
-  min-height: 25px;
-  padding: 0 10px;
-  gap: 10px;
-  background: rgba(1, 11, 7, 0.96);
-  border-top: 1px solid rgba(68, 137, 100, 0.15);
-  color: #587967;
+.jc-hud em {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #4e7c68;
   font-size: 7.5px;
-  letter-spacing: 0.08em;
-}
-
-.pcb-core-footer span:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-align: center;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
-/* --------------------------------------------------------------------------
-   Fullscreen
-
-   No separate hub width/height or font size is required. The board and hub use
-   the same percentages, while cqw makes the title scale naturally with the hub.
-   -------------------------------------------------------------------------- */
-
-.focus-core .pcb-core-stage {
-  min-height: calc(100vh - 148px);
+.jc-hud em i {
+  width: 5px;
+  height: 5px;
+  border: 1px solid rgba(110, 190, 150, 0.5);
 }
 
-.focus-core .pcb-ambient-traces path {
-  stroke-width: 1.15;
-  opacity: 0.95;
+.jc-hud em i.on { background: #55d69a; box-shadow: 0 0 6px rgba(85, 214, 154, 0.7); }
+.jc-hud em i.off { background: transparent; }
+
+.jc-hud-tl {
+  left: 14px;
+  top: 11px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
 }
 
-.focus-core .pcb-trace {
-  stroke-width: 1.3;
+.jc-hud-tr {
+  right: 14px;
+  top: 11px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
 }
 
-.focus-core .pcb-chip-body {
-  stroke-width: 1.25;
-}
+.jc-hud-tr strong { letter-spacing: 0.3em; font-size: 10px; margin-right: -0.3em; }
+.jc-hud-tr em { color: #6ba98d; letter-spacing: 0.26em; }
 
-.focus-core .pcb-via-ring {
-  stroke-width: 1.05;
-}
+.jc-hud-bl { left: 14px; bottom: 10px; }
+.jc-hud-br { right: 44px; bottom: 10px; }
+.jc-hud-bl em,
+.jc-hud-br em { color: #3f6957; font-size: 7px; }
 
-.focus-core .pcb-core-hub {
-  /* geometry deliberately unchanged */
+.jc-led {
+  align-self: flex-end;
+  margin-top: 5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 34%, #ddffee 0%, #58d79c 40%, #1d7c53 68%, #0a3a26 100%);
   box-shadow:
-    0 0 0 2px rgba(0, 6, 4, 0.86),
-    0 0 0 6px rgba(64, 121, 87, 0.08),
-    0 0 42px var(--hub-light),
-    inset 0 0 38px rgba(77, 161, 111, 0.045);
+    0 0 12px rgba(80, 216, 152, 0.75),
+    0 0 30px rgba(70, 200, 140, 0.35),
+    inset 0 0 6px rgba(255, 255, 255, 0.3);
+  transition: background 300ms ease, box-shadow 300ms ease;
 }
 
-.focus-core .pcb-core-footer {
-  font-size: 8.5px;
+.jc-expand {
+  position: absolute;
+  z-index: 20;
+  right: 12px;
+  bottom: 9px;
+  opacity: 0.5;
+  transition: opacity 180ms ease, color 180ms ease, border-color 180ms ease;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(120, 190, 155, 0.16);
+  border-radius: 4px;
+  background: rgba(3, 14, 9, 0.7);
+  color: #5f8d78;
+  cursor: pointer;
+  font-size: 10px;
 }
 
-/* --------------------------------------------------------------------------
-   Responsive protection for the normal dashboard tile.
-   -------------------------------------------------------------------------- */
-
-@media (max-width: 1280px) {
-  .pcb-link-light {
-    display: none;
-  }
-
-  .pcb-core-title {
-    font-size: clamp(12px, 10.5cqw, 52px);
-    letter-spacing: 0.19em;
-    text-indent: 0.19em;
-  }
-
-  .pcb-core-title.thinking-data {
-    font-size: clamp(7px, 4.9cqw, 32px);
-  }
-}
-
-@media (max-height: 760px) {
-  .pcb-core-footer {
-    min-height: 22px;
-  }
+.jc-expand:hover,
+.jc-expand:focus-visible {
+  opacity: 1;
+  color: #cdeadb;
+  border-color: rgba(140, 216, 178, 0.4);
 }
 
 /* --------------------------------------------------------------------------
-   Motion
+   States
+
+   Geometry never changes between states. Only light, packet behaviour and
+   accent hue do, which is what keeps the board feeling like one machine.
    -------------------------------------------------------------------------- */
 
-@keyframes pcb-grain-drift {
-  0%, 100% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(6px, -4px, 0); }
+.jc-stage.state-offline {
+  filter: saturate(0.2) brightness(0.62);
 }
 
-@keyframes pcb-idle-breathe {
-  0%, 100% {
-    --hub-light: rgba(91, 180, 130, 0.07);
-    border-color: rgba(100, 173, 129, 0.48);
-  }
-  50% {
-    --hub-light: rgba(101, 197, 141, 0.13);
-    border-color: rgba(108, 190, 141, 0.6);
-  }
+.jc-stage.state-offline .jc-glow-warm,
+.jc-stage.state-offline .jc-glow-cool { opacity: 0.12; }
+
+.jc-stage.state-idle { --halo: 0.72; }
+
+.jc-stage.state-listening {
+  --halo: 0.8;
 }
 
-@keyframes pcb-aura-idle {
-  0%, 100% { opacity: 0.42; filter: blur(25px); }
-  50% { opacity: 0.57; filter: blur(29px); }
+.jc-stage.state-listening .jc-glow-cool { opacity: calc(0.9 + var(--voice-level) * 0.6); }
+.jc-stage.state-listening .jc-plate-screen { border-color: rgba(96, 186, 200, 0.55); }
+
+.jc-stage.state-transcribing { --halo: 0.86; }
+
+.jc-stage.state-thinking { --halo: 1.05; }
+.jc-stage.state-thinking .jc-scan {
+  opacity: 1;
+  animation: jc-scan 2.4s linear infinite;
 }
 
-@keyframes pcb-pin-spark {
-  0%, 100% {
-    opacity: 0.34;
-    filter: brightness(0.8);
-  }
-  48% {
-    opacity: 1;
-    filter: brightness(1.8) drop-shadow(0 0 3px rgba(113, 255, 179, 0.72));
-  }
-  58% {
-    opacity: 0.5;
-    filter: brightness(1);
-  }
+.jc-stage.state-speaking { --halo: 1.25; }
+.jc-stage.state-speaking .jc-plate-frame {
+  box-shadow:
+    0 0 0 1px rgba(0, 6, 3, 0.6),
+    0 0 34px rgba(var(--jc-warm), calc(0.3 + var(--voice-level) * 0.4)),
+    0 0 90px rgba(var(--jc-warm), calc(0.16 + var(--voice-level) * 0.2));
 }
 
-@keyframes pcb-component-live {
-  0%, 100% {
-    opacity: 0.72;
-    filter: none;
-  }
-  50% {
-    opacity: 1;
-    filter: url(#pcb-hot-glow);
-  }
+.jc-stage.state-working { --halo: 1.12; }
+.jc-stage.state-working .jc-scan {
+  opacity: 0.8;
+  animation: jc-scan 1.6s linear infinite;
 }
 
-@keyframes pcb-speaking-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 2px rgba(0, 6, 4, 0.82),
-      0 0 0 5px rgba(64, 121, 87, 0.08),
-      0 0 calc(22px + (var(--voice-level, 0) * 24px)) rgba(83, 221, 148, calc(0.09 + (var(--voice-level, 0) * 0.1))),
-      inset 0 0 24px rgba(77, 187, 127, 0.05);
-    filter: brightness(1);
-  }
-  50% {
-    box-shadow:
-      0 0 0 2px rgba(0, 6, 4, 0.82),
-      0 0 0 5px rgba(64, 121, 87, 0.08),
-      0 0 calc(33px + (var(--voice-level, 0) * 38px)) rgba(86, 233, 155, calc(0.15 + (var(--voice-level, 0) * 0.16))),
-      inset 0 0 calc(26px + (var(--voice-level, 0) * 14px)) rgba(88, 213, 145, 0.08);
-    filter: brightness(calc(1.01 + (var(--voice-level, 0) * 0.08)));
-  }
+.jc-stage.state-waiting_permission {
+  --halo: 1;
+  --jc-warm: 236, 186, 92;
 }
 
-@keyframes pcb-thinking-hub {
-  0%, 100% {
-    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(64, 121, 87, 0.08), 0 0 28px rgba(77, 211, 139, 0.14), inset 0 0 28px rgba(77, 161, 111, 0.04);
-  }
-  50% {
-    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(64, 121, 87, 0.08), 0 0 45px rgba(84, 223, 148, 0.2), inset 0 0 32px rgba(83, 184, 127, 0.06);
-  }
+.jc-stage.state-waiting_permission .jc-led {
+  background: radial-gradient(circle at 40% 34%, #fff0cf 0%, #e7bd63 40%, #8a6520 68%, #3a2c0c 100%);
+  box-shadow: 0 0 12px rgba(231, 189, 99, 0.75), 0 0 30px rgba(220, 176, 84, 0.3);
 }
 
-@keyframes pcb-thinking-text {
-  0% { opacity: 0.76; transform: translateX(0); }
-  25% { opacity: 1; transform: translateX(0.5px); }
-  50% { opacity: 0.82; transform: translateX(-0.45px); }
-  75% { opacity: 1; transform: translateX(0.35px); }
-  100% { opacity: 0.86; transform: translateX(0); }
+.jc-stage.state-warning {
+  --halo: 1.05;
+  --jc-warm: 232, 122, 108;
 }
 
-@keyframes pcb-sheen-pass {
-  from { left: -45%; }
-  to { left: 112%; }
+.jc-stage.state-warning .jc-led {
+  background: radial-gradient(circle at 40% 34%, #ffd9d4 0%, #e0776a 40%, #7d2c22 68%, #35100c 100%);
+  box-shadow: 0 0 12px rgba(224, 119, 106, 0.8), 0 0 30px rgba(210, 100, 88, 0.35);
 }
 
-@keyframes pcb-working-pulse {
-  0%, 100% { filter: brightness(0.98); }
-  50% { filter: brightness(1.08); }
+.jc-stage.state-warning .jc-plate-screen { border-color: rgba(198, 104, 92, 0.55); }
+
+@keyframes jc-scan {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(100%); }
 }
 
-@keyframes pcb-permission-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(110, 83, 31, 0.06), 0 0 24px rgba(255, 185, 68, 0.1), inset 0 0 24px rgba(255, 187, 73, 0.035);
-  }
-  50% {
-    box-shadow: 0 0 0 2px rgba(0, 6, 4, 0.82), 0 0 0 5px rgba(110, 83, 31, 0.09), 0 0 39px rgba(255, 190, 77, 0.18), inset 0 0 28px rgba(255, 188, 70, 0.065);
-  }
-}
-
-@keyframes pcb-warning-pulse {
-  0%, 100% { filter: brightness(0.95); }
-  50% { filter: brightness(1.16); }
-}
-
-@keyframes pcb-amber-spark {
-  0%, 100% { opacity: 0.35; filter: brightness(0.85); }
-  50% { opacity: 1; filter: brightness(1.7) drop-shadow(0 0 3px rgba(255, 201, 101, 0.7)); }
-}
-
-@keyframes pcb-scan-down {
-  0% { top: 1%; opacity: 0; }
-  10% { opacity: 0.72; }
-  90% { opacity: 0.72; }
-  100% { top: 99%; opacity: 0; }
+@keyframes jc-flicker {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pcb-core-panel *,
-  .pcb-core-panel *::before,
-  .pcb-core-panel *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-  }
+  .jc-scan,
+  .jc-plate-text.is-data { animation: none !important; }
+  .jc-packets { display: none; }
 }
