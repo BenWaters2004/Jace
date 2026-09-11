@@ -1493,6 +1493,230 @@ def _unread_artifacts_named_in_draft(text: str, source_paths: set[str]) -> list[
     return candidates
 
 
+
+_GAP_CODE_REF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:]*$")
+
+_GAP_TERM_STOPWORDS = {
+    "additional", "actual", "available", "cannot", "code", "complete", "completed", "conclusion",
+    "current", "determine", "evidence", "existing", "file", "files", "implementation", "incomplete",
+    "inspect", "inspection", "issue", "missing", "need", "needed", "needs", "project", "relevant",
+    "required", "requires", "result", "results", "root", "source", "system", "task", "verify", "verified",
+    "without", "would", "could", "should", "logic", "mechanism",
+}
+
+
+def _missing_evidence_excerpt(text: str) -> str:
+    """Extract the part of a draft that explains what remains unresolved."""
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    lines = value.splitlines()
+    selected: list[str] = []
+    active = False
+    for line in lines:
+        folded = line.casefold()
+        if (
+            "missing evidence" in folded
+            or "unresolved" in folded
+            or "need to inspect" in folded
+            or "needs inspection" in folded
+            or "still need" in folded
+            or "cannot confirm" in folded
+            or "cannot verify" in folded
+            or "cannot determine" in folded
+            or "evidence is incomplete" in folded
+            or "evidence remains incomplete" in folded
+        ):
+            active = True
+        if active:
+            selected.append(line)
+            if len(selected) >= 28:
+                break
+    if selected:
+        return "\n".join(selected)[-6000:]
+    match = _MISSING_EVIDENCE_RE.search(value)
+    if not match:
+        return ""
+    start = max(0, match.start() - 500)
+    return value[start:start + 6000]
+
+
+def _gap_search_terms(
+    task: AgentTask,
+    draft: str,
+    evidence_records: list[dict[str, Any]],
+    *,
+    limit: int = 12,
+) -> list[str]:
+    """Build project-agnostic search terms for the unresolved evidence frontier."""
+    excerpt = _missing_evidence_excerpt(draft)
+    weighted: list[tuple[float, str]] = []
+    seen: set[str] = set()
+
+    def add(value: str, weight: float) -> None:
+        raw = str(value or "").strip("`'\".,;:()[]{} ")
+        if not raw or len(raw) < 3 or len(raw) > 96:
+            return
+        folded = raw.casefold()
+        if folded in seen or folded in _GAP_TERM_STOPWORDS:
+            return
+        if raw.isdigit():
+            return
+        seen.add(folded)
+        weighted.append((weight, raw))
+
+    for match in re.finditer(r"`([^`\n]{2,120})`", excerpt):
+        token = match.group(1).strip()
+        if _GAP_CODE_REF_RE.fullmatch(token) or _ARTIFACT_PATH_RE.search(token):
+            add(token, 10.0)
+        elif len(token.split()) <= 4:
+            add(token, 8.0)
+
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.:-]{2,95}", excerpt):
+        folded = token.casefold().strip("._:-")
+        if folded in _GAP_TERM_STOPWORDS or folded in _BOOTSTRAP_STOPWORDS:
+            continue
+        weight = 7.0 if any(ch in token for ch in "_.:") or re.search(r"[A-Z].*[A-Z]", token) else 4.5
+        add(token, weight)
+
+    words = [
+        word for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", excerpt)
+        if word.casefold() not in _GAP_TERM_STOPWORDS
+        and word.casefold() not in _BOOTSTRAP_STOPWORDS
+    ]
+    for width, weight in ((3, 5.5), (2, 5.0)):
+        for index in range(0, max(0, len(words) - width + 1)):
+            phrase = " ".join(words[index:index + width])
+            if len(phrase) <= 72:
+                add(phrase, weight)
+
+    for symbol in _structural_expansion_terms(evidence_records, limit=10):
+        add(symbol, 8.5)
+
+    for term in _source_bootstrap_terms(task, limit=10):
+        add(term, 2.0)
+
+    weighted.sort(key=lambda item: (-item[0], item[1].casefold()))
+    return [value for _, value in weighted[:limit]]
+
+
+async def _bootstrap_gap_followup_evidence(
+    *,
+    task_id: str,
+    task: AgentTask,
+    agent_name: str,
+    workspace_catalog: list[dict[str, Any]],
+    available_tools: set[str],
+    used_tools: list[str],
+    draft: str,
+    evidence_records: list[dict[str, Any]],
+    already_read: set[str],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Deterministically continue an investigation from its unresolved frontier."""
+    if "search_workspace_files" not in available_tools or "read_workspace_file" not in available_tools:
+        return [], set()
+    targets = _select_bootstrap_workspaces(task, workspace_catalog)
+    if not targets:
+        return [], set()
+    workspace_id = str(targets[0].get("id") or "")
+    if not workspace_id:
+        return [], set()
+
+    terms = _gap_search_terms(task, draft, evidence_records, limit=12)
+    if not terms:
+        return [], set()
+
+    search_records: list[dict[str, Any]] = []
+    for index, term in enumerate(terms[:8]):
+        _, execution = await _record_bootstrap_tool_execution(
+            task_id=task_id,
+            task=task,
+            agent_name=agent_name,
+            tool_name="search_workspace_files",
+            arguments={
+                "workspace_id": workspace_id,
+                "query": term,
+                "path": ".",
+                "include_content": True,
+                "max_results": 16,
+            },
+            used_tools=used_tools,
+            progress=min(0.82 + index * 0.006, 0.875),
+        )
+        if execution.get("success") is True:
+            search_records.append(execution)
+
+    candidates = _rank_bootstrap_candidate_records(search_records, task=task)
+    if not candidates:
+        return [], set()
+
+    records: list[dict[str, Any]] = []
+    new_paths: set[str] = set()
+    for candidate in candidates:
+        if len(records) >= 5:
+            break
+        candidate_path = str(candidate.get("path") or "").strip()
+        if not candidate_path:
+            continue
+        normalized = candidate_path.replace("\\", "/").casefold()
+        if normalized in already_read or normalized in new_paths:
+            continue
+
+        start_line, max_lines = _anchored_read_window(candidate.get("lines") or [], max_lines=420)
+        discovery = {
+            "queries": candidate.get("queries") or [],
+            "lines": candidate.get("lines") or [],
+            "snippets": candidate.get("snippets") or [],
+            "candidate_score": candidate.get("score") or 0.0,
+            "anchored_start_line": start_line,
+            "structural_followup": True,
+            "gap_followup": True,
+        }
+        _, execution = await _record_bootstrap_tool_execution(
+            task_id=task_id,
+            task=task,
+            agent_name=agent_name,
+            tool_name="read_workspace_file",
+            arguments={
+                "workspace_id": workspace_id,
+                "path": candidate_path,
+                "start_line": start_line,
+                "max_lines": max_lines,
+            },
+            used_tools=used_tools,
+            progress=min(0.88 + len(records) * 0.008, 0.92),
+            discovery_evidence=discovery,
+        )
+        if execution.get("success") is not True:
+            continue
+        evidence = execution.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        source_path = str(evidence.get("path") or "").strip()
+        try:
+            returned_lines = int(evidence.get("returned_lines") or 0)
+        except (TypeError, ValueError):
+            returned_lines = 0
+        if not source_path or returned_lines <= 0 or not str(evidence.get("text") or "").strip():
+            continue
+
+        relevant, relevance_score, relevance_reason = _source_read_relevance(task, execution)
+        execution["source_relevance"] = {
+            "relevant": bool(relevant),
+            "score": relevance_score,
+            "reason": relevance_reason,
+        }
+        if not relevant:
+            continue
+        key = source_path.replace("\\", "/").casefold()
+        if key in already_read or key in new_paths:
+            continue
+        new_paths.add(key)
+        records.append(execution)
+
+    return records, new_paths
+
+
 def _source_evidence_dossier(records: list[dict[str, Any]]) -> str:
     chunks: list[str] = []
     seen_paths: set[str] = set()
@@ -1589,6 +1813,130 @@ async def _finalize_source_backed_handoff(
         f"Successfully read: {', '.join(dict.fromkeys(paths)) or 'unknown source path'}. "
         "The Director should pass the captured source excerpts to Analyst rather than inventing a conclusion."
     )
+
+
+async def _close_source_evidence_frontier(
+    *,
+    task_id: str,
+    cancel_event: asyncio.Event,
+    task: AgentTask,
+    agent_name: str,
+    model: str,
+    reasoning_mode: str,
+    temperature: float,
+    system_prompt: str,
+    workspace_catalog: list[dict[str, Any]],
+    available_tools: set[str],
+    used_tools: list[str],
+    final_text: str,
+    evidence_records: list[dict[str, Any]],
+    successful_source_paths: set[str],
+    max_rounds: int = 4,
+) -> tuple[str, list[dict[str, Any]], set[str]]:
+    """Close an unresolved evidence frontier after the model tool budget is exhausted.
+
+    The normal worker loop is intentionally bounded. A source-backed finalisation
+    pass can, however, discover the most useful missing artifact only *after* that
+    loop has consumed its model/tool steps. Deterministic workspace search/read
+    operations are not model tool-choice turns, so use a second bounded closure
+    stage to resolve exact named artifacts or search the worker's missing-evidence
+    description before the task is allowed to finish.
+
+    This keeps the investigation project-agnostic: every follow-up is derived from
+    the worker's own evidence-backed gap statement and symbols already captured.
+    """
+    text = str(final_text or "").strip()
+    if not text or not evidence_records or not _draft_declares_missing_evidence(text):
+        return text, evidence_records, successful_source_paths
+
+    for round_index in range(max(0, int(max_rounds))):
+        if cancel_event.is_set():
+            raise AgentTaskCancelled()
+
+        before = set(successful_source_paths)
+        unread = _unread_artifacts_named_in_draft(text, successful_source_paths)
+        added_records: list[dict[str, Any]] = []
+        added_paths: set[str] = set()
+        route = ""
+
+        if unread:
+            named_records, named_paths = await _bootstrap_named_followup_evidence(
+                task_id=task_id,
+                task=task,
+                agent_name=agent_name,
+                workspace_catalog=workspace_catalog,
+                available_tools=available_tools,
+                used_tools=used_tools,
+                artifacts=unread,
+                already_read=successful_source_paths,
+            )
+            if named_records:
+                added_records.extend(named_records)
+                added_paths.update(named_paths)
+                route = "named artifact"
+
+        if not added_records:
+            gap_records, gap_paths = await _bootstrap_gap_followup_evidence(
+                task_id=task_id,
+                task=task,
+                agent_name=agent_name,
+                workspace_catalog=workspace_catalog,
+                available_tools=available_tools,
+                used_tools=used_tools,
+                draft=text,
+                evidence_records=evidence_records,
+                already_read=successful_source_paths,
+            )
+            if gap_records:
+                added_records.extend(gap_records)
+                added_paths.update(gap_paths)
+                route = "gap search"
+
+        if not added_records:
+            logger.info(
+                "Director-managed %s task %s post-budget evidence frontier remained unresolved after deterministic closure round %d/%d; no new approved-workspace evidence was found.",
+                agent_name,
+                task_id,
+                round_index + 1,
+                max_rounds,
+            )
+            break
+
+        evidence_records.extend(added_records)
+        successful_source_paths.update(added_paths)
+        actual_new = sorted(successful_source_paths - before)
+        logger.info(
+            "Director-managed %s task %s post-budget evidence-frontier closure round %d/%d followed %s evidence into %d additional relevant source file(s): %s",
+            agent_name,
+            task_id,
+            round_index + 1,
+            max_rounds,
+            route or "deterministic",
+            len(actual_new),
+            ", ".join(actual_new) or "[none]",
+        )
+
+        text = await _finalize_source_backed_handoff(
+            task_id=task_id,
+            cancel_event=cancel_event,
+            task=task,
+            model=model,
+            reasoning_mode=reasoning_mode,
+            temperature=temperature,
+            system_prompt=system_prompt,
+            evidence_records=evidence_records,
+            draft=text,
+        )
+        if not _draft_declares_missing_evidence(text):
+            logger.info(
+                "Director-managed %s task %s closed the post-budget evidence frontier after %d round(s).",
+                agent_name,
+                task_id,
+                round_index + 1,
+            )
+            break
+
+    return text, evidence_records, successful_source_paths
 
 
 def _parse_tool_json(content: str) -> dict[str, Any]:
@@ -2166,7 +2514,7 @@ async def execute_agent_task(
     source_finalized = False
     if requires_local_source:
         logger.info(
-            "Director-managed %s task %s requires %d DISTINCT relevant source read(s) using project-discovered paths.",
+            "Director-managed %s task %s requires %d DISTINCT relevant source read(s) as a minimum investigation seed using project-discovered paths.",
             definition.name,
             task_id,
             required_source_reads,
@@ -2198,7 +2546,7 @@ async def execute_agent_task(
                 ),
             })
             logger.info(
-                "Director-managed %s task %s deterministically bootstrapped %d distinct source read(s): %s",
+                "Director-managed %s task %s deterministically bootstrapped %d relevant source read(s) as the initial evidence seed: %s",
                 definition.name,
                 task_id,
                 successful_source_reads,
@@ -2358,6 +2706,45 @@ async def execute_agent_task(
                     )
                     continue
 
+                # If the worker described a missing layer/concept rather than an exact
+                # file path, continue deterministically from that evidence frontier.
+                # Search terms come from the worker's own missing-evidence statement
+                # plus symbols/imports discovered in source already captured.
+                gap_records, gap_paths = await _bootstrap_gap_followup_evidence(
+                    task_id=task_id,
+                    task=task,
+                    agent_name=definition.name,
+                    workspace_catalog=workspace_catalog,
+                    available_tools=set(tool_names),
+                    used_tools=used_tools,
+                    draft=candidate_text,
+                    evidence_records=source_evidence_records,
+                    already_read=successful_source_paths,
+                )
+                if gap_records:
+                    source_evidence_records.extend(gap_records)
+                    successful_source_paths.update(gap_paths)
+                    successful_source_reads = len(successful_source_paths)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "DIRECTOR EVIDENCE-FRONTIER FOLLOW-UP\n"
+                            "Your source-backed draft identified an unresolved implementation layer. "
+                            "Jace searched the approved workspace using that missing-evidence description and concrete symbols from source already read, then captured additional anchored evidence. "
+                            "Reassess the objective using the expanded evidence graph. Do not stop merely because the original minimum source-count threshold was already met.\n\n"
+                            f"{_source_evidence_dossier(gap_records)}\n"
+                            "END DIRECTOR EVIDENCE-FRONTIER FOLLOW-UP"
+                        ),
+                    })
+                    logger.info(
+                        "Director-managed %s task %s expanded the unresolved evidence frontier into %d additional relevant source file(s): %s",
+                        definition.name,
+                        task_id,
+                        len(gap_paths),
+                        ", ".join(sorted(gap_paths)),
+                    )
+                    continue
+
                 targeted = (
                     " The source-backed draft named these unread candidate artifacts: " + ", ".join(unread) + "."
                     if unread
@@ -2444,6 +2831,21 @@ async def execute_agent_task(
                     if returned_lines > 0 and str(evidence.get("text") or "").strip():
                         source_path = str(evidence.get("path") or "").strip()
                         normalized_path = source_path.replace("\\", "/").casefold()
+                        # A model-triggered reread of a path that Jace already counted
+                        # should retain the audited discovery provenance from the
+                        # original anchored read. Otherwise the same file can appear
+                        # to become "irrelevant" merely because the model omitted the
+                        # preceding search call on its reread.
+                        if normalized_path in successful_source_paths and not isinstance(tool_execution.get("discovery_evidence"), dict):
+                            for prior_record in source_evidence_records:
+                                prior_evidence = prior_record.get("evidence")
+                                if not isinstance(prior_evidence, dict):
+                                    continue
+                                prior_path = str(prior_evidence.get("path") or "").replace("\\", "/").casefold()
+                                prior_discovery = prior_record.get("discovery_evidence")
+                                if prior_path == normalized_path and isinstance(prior_discovery, dict):
+                                    tool_execution["discovery_evidence"] = dict(prior_discovery)
+                                    break
                         relevant, relevance_score, relevance_reason = _source_read_relevance(task, tool_execution)
                         if not relevant:
                             logger.info(
@@ -2606,6 +3008,36 @@ async def execute_agent_task(
             evidence_records=source_evidence_records,
             draft=final_text,
         )
+
+    # A source-backed finalisation performed after the bounded model/tool loop can
+    # be the first point at which the worker identifies the *right* missing file
+    # or implementation layer. Do not lose that discovery simply because the
+    # model tool-step budget is already exhausted. Close the remaining frontier
+    # with bounded deterministic approved-workspace search/read calls, then
+    # regenerate the source-backed handoff over the expanded evidence graph.
+    if (
+        requires_local_source
+        and source_evidence_records
+        and _draft_declares_missing_evidence(final_text)
+    ):
+        final_text, source_evidence_records, successful_source_paths = await _close_source_evidence_frontier(
+            task_id=task_id,
+            cancel_event=cancel_event,
+            task=task,
+            agent_name=definition.name,
+            model=model,
+            reasoning_mode=reasoning_mode,
+            temperature=temperature,
+            system_prompt=worker_system_prompt,
+            workspace_catalog=workspace_catalog,
+            available_tools=set(tool_names),
+            used_tools=used_tools,
+            final_text=final_text,
+            evidence_records=source_evidence_records,
+            successful_source_paths=successful_source_paths,
+            max_rounds=4,
+        )
+        successful_source_reads = len(successful_source_paths)
 
     if not final_text:
         final_text = "The background agent completed without a textual handoff."

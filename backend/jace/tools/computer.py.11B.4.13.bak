@@ -26,75 +26,6 @@ from jace.tools.registry import registry
 
 _TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252")
 
-# 11B.4.13 workspace-search hygiene
-#
-# Root-level workspace searches should spend their bounded scan budget on the
-# user's project rather than dependency caches, generated build outputs, or
-# obvious binary assets. These names are ecosystem conventions rather than
-# assumptions about any one project layout. If a user explicitly searches with
-# path set to one of these directories, files at that selected root are still
-# searchable; the pruning only affects recursive child traversal.
-_SEARCH_PRUNED_DIR_NAMES = {
-    "node_modules",
-    "bower_components",
-    "jspm_packages",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    ".tox",
-    ".nox",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".cache",
-    ".next",
-    ".nuxt",
-    ".turbo",
-    "dist",
-    "build",
-    "coverage",
-    "target",
-    "out",
-    "pods",
-    "deriveddata",
-}
-
-_SEARCH_SKIPPED_FILE_SUFFIXES = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff",
-    ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac",
-    ".mp4", ".mov", ".avi", ".mkv", ".webm",
-    ".woff", ".woff2", ".ttf", ".otf", ".eot",
-    ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz",
-    ".pdf", ".exe", ".dll", ".so", ".dylib", ".pdb",
-    ".db", ".sqlite", ".sqlite3", ".onnx", ".bin", ".class", ".jar",
-}
-
-
-def _search_should_prune_dir(name: str) -> bool:
-    value = str(name or "").strip()
-    if not value:
-        return True
-    return value.startswith(".") or value.casefold() in _SEARCH_PRUNED_DIR_NAMES
-
-
-def _search_should_skip_file(name: str) -> bool:
-    value = str(name or "").strip()
-    if not value:
-        return True
-    return Path(value).suffix.casefold() in _SEARCH_SKIPPED_FILE_SUFFIXES
-
-
-def _prune_search_directories(dir_names: list[str]) -> int:
-    """Prune noisy recursive trees in-place and return how many were removed."""
-    before = len(dir_names)
-    dir_names[:] = sorted(
-        (name for name in dir_names if not _search_should_prune_dir(name)),
-        key=str.casefold,
-    )
-    return before - len(dir_names)
-
-
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -338,22 +269,12 @@ async def search_workspace_files_tool(data: BaseModel, context: ToolContext) -> 
     query = payload.query.casefold()
     results = []
     scanned = 0
-    files_skipped = 0
-    directories_pruned = 0
 
     for current_root, dir_names, file_names in os.walk(base):
-        # Keep bounded searches focused on project-owned text/source instead of
-        # exhausting the scan limit inside package managers, virtualenvs,
-        # generated builds, caches, or similar recursive trees.
-        directories_pruned += _prune_search_directories(dir_names)
-
-        for name in sorted(file_names, key=str.casefold):
-            if _search_should_skip_file(name):
-                files_skipped += 1
-                continue
+        dir_names[:] = [name for name in dir_names if not name.startswith(".")]
+        for name in file_names:
             if scanned >= settings.computer_search_max_files:
                 break
-
             scanned += 1
             candidate = Path(current_root) / name
             try:
@@ -393,11 +314,9 @@ async def search_workspace_files_tool(data: BaseModel, context: ToolContext) -> 
                 )
                 if len(results) >= min(payload.max_results, settings.computer_search_max_results):
                     break
-
         if scanned >= settings.computer_search_max_files or len(results) >= payload.max_results:
             break
 
-    scan_limit_reached = scanned >= settings.computer_search_max_files
     return ToolExecutionResult(
         content=json.dumps(
             {
@@ -405,18 +324,13 @@ async def search_workspace_files_tool(data: BaseModel, context: ToolContext) -> 
                 "query": payload.query,
                 "results": results,
                 "files_scanned": scanned,
-                "files_skipped": files_skipped,
-                "directories_pruned": directories_pruned,
-                "scan_limit_reached": scan_limit_reached,
+                "scan_limit_reached": scanned >= settings.computer_search_max_files,
             },
             ensure_ascii=False,
         ),
-        display=(
-            f"Found {len(results)} matching file result{'s' if len(results) != 1 else ''} in {workspace.label}. "
-            f"Scanned {scanned} searchable file{'s' if scanned != 1 else ''}; "
-            f"pruned {directories_pruned} generated/dependency director{'ies' if directories_pruned != 1 else 'y'}."
-        ),
+        display=f"Found {len(results)} matching file result{'s' if len(results) != 1 else ''} in {workspace.label}.",
     )
+
 
 class CreateWorkspaceDirectoryInput(BaseModel):
     workspace_id: str = Field(min_length=36, max_length=36)

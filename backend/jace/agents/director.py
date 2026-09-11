@@ -429,8 +429,10 @@ def _plan_from_agents(objective: str, agents: list[AgentKind], rationale: str = 
             title="Review the evidence and recommend the best outcome",
             instruction=(
                 "Review only the supplied specialist evidence. Separate verified facts, implementation status, hypotheses, "
-                "and recommendations. Never promote an upstream unsupported claim to a confirmed fact. If evidence is "
-                "incomplete, explain the missing evidence precisely rather than inventing a project structure."
+                "and recommendations. Never promote an upstream unsupported claim to a confirmed fact. If an upstream "
+                "specialist explicitly says evidence is incomplete, you MUST preserve that uncertainty and must not use "
+                "phrases such as 'root cause identified' or present a concrete fix as confirmed. If evidence is incomplete, "
+                "explain the missing evidence precisely rather than inventing a project structure."
             ),
             depends_on=deps,
             reasoning_mode="balanced",
@@ -627,6 +629,50 @@ _SOURCE_FILE_RE = re.compile(
 )
 _BACKTICK_RE = re.compile(r"`([^`\n]{2,160})`")
 _SIMPLE_CODE_REF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:]*$")
+
+_UPSTREAM_EVIDENCE_GAP_RE = re.compile(
+    r"\b(?:missing evidence|unresolved|evidence (?:is|remains) incomplete|"
+    r"cannot (?:confirm|verify|determine|conclude)|need(?:s|ed)? to inspect|"
+    r"still need(?:s)?|additional (?:file|artifact|component|evidence))\b",
+    re.IGNORECASE,
+)
+
+
+def _dependency_has_explicit_evidence_gap(
+    step: DirectorStep,
+    outcomes: dict[str, StepOutcome],
+) -> bool:
+    for dependency in step.depends_on:
+        outcome = outcomes.get(dependency)
+        if outcome is None or outcome.verified:
+            continue
+        if _UPSTREAM_EVIDENCE_GAP_RE.search(outcome.result or ""):
+            return True
+    return False
+
+
+def _sanitize_unverified_analyst_language(text: str) -> str:
+    """Keep an unverified Analyst review from sounding like a confirmed diagnosis."""
+    value = str(text or "").strip()
+    if not value:
+        return value
+    replacements = (
+        (r"(?im)^#{1,6}\s*Investigation Complete:\s*Root Cause Identified\s*$", "### Unverified Hypothesis Review"),
+        (r"(?im)^#{1,6}\s*Root Cause Identified\s*$", "### Unverified Hypothesis Review"),
+        (r"(?im)^\*\*Root Cause:\*\*", "**Hypothesis:**"),
+        (r"(?im)^Root Cause:\s*", "Hypothesis: "),
+    )
+    for pattern, replacement in replacements:
+        value = re.sub(pattern, replacement, value)
+    if not value.casefold().startswith("unverified review"):
+        value = (
+            "UNVERIFIED REVIEW — upstream project evidence is incomplete, so the following "
+            "analysis must be treated as hypotheses/recommendations rather than a confirmed root cause.\n\n"
+            + value
+        )
+    return value
+
+
 _ALLOWED_GENERIC_CODE_REFS = {
     "running", "completed", "failed", "cancelled", "queued", "thinking",
     "using_tool", "waiting_permission", "json", "http", "https", "system",
@@ -833,6 +879,8 @@ def _verification_for_step(
     if step.agent_id == "code":
         if explicitly_unverified:
             return False, "Worker explicitly reported that verification was unavailable.", evidence_context
+        if _UPSTREAM_EVIDENCE_GAP_RE.search(result or ""):
+            return False, "Worker explicitly reported that material source evidence remained unresolved.", evidence_context
         if _is_creation_step(step):
             successful_writes = [
                 record for record in tool_evidence
@@ -928,6 +976,14 @@ def _verification_for_step(
         return False, "No successful web evidence tool completed.", evidence_context
 
     if step.agent_id == "analyst":
+        if _dependency_has_explicit_evidence_gap(step, outcomes):
+            read_paths, dependency_corpus = _dependency_source_context(step, outcomes)
+            return (
+                False,
+                "Upstream source investigation explicitly remained evidence-incomplete; Analyst cannot promote that gap to a confirmed diagnosis without new primary evidence.",
+                dependency_corpus or evidence_context,
+            )
+
         # Analyst is a reviewer, not a workspace reader.  If a Code/File worker
         # captured successful raw source evidence but failed to produce a usable
         # textual handoff, Analyst may still verify its own conclusions directly
@@ -1090,12 +1146,16 @@ async def _run_step(
         result=row.result or "",
         tool_evidence=tool_evidence,
     )
+    outcome_result = row.result or ""
+    if step.agent_id == "analyst" and not verified:
+        outcome_result = _sanitize_unverified_analyst_language(outcome_result)
+
     outcome = StepOutcome(
         step_id=step.id,
         agent_id=step.agent_id,
         title=step.title,
         status=row.status,
-        result=row.result or "",
+        result=outcome_result,
         error=row.error or "",
         task_id=row.id,
         retried=retried,
