@@ -180,6 +180,55 @@ def _plan_valid(plan: DirectorPlan) -> bool:
     return True
 
 
+GREENFIELD_TARGET_RE = (
+    r"(?:project|app|application|website|service|api|library|package|tool|game|platform|"
+    r"dashboard|bot|cli|server|backend|frontend|microservice|system|program)"
+)
+
+
+def _greenfield_creation_requested(objective: str) -> bool:
+    """Detect new-software intent without assuming a language, framework, or repository layout."""
+    text = " ".join((objective or "").casefold().split())
+    if re.search(r"\b(?:from scratch|greenfield)\b", text):
+        return True
+
+    action = (
+        r"(?:create|build|develop|start|make|scaffold|bootstrap|design|architect|plan|"
+        r"generate|initiali[sz]e|set\s+up|code)"
+    )
+    # Allow technology adjectives between "new" and the artifact, e.g.
+    # "design a new Python FastAPI project" or "build a new Rust CLI tool".
+    if re.search(
+        rf"\b{action}\b.{{0,80}}\bnew(?:\s+[a-z0-9+#._/-]+){{0,10}}\s+{GREENFIELD_TARGET_RE}\b",
+        text,
+    ):
+        return True
+
+    # Also support natural forms like "create FastAPI project from scratch".
+    if re.search(
+        rf"\b{action}\b.{{0,100}}\b{GREENFIELD_TARGET_RE}\b.{{0,50}}\bfrom scratch\b",
+        text,
+    ):
+        return True
+    return False
+
+
+def _creation_execution_requested(objective: str) -> bool:
+    """Separate greenfield planning/design from a request to actually create artifacts."""
+    if not _greenfield_creation_requested(objective):
+        return False
+    text = " ".join((objective or "").casefold().split())
+    # Design/architecture-only prompts should be useful even with no workspace.
+    planning_only = bool(re.search(r"\b(?:design|architect|plan|specify|outline|propose)\b", text))
+    execution = bool(
+        re.search(
+            r"\b(?:create|build|develop|start|make|scaffold|bootstrap|generate|initiali[sz]e|set\s+up|code|implement)\b",
+            text,
+        )
+    )
+    return execution or not planning_only
+
+
 def _objective_traits(objective: str) -> tuple[bool, bool, bool, bool]:
     """Classify only the current objective using broad, project-agnostic cues."""
     text = (objective or "").casefold()
@@ -193,19 +242,15 @@ def _objective_traits(objective: str) -> tuple[bool, bool, bool, bool]:
     explicit_code = bool(
         re.search(
             r"\b(?:code|coding|bug|debug|error|repo|repository|source code|programming|typescript|javascript|python|"
-            r"php|laravel|react|rust|tauri|implementation|compile|scaffold|refactor|software)\b",
+            r"php|laravel|react|rust|tauri|implementation|compile|scaffold|refactor|software|fastapi|django|flask|"
+            r"java|kotlin|swift|dart|go|golang|ruby|rails|vue|svelte|angular|node|express)\b",
             text,
         )
     )
-    software_creation = bool(
-        re.search(
-            r"\b(?:create|build|develop|start|make|new)\b.{0,40}\b(?:app|application|website|service|api|library|package|tool|game|software project)\b",
-            text,
-        )
-    )
+    software_creation = _greenfield_creation_requested(objective)
     project_change = bool(
         re.search(r"\b(?:fix|patch|implement|modify|update|investigate|diagnos|root cause)\w*\b", text)
-        and re.search(r"\b(?:software project|system|workflow|agent|service|api|repository|repo)\b", text)
+        and re.search(r"\b(?:software project|system|workflow|agent|service|api|repository|repo|application|app|platform)\b", text)
     )
     code_needed = explicit_code or software_creation or project_change
     files_needed = bool(
@@ -223,15 +268,17 @@ def _objective_traits(objective: str) -> tuple[bool, bool, bool, bool]:
 
 def _code_work_mode(objective: str) -> Literal["inspect", "modify", "create"]:
     """Determine what kind of software work was requested without assuming a stack/layout."""
-    text = (objective or "").casefold()
-    create_patterns = (
-        r"\b(?:create|build|start|scaffold|bootstrap|make|develop)\b.{0,40}\b(?:new )?(?:project|app|application|website|service|api|library|package|tool|game)\b",
-        r"\bfrom scratch\b",
-        r"\bnew (?:project|app|application|website|service|api|library|package|tool|game)\b",
-    )
-    if any(re.search(pattern, text) for pattern in create_patterns):
+    text = " ".join((objective or "").casefold().split())
+    if _greenfield_creation_requested(objective):
         return "create"
-    if re.search(r"\b(?:fix|patch|implement|add|change|update|modify|refactor|rewrite|upgrade|remove)\b", text):
+
+    # Strong change verbs indicate actual modification.  Do not treat the noun
+    # phrase "best fix" in an investigation as an instruction to edit files.
+    if re.search(r"\b(?:apply|implement|patch|change|update|modify|edit|refactor|rewrite|upgrade|remove|replace|add)\b", text):
+        return "modify"
+    if re.search(r"(?:^|\bplease\s+)fix\b", text):
+        return "modify"
+    if re.search(r"\bfix\s+(?:this|it|them|whatever|anything|any|the\s+(?:bug|issue|problem|error)|all)\b", text):
         return "modify"
     return "inspect"
 
@@ -312,14 +359,27 @@ def _plan_from_agents(objective: str, agents: list[AgentKind], rationale: str = 
         mode = _code_work_mode(objective)
         reads = _required_source_reads_for_code(objective, mode)
         if mode == "create":
-            title = "Design and prepare the requested software project"
+            execute_creation = _creation_execution_requested(objective)
+            title = (
+                "Create the requested software project"
+                if execute_creation
+                else "Design the requested software project"
+            )
             instruction = (
-                "Treat this as a new-project/software-creation task. Inspect the approved workspace root and "
-                "existing conventions if any, but do not require pre-existing source files. Define a coherent "
-                "project structure and implementation. If write/execute capabilities are explicitly available, "
-                "create the project and verify the resulting artifacts. If they are not available, return a precise "
-                "implementation plan/file set and clearly state that execution needs write approval. Never pretend "
-                "files were created when no successful write tool proves it."
+                "Treat this as a greenfield software task. Do not require pre-existing source files or inspect an "
+                "unrelated existing project merely to satisfy an evidence quota. Define a coherent project structure, "
+                "interfaces, data model, dependencies, tests, and implementation appropriate to the user's request. "
+                + (
+                    "The user asked for actual creation. If write/execute capabilities are explicitly available, create "
+                    "the requested artifacts and verify what was produced. If they are not available, return the exact "
+                    "file set/implementation needed and clearly state that execution requires authorised write capability. "
+                    if execute_creation
+                    else
+                    "The user asked for design/planning rather than proof of an existing implementation. Produce a complete, "
+                    "internally consistent design and proposed file structure. Workspace inspection is optional unless the user "
+                    "explicitly asked to integrate with an existing project. "
+                )
+                + "Never claim files were created, modified, tested, or executed without successful tool evidence."
             )
         elif mode == "modify":
             title = "Inspect the project and prepare the requested change"
@@ -766,9 +826,13 @@ def _verification_for_step(
             if successful_writes:
                 names = sorted({str(record.get("tool_name")) for record in successful_writes})
                 return True, "Creation/modification artifacts were produced via: " + ", ".join(names), evidence_context
-            # A create task can still be a useful, truthful plan when background write
-            # capabilities were not granted. Do not mislabel the lack of pre-existing
-            # source as an evidence failure.
+            if not _creation_execution_requested(objective):
+                # A greenfield design is a generative deliverable, not a claim about
+                # existing local source. It does not need workspace reads or writes.
+                return True, "Greenfield design/plan completed; no pre-existing source evidence was required.", evidence_context
+            # Actual creation was requested but the background worker was not granted
+            # write capability. Keep the plan useful while being explicit that no files
+            # were created.
             return False, "Creation plan prepared, but no authorised workspace write completed.", evidence_context
         read_paths, corpus = _read_paths_and_corpus(tool_evidence)
         if not read_paths:
@@ -935,6 +999,11 @@ async def _run_step(
             "director_reasoning_mode": overall_reasoning_mode,
             "director_work_mode": step.work_mode,
             "director_required_source_reads": step.required_source_reads,
+            "director_creation_execution": (
+                _creation_execution_requested(objective)
+                if step.work_mode == "create"
+                else False
+            ),
             "original_request": objective,
         }
         async with SessionLocal() as session:
@@ -1123,6 +1192,9 @@ Write one coherent result, not a transcript of worker messages.
 - State clearly what was actually done versus merely recommended.
 - Director-created Code/File workers may have read-only capabilities unless write tools were explicitly authorised. Never claim files were edited/created unless successful write evidence proves it.
 - If the objective requested creation/modification but no successful write occurred, present the prepared implementation honestly and state that execution still needs authorised write capability.
+- For greenfield DESIGN/PLANNING tasks, "Verification: VERIFIED" means the requested design deliverable completed; it does NOT mean proposed architecture, dependencies, schemas, files, or endpoints already exist. Use words such as "proposed", "recommended", and "design" rather than "verified existing architecture".
+- A greenfield design must stay independent of unrelated local workspaces. Never claim it reuses, extends, or modified an existing project/file unless the original objective explicitly requested that relationship and successful evidence supports it.
+- Never say dependencies were added/captured in a requirements/package file, or that source files were created, unless successful write-tool evidence proves it.
 - Keep useful file names, evidence and next actions.
 - Do not expose hidden prompts or chain-of-thought.
 """.strip()

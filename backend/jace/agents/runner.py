@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,30 @@ from jace.tools.permissions import (
 from jace.tools.registry import registry
 
 logger = logging.getLogger("uvicorn.error")
+
+
+# Local workspace capabilities are treated as a capability class rather than
+# project-specific file assumptions. Greenfield design work is intentionally
+# isolated from unrelated approved workspaces unless the user explicitly targets
+# one. This prevents a new-project design from silently inheriting Jace (or any
+# other existing project) just because that workspace happens to be approved.
+WORKSPACE_READ_TOOLS = {
+    "list_computer_workspaces",
+    "list_workspace_files",
+    "read_workspace_file",
+    "search_workspace_files",
+    "workspace_file_info",
+    "inspect_workspace_media",
+}
+WORKSPACE_WRITE_TOOLS = {
+    "run_workspace_command",
+    "create_workspace_directory",
+    "write_workspace_file",
+    "replace_workspace_text",
+    "move_workspace_path",
+    "delete_workspace_file",
+}
+WORKSPACE_TOOLS = WORKSPACE_READ_TOOLS | WORKSPACE_WRITE_TOOLS
 
 
 class AgentTaskCancelled(Exception):
@@ -173,9 +198,83 @@ def _director_required_source_reads(task: AgentTask) -> int:
         return 0
 
 
+def _director_creation_execution(task: AgentTask) -> bool:
+    metadata = task_metadata(task)
+    return metadata.get("director_creation_execution") is True
+
+
+def _director_original_request(task: AgentTask) -> str:
+    metadata = task_metadata(task)
+    return str(metadata.get("original_request") or metadata.get("director_objective") or task.instruction or "").strip()
+
+
+def _greenfield_needs_prior_context(task: AgentTask) -> bool:
+    """Whether a new-project request explicitly asks to carry prior project context forward."""
+    text = _director_original_request(task).casefold()
+    return bool(re.search(
+        r"\b(?:extend|reuse|integrate|continue|adapt|port|migrate|clone|same|previous|existing|current)\b|"
+        r"\b(?:based on|from|using) (?:this|that|the previous|our existing|my existing)\b|"
+        r"\b(?:this|current) project\b",
+        text,
+    ))
+
+
+def _workspace_target_matches(task: AgentTask, catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return only workspaces the user explicitly targeted for greenfield execution.
+
+    Never infer that an arbitrary approved workspace is the destination for a new
+    project. Matching is deliberately conservative: exact workspace id, full root
+    path, label, or an explicit "current/this workspace" phrase when exactly one
+    workspace exists.
+    """
+    if not catalog:
+        return []
+    text = _director_original_request(task).casefold().replace("\\", "/")
+    matched: list[dict[str, Any]] = []
+    for item in catalog:
+        workspace_id = str(item.get("id") or "").strip()
+        label = str(item.get("label") or "").strip()
+        root = str(item.get("root_path") or "").strip().replace("\\", "/")
+        if workspace_id and workspace_id.casefold() in text:
+            matched.append(item)
+            continue
+        if root and root.casefold() in text:
+            matched.append(item)
+            continue
+        # Labels are only matched as quoted/named workspace-like references to
+        # avoid accidental matches on generic words such as "project".
+        if label and len(label) >= 3:
+            label_folded = label.casefold()
+            patterns = (
+                f'workspace {label_folded}',
+                f'workspace "{label_folded}"',
+                f"workspace '{label_folded}'",
+                f'in {label_folded} workspace',
+                f'into {label_folded} workspace',
+            )
+            if any(pattern in text for pattern in patterns):
+                matched.append(item)
+    if not matched and len(catalog) == 1 and re.search(r"\b(?:this|current)\s+workspace\b", text):
+        matched.append(catalog[0])
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in matched:
+        key = str(item.get("id") or item.get("root_path") or "")
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    return deduped
+
+
 def _director_requires_workspace_context(task: AgentTask) -> bool:
     metadata = task_metadata(task)
-    return metadata.get("director_managed") is True and task.agent_id in {"code", "files"}
+    if metadata.get("director_managed") is not True or task.agent_id not in {"code", "files"}:
+        return False
+    # Greenfield design/planning should work even when no workspace exists.
+    # Actual creation may still use an approved workspace when one is available.
+    if task.agent_id == "code" and _director_work_mode(task) == "create":
+        return _director_creation_execution(task)
+    return True
 
 
 def _director_requires_local_source(task: AgentTask) -> bool:
@@ -205,6 +304,32 @@ def _safe_workspace_inventory(root_path: str, *, max_entries: int = 80) -> list[
     return output
 
 
+def _render_workspace_context(catalog: list[dict[str, Any]]) -> str:
+    if not catalog:
+        return (
+            "APPROVED READABLE WORKSPACES\n"
+            "None are available for this task. Do not invent local evidence or assume another approved workspace is the target.\n"
+            "END APPROVED READABLE WORKSPACES"
+        )
+    lines = ["APPROVED READABLE WORKSPACES"]
+    for item in catalog:
+        lines.append(
+            f"- id={item.get('id')} | label={item.get('label')} | root={item.get('root_path')} | "
+            f"write_enabled={bool(item.get('write_enabled'))}"
+        )
+        inventory = item.get("inventory") or []
+        if inventory:
+            lines.append("  top-level: " + ", ".join(str(value) for value in inventory[:50]))
+    lines.extend([
+        "Workspace tool paths are ALWAYS relative to the selected workspace root.",
+        "For list_workspace_files, begin with path='.' unless a listed relative directory is known to exist.",
+        "Never pass the absolute root path as the tool path.",
+        "Use the exact workspace id shown above.",
+        "END APPROVED READABLE WORKSPACES",
+    ])
+    return "\n".join(lines)
+
+
 async def _readable_workspace_context() -> tuple[str, list[dict[str, Any]]]:
     """Describe user-approved readable workspaces without assuming any repository layout."""
     async with SessionLocal() as session:
@@ -216,53 +341,36 @@ async def _readable_workspace_context() -> tuple[str, list[dict[str, Any]]]:
         and bool(getattr(workspace, "read_enabled", False))
     ]
     catalog: list[dict[str, Any]] = []
-    if not readable:
-        return (
-            "APPROVED READABLE WORKSPACES\n"
-            "None are configured. Do not invent local evidence.\n"
-            "END APPROVED READABLE WORKSPACES",
-            catalog,
-        )
-
-    lines = ["APPROVED READABLE WORKSPACES"]
     for workspace in readable:
-        inventory = _safe_workspace_inventory(str(workspace.root_path))
         catalog.append({
             "id": str(workspace.id),
             "label": str(workspace.label),
             "root_path": str(workspace.root_path),
             "write_enabled": bool(getattr(workspace, "write_enabled", False)),
-            "inventory": inventory,
+            "inventory": _safe_workspace_inventory(str(workspace.root_path)),
         })
-        lines.append(
-            f"- id={workspace.id} | label={workspace.label} | root={workspace.root_path} | "
-            f"write_enabled={bool(getattr(workspace, 'write_enabled', False))}"
-        )
-        if inventory:
-            lines.append("  top-level: " + ", ".join(inventory[:50]))
-    lines.extend([
-        "Workspace tool paths are ALWAYS relative to the selected workspace root.",
-        "For list_workspace_files, begin with path='.' unless a listed relative directory is known to exist.",
-        "Never pass the absolute root path as the tool path.",
-        "Use the exact workspace id shown above.",
-        "END APPROVED READABLE WORKSPACES",
-    ])
-    return "\n".join(lines), catalog
+    return _render_workspace_context(catalog), catalog
 
 
 def _director_source_rules(workspace_context: str, task: AgentTask) -> str:
     mode = _director_work_mode(task)
     required = _director_required_source_reads(task)
     if mode == "create":
+        execution_requested = _director_creation_execution(task)
         return (
-            "DIRECTOR PROJECT CREATION RULES\n"
-            "This is a new-project/software creation task. Do not require source files that do not exist yet.\n"
-            "- Inspect the workspace root and existing conventions if present.\n"
-            "- If write/execute tools were explicitly authorised, create the requested artifacts and verify what you created.\n"
-            "- If write tools are not available, produce a precise implementation/file plan and state that execution requires authorised write capability.\n"
-            "- Never claim a file was created, modified, tested, or executed without successful tool evidence.\n"
-            f"{workspace_context}\n"
-            "END DIRECTOR PROJECT CREATION RULES"
+            "DIRECTOR GREENFIELD PROJECT RULES\n"
+            "This is a new-project/software task. Do not require source files that do not exist yet.\n"
+            + (
+                "- Actual artifact creation was requested. Use only explicitly authorised write/execute tools, and verify anything you create.\n"
+                "- If write tools are unavailable, return a precise implementation/file plan and state that execution still needs authorised write capability.\n"
+                if execution_requested
+                else
+                "- This is a design/planning deliverable. You may answer without a workspace when the user did not ask to integrate with an existing project.\n"
+                "- Produce a coherent architecture, file structure, interfaces, data model, dependencies, testing approach, and implementation guidance.\n"
+            )
+            + "- Never claim a file was created, modified, tested, or executed without successful tool evidence.\n"
+            + (f"{workspace_context}\n" if workspace_context else "")
+            + "END DIRECTOR GREENFIELD PROJECT RULES"
         )
     return (
         "DIRECTOR PROJECT EVIDENCE RULES\n"
@@ -386,6 +494,110 @@ def _workspace_failure_nudge(
         ids = ", ".join(str(item.get("id") or "") for item in catalog)
         return f"WORKSPACE ID CORRECTION: use one of the approved workspace ids exactly as provided: {ids}."
     return None
+
+
+def _repair_tool_arguments_to_schema(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Apply only lossless/safe repairs implied by the registered tool schema.
+
+    Small local models sometimes request a numeric limit outside the schema even
+    when the schema states the bound. Clamping such values is safer and more
+    general than hard-coding fixes for individual tools.
+    """
+    tool = registry.get(tool_name)
+    if tool is None:
+        return dict(arguments), []
+    try:
+        schema = tool.input_model.model_json_schema()
+    except Exception:
+        return dict(arguments), []
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return dict(arguments), []
+
+    fixed = dict(arguments)
+    notes: list[str] = []
+    for key, value in list(fixed.items()):
+        spec = properties.get(key)
+        if not isinstance(spec, dict):
+            continue
+        candidates = [spec]
+        for branch_key in ("anyOf", "oneOf"):
+            branches = spec.get(branch_key)
+            if isinstance(branches, list):
+                candidates.extend(branch for branch in branches if isinstance(branch, dict))
+
+        numeric_spec = next(
+            (candidate for candidate in candidates if candidate.get("type") in {"integer", "number"}),
+            None,
+        )
+        if numeric_spec is not None and isinstance(value, (int, float)) and not isinstance(value, bool):
+            repaired = value
+            minimum = numeric_spec.get("minimum")
+            maximum = numeric_spec.get("maximum")
+            exclusive_min = numeric_spec.get("exclusiveMinimum")
+            exclusive_max = numeric_spec.get("exclusiveMaximum")
+            if isinstance(minimum, (int, float)) and repaired < minimum:
+                repaired = minimum
+            if isinstance(maximum, (int, float)) and repaired > maximum:
+                repaired = maximum
+            if isinstance(exclusive_min, (int, float)) and repaired <= exclusive_min:
+                repaired = exclusive_min + (1 if numeric_spec.get("type") == "integer" else 1e-9)
+            if isinstance(exclusive_max, (int, float)) and repaired >= exclusive_max:
+                repaired = exclusive_max - (1 if numeric_spec.get("type") == "integer" else 1e-9)
+            if numeric_spec.get("type") == "integer":
+                repaired = int(repaired)
+            if repaired != value:
+                fixed[key] = repaired
+                notes.append(f"clamped {key} from {value!r} to schema-valid {repaired!r}")
+            continue
+
+        array_spec = next((candidate for candidate in candidates if candidate.get("type") == "array"), None)
+        if array_spec is not None and isinstance(value, list):
+            max_items = array_spec.get("maxItems")
+            if isinstance(max_items, int) and len(value) > max_items:
+                fixed[key] = value[:max_items]
+                notes.append(f"trimmed {key} to schema maxItems={max_items}")
+
+    return fixed, notes
+
+
+_MISSING_EVIDENCE_RE = re.compile(
+    r"\b(?:missing evidence|need(?:s|ed)? to inspect|still need(?:s)? to inspect|requires? inspection|"
+    r"cannot (?:confirm|verify|determine|conclude) without|additional (?:file|artifact|component|evidence).*?(?:inspect|read)|"
+    r"evidence (?:is|remains) incomplete)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_ARTIFACT_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_])([A-Za-z0-9_. -]+(?:[/\\][A-Za-z0-9_. -]+)+\.[A-Za-z0-9]{1,12}|"
+    r"[A-Za-z0-9_.-]+\.(?:py|pyi|ts|tsx|js|jsx|php|rs|go|java|kt|kts|swift|dart|rb|vue|svelte|"
+    r"json|toml|ya?ml|xml|sql|md|html?|css|scss|sass|less|sh|bash|ps1|cs|fs|fsx|cpp|c|h|hpp|"
+    r"gradle|properties|ini|cfg|conf|tf|hcl|proto|graphql|gql))",
+    re.IGNORECASE,
+)
+
+
+def _draft_declares_missing_evidence(text: str) -> bool:
+    return bool(_MISSING_EVIDENCE_RE.search(text or ""))
+
+
+def _unread_artifacts_named_in_draft(text: str, source_paths: set[str]) -> list[str]:
+    read = {path.replace("\\", "/").casefold() for path in source_paths}
+    basenames = {path.split("/")[-1] for path in read}
+    candidates: list[str] = []
+    for match in _ARTIFACT_PATH_RE.finditer(text or ""):
+        raw = match.group(1).strip("`'\".,;:()[]{} ")
+        normal = raw.replace("\\", "/").casefold()
+        base = normal.split("/")[-1]
+        if normal in read or base in basenames:
+            continue
+        if raw not in candidates:
+            candidates.append(raw)
+        if len(candidates) >= 8:
+            break
+    return candidates
 
 
 def _source_evidence_dossier(records: list[dict[str, Any]]) -> str:
@@ -954,7 +1166,6 @@ async def execute_agent_task(
     )
 
     tool_names = await _effective_tool_names(task)
-    tool_schemas = registry.schemas(set(tool_names)) if tool_names else []
 
     requires_workspace_context = _director_requires_workspace_context(task)
     requires_local_source = _director_requires_local_source(task)
@@ -962,7 +1173,54 @@ async def execute_agent_task(
     workspace_catalog: list[dict[str, Any]] = []
     readable_workspace_count = 0
     worker_system_prompt = definition.system_prompt
-    if requires_workspace_context:
+    mode = _director_work_mode(task)
+
+    # Greenfield design is isolated from unrelated existing projects. An approved
+    # workspace is not automatically relevant just because it exists. For actual
+    # greenfield execution, only an explicitly targeted workspace is exposed.
+    if task.agent_id == "code" and mode == "create":
+        if not _director_creation_execution(task):
+            tool_names = [name for name in tool_names if name not in WORKSPACE_TOOLS]
+            worker_system_prompt = (
+                definition.system_prompt
+                + "\n\n"
+                + _director_source_rules("", task)
+                + "\nGREENFIELD ISOLATION: No existing local workspace is part of this design task. "
+                  "Do not claim integration with, reuse from, or changes to an existing project unless the user explicitly requested that. "
+                  "Describe all files/dependencies as proposed artifacts, not existing or verified files."
+            )
+            logger.info(
+                "Director-managed Code Agent task %s is isolated greenfield design; local workspace tools hidden.",
+                task_id,
+            )
+        else:
+            all_context, all_catalog = await _readable_workspace_context()
+            del all_context
+            workspace_catalog = _workspace_target_matches(task, all_catalog)
+            readable_workspace_count = len(workspace_catalog)
+            if workspace_catalog:
+                workspace_context = _render_workspace_context(workspace_catalog)
+                worker_system_prompt = (
+                    definition.system_prompt
+                    + "\n\n"
+                    + _director_source_rules(workspace_context, task)
+                )
+            else:
+                tool_names = [name for name in tool_names if name not in WORKSPACE_TOOLS]
+                worker_system_prompt = (
+                    definition.system_prompt
+                    + "\n\n"
+                    + _director_source_rules("", task)
+                    + "\nGREENFIELD TARGET REQUIRED: The user asked for actual creation, but did not explicitly identify an approved target workspace. "
+                      "Prepare the complete implementation/file set, but do not inspect or modify an unrelated workspace. "
+                      "State that execution requires an explicitly selected approved target workspace."
+                )
+            logger.info(
+                "Director-managed Code Agent task %s greenfield execution matched %d explicit target workspace(s).",
+                task_id,
+                readable_workspace_count,
+            )
+    elif requires_workspace_context:
         workspace_context, workspace_catalog = await _readable_workspace_context()
         readable_workspace_count = len(workspace_catalog)
         worker_system_prompt = (
@@ -975,10 +1233,18 @@ async def execute_agent_task(
             definition.name,
             task_id,
             readable_workspace_count,
-            _director_work_mode(task),
+            mode,
         )
 
+    tool_schemas = registry.schemas(set(tool_names)) if tool_names else []
+
     context_messages = await _conversation_context(task)
+    if task.agent_id == "code" and mode == "create" and not _greenfield_needs_prior_context(task):
+        context_messages = []
+        logger.info(
+            "Director-managed Code Agent task %s is greenfield-isolated from prior conversation project context.",
+            task_id,
+        )
     messages: list[dict[str, Any]] = [
         *context_messages,
         {
@@ -1003,7 +1269,8 @@ async def execute_agent_task(
     source_evidence_records: list[dict[str, Any]] = []
     required_source_reads = _required_source_read_count(task) if requires_local_source else 0
     evidence_nudges = 0
-    max_evidence_nudges = 4 if requires_local_source else 0
+    max_evidence_nudges = 6 if requires_local_source else 0
+    source_finalized = False
     if requires_local_source:
         logger.info(
             "Director-managed %s task %s requires %d DISTINCT relevant source read(s) using project-discovered paths.",
@@ -1098,7 +1365,61 @@ async def execute_agent_task(
                 )
                 break
 
-            final_text = proposed_text
+            candidate_text = proposed_text
+            if requires_local_source and coverage_ok and source_evidence_records:
+                candidate_text = await _finalize_source_backed_handoff(
+                    task_id=task_id,
+                    cancel_event=cancel_event,
+                    task=task,
+                    model=model,
+                    reasoning_mode=reasoning_mode,
+                    temperature=temperature,
+                    system_prompt=worker_system_prompt,
+                    evidence_records=source_evidence_records,
+                    draft=proposed_text,
+                )
+
+            if (
+                requires_local_source
+                and coverage_ok
+                and _draft_declares_missing_evidence(candidate_text)
+                and evidence_nudges < max_evidence_nudges
+            ):
+                # The source-backed finalisation pass may discover a gap that the
+                # original draft missed. Put that conclusion back into the worker
+                # transcript before asking for more tools so the next turn can
+                # continue from its own evidence-backed diagnosis.
+                if candidate_text and candidate_text != proposed_text:
+                    messages.append({"role": "assistant", "content": candidate_text})
+                evidence_nudges += 1
+                unread = _unread_artifacts_named_in_draft(candidate_text, successful_source_paths)
+                targeted = (
+                    " The source-backed draft named these unread candidate artifacts: " + ", ".join(unread) + "."
+                    if unread
+                    else ""
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "YOUR SOURCE-BACKED DRAFT SAYS THE EVIDENCE IS STILL INCOMPLETE. Do not finalize yet."
+                        + targeted
+                        + " Continue the investigation using the approved project workspace. Inspect the additional artifact/component needed to resolve the uncertainty. "
+                        "If a named path is only a guess or inaccessible, search for the relevant symbol, caller/callee, configuration, test, log-producing code, or integration point. "
+                        "Do not reread already-counted files merely to consume a turn. Only finalize once the requested conclusion is supported, "
+                        "or once you have made a reasonable bounded attempt and can precisely explain what evidence is genuinely unavailable."
+                    ),
+                })
+                logger.info(
+                    "Director-managed %s task %s source-backed handoff still identified missing evidence; continuing investigation (%d/%d).",
+                    definition.name,
+                    task_id,
+                    evidence_nudges,
+                    max_evidence_nudges,
+                )
+                continue
+
+            final_text = candidate_text
+            source_finalized = bool(requires_local_source and coverage_ok and source_evidence_records)
             break
 
         for call in calls:
@@ -1106,19 +1427,22 @@ async def execute_agent_task(
                 raise AgentTaskCancelled()
             name = call["function"]["name"]
             arguments = call["function"].get("arguments") or {}
+            repair_notes: list[str] = []
             if requires_workspace_context:
-                repaired_arguments, repair_notes = _repair_workspace_tool_arguments(
+                arguments, workspace_repair_notes = _repair_workspace_tool_arguments(
                     name, arguments, workspace_catalog
                 )
-                if repair_notes:
-                    logger.info(
-                        "Agent task %s repaired %s arguments: %s",
-                        task_id,
-                        name,
-                        "; ".join(repair_notes),
-                    )
-                    arguments = repaired_arguments
-                    call["function"]["arguments"] = arguments
+                repair_notes.extend(workspace_repair_notes)
+            arguments, schema_repair_notes = _repair_tool_arguments_to_schema(name, arguments)
+            repair_notes.extend(schema_repair_notes)
+            if repair_notes:
+                logger.info(
+                    "Agent task %s repaired %s arguments: %s",
+                    task_id,
+                    name,
+                    "; ".join(repair_notes),
+                )
+                call["function"]["arguments"] = arguments
             used_tools.append(name)
             await _set_state(
                 task_id,
@@ -1283,6 +1607,7 @@ async def execute_agent_task(
         requires_local_source
         and coverage_ok
         and source_evidence_records
+        and not source_finalized
     ):
         final_text = await _finalize_source_backed_handoff(
             task_id=task_id,
