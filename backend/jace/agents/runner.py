@@ -424,6 +424,13 @@ _BOOTSTRAP_STOPWORDS = {
     "could", "current", "find", "free", "from", "have", "investigate", "jace", "keep", "need", "project",
     "system", "task", "that", "their", "them", "this", "through", "using", "whatever", "when",
     "where", "which", "while", "with", "work", "worked", "working", "would", "your",
+    # Generic task/action verbs are not implementation evidence. Keeping them out
+    # of the semantic term set prevents unrelated source from becoming "relevant"
+    # merely because it contains words such as inspect/review/analyse.
+    "inspect", "inspection", "review", "reviewing", "analyse", "analyze", "analysis",
+    "determine", "establish", "recommend", "recommendation", "verify", "verification",
+    "diagnose", "diagnosis", "resolve", "resolution", "understand", "identify",
+    "explain", "explanation", "assess", "assessment",
 }
 _BOOTSTRAP_SOURCE_EXTENSIONS = {
     ".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".php", ".rs", ".go", ".java",
@@ -1459,8 +1466,25 @@ def _repair_tool_arguments_to_schema(
 
 _MISSING_EVIDENCE_RE = re.compile(
     r"\b(?:missing evidence|need(?:s|ed)? to inspect|still need(?:s)? to inspect|requires? inspection|"
-    r"cannot (?:confirm|verify|determine|conclude) without|additional (?:file|artifact|component|evidence).*?(?:inspect|read)|"
-    r"evidence (?:is|remains) incomplete)\b",
+    r"cannot (?:confirm|verify|determine|conclude)(?:\s+the\s+root\s+cause)?(?:\s+without)?|"
+    r"additional (?:file|artifact|component|evidence).*?(?:inspect|read)|"
+    r"evidence (?:is|remains) incomplete|root cause cannot be determined|required additional inspection|"
+    r"unresolved (?:issues?|questions?|evidence|limitations?))\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_UNRESOLVED_FRONTIER_RE = re.compile(
+    r"(?:"
+    r"\bmissing evidence\b|"
+    r"\bunresolved (?:issues?|questions?|evidence|limitations?)\b|"
+    r"\broot cause cannot be determined\b|"
+    r"\brequired additional inspection\b|"
+    r"\b(?:still )?need(?:s|ed)? to inspect\b|"
+    r"\brequires? inspection\b|"
+    r"\bcannot (?:confirm|verify|determine|conclude)(?:\s+the\s+root\s+cause)?\b|"
+    r"\bevidence (?:is|remains) incomplete\b|"
+    r"\bdo not (?:contain|show|establish|prove)\b"
+    r")",
     re.IGNORECASE | re.DOTALL,
 )
 _ARTIFACT_PATH_RE = re.compile(
@@ -1476,21 +1500,56 @@ def _draft_declares_missing_evidence(text: str) -> bool:
     return bool(_MISSING_EVIDENCE_RE.search(text or ""))
 
 
+def _draft_has_unresolved_frontier(text: str) -> bool:
+    """Return True when a specialist is explicitly saying the investigation is incomplete.
+
+    This is intentionally broader than the original missing-evidence phrase matcher.
+    Small local models often use headings such as "Unresolved Issues / Limitations",
+    "Root Cause Cannot Be Determined", or "Required Additional Inspection" instead
+    of the exact phrase "missing evidence".
+    """
+    return bool(_UNRESOLVED_FRONTIER_RE.search(text or ""))
+
+
 def _unread_artifacts_named_in_draft(text: str, source_paths: set[str]) -> list[str]:
+    """Extract concrete unread source artifacts, prioritising explicit markdown/code paths."""
     read = {path.replace("\\", "/").casefold() for path in source_paths}
     basenames = {path.split("/")[-1] for path in read}
     candidates: list[str] = []
-    for match in _ARTIFACT_PATH_RE.finditer(text or ""):
-        raw = match.group(1).strip("`'\".,;:()[]{} ")
-        normal = raw.replace("\\", "/").casefold()
+    seen: set[str] = set()
+
+    def add(raw_value: str) -> None:
+        raw = str(raw_value or "").strip("`'\".,;:()[]{} *-_")
+        raw = raw.replace("\\/", "/")
+        if not raw:
+            return
+        normal = raw.replace("\\", "/").casefold().lstrip("./")
         base = normal.split("/")[-1]
-        if normal in read or base in basenames:
-            continue
-        if raw not in candidates:
-            candidates.append(raw)
+        if normal in read or base in basenames or normal in seen:
+            return
+        seen.add(normal)
+        candidates.append(raw)
+
+    # Explicit backtick references are strongest. A specialist that names
+    # `backend/foo/runner.py` should cause an exact approved-workspace read before
+    # any broad conceptual search.
+    for match in re.finditer(r"`([^`\n]{2,220})`", text or ""):
+        token = match.group(1).strip()
+        artifact = _ARTIFACT_PATH_RE.search(token)
+        if artifact:
+            add(artifact.group(1))
         if len(candidates) >= 8:
             break
-    return candidates
+
+    if len(candidates) < 8:
+        for match in _ARTIFACT_PATH_RE.finditer(text or ""):
+            add(match.group(1))
+            if len(candidates) >= 8:
+                break
+
+    indexed = list(enumerate(candidates))
+    indexed.sort(key=lambda item: (0 if "/" in item[1].replace("\\", "/") else 1, item[0]))
+    return [value for _, value in indexed]
 
 
 
@@ -1526,6 +1585,10 @@ def _missing_evidence_excerpt(text: str) -> str:
             or "cannot determine" in folded
             or "evidence is incomplete" in folded
             or "evidence remains incomplete" in folded
+            or "root cause cannot be determined" in folded
+            or "required additional inspection" in folded
+            or "unresolved issues" in folded
+            or "unresolved limitations" in folded
         ):
             active = True
         if active:
@@ -1846,8 +1909,17 @@ async def _close_source_evidence_frontier(
     the worker's own evidence-backed gap statement and symbols already captured.
     """
     text = str(final_text or "").strip()
-    if not text or not evidence_records or not _draft_declares_missing_evidence(text):
+    if not text or not evidence_records or not _draft_has_unresolved_frontier(text):
         return text, evidence_records, successful_source_paths
+
+    initial_named = _unread_artifacts_named_in_draft(text, successful_source_paths)
+    logger.info(
+        "Director-managed %s task %s entering post-budget evidence-frontier closure with %d named unread artifact(s): %s",
+        agent_name,
+        task_id,
+        len(initial_named),
+        ", ".join(initial_named) or "[none]",
+    )
 
     for round_index in range(max(0, int(max_rounds))):
         if cancel_event.is_set():
@@ -1927,7 +1999,7 @@ async def _close_source_evidence_frontier(
             evidence_records=evidence_records,
             draft=text,
         )
-        if not _draft_declares_missing_evidence(text):
+        if not _draft_has_unresolved_frontier(text):
             logger.info(
                 "Director-managed %s task %s closed the post-budget evidence frontier after %d round(s).",
                 agent_name,
@@ -2662,7 +2734,7 @@ async def execute_agent_task(
             if (
                 requires_local_source
                 and coverage_ok
-                and _draft_declares_missing_evidence(candidate_text)
+                and _draft_has_unresolved_frontier(candidate_text)
                 and evidence_nudges < max_evidence_nudges
             ):
                 # The source-backed finalisation pass may discover a gap that the
@@ -2771,7 +2843,12 @@ async def execute_agent_task(
                 continue
 
             final_text = candidate_text
-            source_finalized = bool(requires_local_source and coverage_ok and source_evidence_records)
+            source_finalized = bool(
+                requires_local_source
+                and coverage_ok
+                and source_evidence_records
+                and not _draft_has_unresolved_frontier(candidate_text)
+            )
             break
 
         for call in calls:
@@ -3018,7 +3095,7 @@ async def execute_agent_task(
     if (
         requires_local_source
         and source_evidence_records
-        and _draft_declares_missing_evidence(final_text)
+        and _draft_has_unresolved_frontier(final_text)
     ):
         final_text, source_evidence_records, successful_source_paths = await _close_source_evidence_frontier(
             task_id=task_id,
