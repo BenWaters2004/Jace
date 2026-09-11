@@ -66,7 +66,6 @@
       rgba(10, 20, 24, 0.97)
     );
   color: #8feaf4;
-
   font: inherit;
   font-size: 18px;
   line-height: 1;
@@ -133,19 +132,109 @@
   }
 }
 
+/*
+ * Phase 11B.3D polish — background specialist handoffs.
+ *
+ * Agent output is persisted as a normal assistant message so it remains part
+ * of Jace's real conversation history. Present it as a distinct result card so
+ * it does not look like a second ordinary Jace reply.
+ */
+.chat-shell .message.agent-handoff-message {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
 
-/* Phase 11B.1.4 — persisted background-agent handoff in normal chat. */
 .chat-shell .message.agent-handoff-message .message-body {
-  border-left: 2px solid rgba(105, 224, 190, 0.48);
-  padding-left: 12px;
+  position: relative;
+  overflow: hidden;
+  padding: 14px 16px 15px;
+  border: 1px solid rgba(94, 214, 180, 0.19);
+  border-left: 3px solid rgba(105, 224, 190, 0.68);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(28, 54, 49, 0.34),
+      rgba(15, 25, 28, 0.72) 44%,
+      rgba(12, 18, 23, 0.88)
+    );
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.chat-shell .message.agent-handoff-message .message-body::after {
+  content: "";
+  position: absolute;
+  top: -36px;
+  right: -28px;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: rgba(92, 222, 184, 0.045);
+  filter: blur(1px);
+  pointer-events: none;
 }
 
 .chat-shell .message.agent-handoff-message .message-author {
-  color: rgba(116, 228, 197, 0.86);
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 7px;
+  color: rgba(149, 240, 214, 0.96);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.chat-shell .message.agent-handoff-message .message-author::after {
+  content: "SPECIALIST RESULT";
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 7px;
+  border: 1px solid rgba(105, 224, 190, 0.2);
+  border-radius: 999px;
+  background: rgba(91, 211, 177, 0.07);
+  color: rgba(157, 226, 207, 0.72);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
+
+.chat-shell .message.agent-handoff-message .message-content {
+  position: relative;
+  z-index: 1;
+  color: rgba(232, 239, 240, 0.93);
+  line-height: 1.62;
+}
+
+/* The first line is the persisted "Agent finished task" handoff summary. */
+.chat-shell .message.agent-handoff-message .message-content::first-line {
+  color: rgba(206, 244, 233, 0.96);
+  font-weight: 620;
 }
 
 .chat-shell .message.agent-handoff-message .message-avatar {
+  border: 1px solid rgba(103, 227, 191, 0.2);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(33, 64, 57, 0.95),
+      rgba(17, 35, 32, 0.98)
+    );
+  color: rgba(183, 246, 228, 0.95);
   box-shadow:
-    inset 0 0 0 1px rgba(103, 227, 191, 0.24),
-    0 0 18px rgba(77, 209, 171, 0.08);
+    inset 0 0 0 1px rgba(103, 227, 191, 0.1),
+    0 0 20px rgba(77, 209, 171, 0.08);
+}
+
+@media (max-width: 760px) {
+  .chat-shell .message.agent-handoff-message .message-author {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
 }

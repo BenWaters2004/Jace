@@ -41,12 +41,48 @@ export interface RuntimeEvent {
 
 type RuntimeListener = (event: RuntimeEvent) => void;
 
-const listeners = new Set<RuntimeListener>();
-let socket: WebSocket | null = null;
-let retryTimer: number | null = null;
-let transportConnected = false;
-let closingBecauseUnused = false;
-let latestEvent: RuntimeEvent | null = null;
+interface RuntimeHub {
+  listeners: Set<RuntimeListener>;
+  socket: WebSocket | null;
+  retryTimer: number | null;
+  disconnectTimer: number | null;
+  transportConnected: boolean;
+  latestEvent: RuntimeEvent | null;
+  socketGeneration: number;
+  intentionallyClosing: WeakSet<WebSocket>;
+}
+
+type JaceRuntimeGlobal = typeof globalThis & {
+  __JACE_RUNTIME_HUB__?: RuntimeHub;
+};
+
+/*
+ * Keep the transport outside React's component lifecycle.
+ *
+ * React.StrictMode deliberately mounts, unmounts and remounts effects in
+ * development. Vite can also replace this module while the desktop window is
+ * still alive. A module-local WebSocket can therefore briefly exist twice.
+ *
+ * globalThis gives the renderer exactly one runtime hub for the lifetime of
+ * the webview, including StrictMode effect replay and Vite HMR.
+ */
+const runtimeGlobal = globalThis as JaceRuntimeGlobal;
+const hub: RuntimeHub =
+  runtimeGlobal.__JACE_RUNTIME_HUB__ ?? {
+    listeners: new Set<RuntimeListener>(),
+    socket: null,
+    retryTimer: null,
+    disconnectTimer: null,
+    transportConnected: false,
+    latestEvent: null,
+    socketGeneration: 0,
+    intentionallyClosing: new WeakSet<WebSocket>(),
+  };
+
+runtimeGlobal.__JACE_RUNTIME_HUB__ = hub;
+
+const RECONNECT_DELAY_MS = 1500;
+const UNUSED_DISCONNECT_GRACE_MS = 500;
 
 function websocketUrl(): string {
   const base = new URL(API_BASE_URL);
@@ -55,8 +91,9 @@ function websocketUrl(): string {
 }
 
 function emit(event: RuntimeEvent) {
-  latestEvent = event;
-  for (const listener of listeners) {
+  hub.latestEvent = event;
+
+  for (const listener of hub.listeners) {
     try {
       listener(event);
     } catch {
@@ -66,44 +103,58 @@ function emit(event: RuntimeEvent) {
 }
 
 function clearRetryTimer() {
-  if (retryTimer !== null) {
-    window.clearTimeout(retryTimer);
-    retryTimer = null;
+  if (hub.retryTimer !== null) {
+    window.clearTimeout(hub.retryTimer);
+    hub.retryTimer = null;
+  }
+}
+
+function clearDisconnectTimer() {
+  if (hub.disconnectTimer !== null) {
+    window.clearTimeout(hub.disconnectTimer);
+    hub.disconnectTimer = null;
   }
 }
 
 function scheduleReconnect() {
-  if (listeners.size === 0 || retryTimer !== null) return;
+  if (hub.listeners.size === 0 || hub.retryTimer !== null) return;
 
-  retryTimer = window.setTimeout(() => {
-    retryTimer = null;
+  hub.retryTimer = window.setTimeout(() => {
+    hub.retryTimer = null;
+
+    if (hub.listeners.size === 0) return;
     ensureRuntimeConnection();
-  }, 1500);
+  }, RECONNECT_DELAY_MS);
 }
 
 function ensureRuntimeConnection() {
-  if (listeners.size === 0) return;
+  clearDisconnectTimer();
+
+  if (hub.listeners.size === 0) return;
 
   if (
-    socket &&
-    (
-      socket.readyState === WebSocket.CONNECTING ||
-      socket.readyState === WebSocket.OPEN
-    )
+    hub.socket &&
+    (hub.socket.readyState === WebSocket.CONNECTING ||
+      hub.socket.readyState === WebSocket.OPEN)
   ) {
     return;
   }
 
   clearRetryTimer();
-  closingBecauseUnused = false;
 
+  const generation = ++hub.socketGeneration;
   const nextSocket = new WebSocket(websocketUrl());
-  socket = nextSocket;
+  hub.socket = nextSocket;
 
   nextSocket.onopen = () => {
-    if (socket !== nextSocket) return;
+    if (
+      hub.socket !== nextSocket ||
+      generation !== hub.socketGeneration
+    ) {
+      return;
+    }
 
-    transportConnected = true;
+    hub.transportConnected = true;
     emit({
       type: "runtime.transport.connected",
       connected: true,
@@ -112,31 +163,46 @@ function ensureRuntimeConnection() {
   };
 
   nextSocket.onmessage = (message) => {
-    if (socket !== nextSocket) return;
+    if (
+      hub.socket !== nextSocket ||
+      generation !== hub.socketGeneration
+    ) {
+      return;
+    }
 
     try {
       const event = JSON.parse(message.data) as RuntimeEvent;
       emit(event);
     } catch {
-      // REST state remains authoritative if a presentation message is malformed.
+      // REST state remains authoritative if a presentation event is malformed.
     }
   };
 
   nextSocket.onerror = () => {
-    if (socket === nextSocket) {
-      nextSocket.close();
+    if (hub.socket === nextSocket) {
+      try {
+        nextSocket.close();
+      } catch {
+        // onclose/reconnect is best-effort; REST remains authoritative.
+      }
     }
   };
 
   nextSocket.onclose = () => {
-    if (socket === nextSocket) {
-      socket = null;
+    const isCurrent =
+      hub.socket === nextSocket &&
+      generation === hub.socketGeneration;
+    const intentional = hub.intentionallyClosing.has(nextSocket);
+
+    if (!isCurrent) {
+      return;
     }
 
-    const wasConnected = transportConnected;
-    transportConnected = false;
+    hub.socket = null;
+    const wasConnected = hub.transportConnected;
+    hub.transportConnected = false;
 
-    if (wasConnected || !closingBecauseUnused) {
+    if (!intentional && (wasConnected || hub.listeners.size > 0)) {
       emit({
         type: "runtime.transport.disconnected",
         connected: false,
@@ -144,58 +210,79 @@ function ensureRuntimeConnection() {
       });
     }
 
-    if (!closingBecauseUnused) {
+    if (!intentional) {
       scheduleReconnect();
     }
   };
 }
 
-function disconnectIfUnused() {
-  if (listeners.size > 0) return;
+function closeRuntimeConnectionIfStillUnused() {
+  hub.disconnectTimer = null;
+
+  if (hub.listeners.size > 0) return;
 
   clearRetryTimer();
-  closingBecauseUnused = true;
 
-  const current = socket;
-  socket = null;
-  transportConnected = false;
+  const current = hub.socket;
+  hub.socket = null;
+  hub.transportConnected = false;
 
-  if (current) {
+  if (!current) return;
+
+  hub.intentionallyClosing.add(current);
+
+  try {
     current.close();
+  } catch {
+    // The renderer is shutting down; nothing else needs to happen.
   }
+}
+
+function scheduleDisconnectIfUnused() {
+  if (hub.listeners.size > 0 || hub.disconnectTimer !== null) return;
+
+  /*
+   * Do not close immediately. React.StrictMode removes every effect and then
+   * re-subscribes moments later in development. The grace period lets that
+   * replay reuse the same socket instead of opening a second one.
+   */
+  hub.disconnectTimer = window.setTimeout(
+    closeRuntimeConnectionIfStillUnused,
+    UNUSED_DISCONNECT_GRACE_MS,
+  );
 }
 
 export function subscribeRuntimeEvents(
   listener: RuntimeListener,
 ): () => void {
-  listeners.add(listener);
+  clearDisconnectTimer();
+  hub.listeners.add(listener);
   ensureRuntimeConnection();
 
-  if (latestEvent) {
+  if (hub.latestEvent) {
     queueMicrotask(() => {
-      if (listeners.has(listener) && latestEvent) {
-        listener(latestEvent);
+      if (hub.listeners.has(listener) && hub.latestEvent) {
+        listener(hub.latestEvent);
       }
     });
   }
 
   return () => {
-    listeners.delete(listener);
-    disconnectIfUnused();
+    hub.listeners.delete(listener);
+    scheduleDisconnectIfUnused();
   };
 }
 
 export function runtimeTransportConnected(): boolean {
-  return transportConnected;
+  return hub.transportConnected;
 }
 
 export function useRuntimeEvents(fallback: JaceRuntimeState) {
-  const [state, setState] =
-    useState<JaceRuntimeState>(fallback);
-  const [connected, setConnected] =
-    useState(runtimeTransportConnected());
-  const [lastEvent, setLastEvent] =
-    useState<RuntimeEvent | null>(latestEvent);
+  const [state, setState] = useState<JaceRuntimeState>(fallback);
+  const [connected, setConnected] = useState(runtimeTransportConnected());
+  const [lastEvent, setLastEvent] = useState<RuntimeEvent | null>(
+    hub.latestEvent,
+  );
 
   useEffect(() => {
     return subscribeRuntimeEvents((event) => {
