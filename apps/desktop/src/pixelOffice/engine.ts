@@ -2399,76 +2399,89 @@ export class JacePixelOfficeEngine {
     room:
       OfficeRoomZone,
   ) {
+    const startX =
+      room.col *
+      TILE_SIZE;
+
+    const startY =
+      room.row *
+      TILE_SIZE;
+
+    const width =
+      room.width *
+      TILE_SIZE;
+
+    const height =
+      room.height *
+      TILE_SIZE;
+
     ctx.fillStyle =
-      "#73472A";
+      "#784B27";
 
     ctx.fillRect(
-      room.col *
-        TILE_SIZE,
-      room.row *
-        TILE_SIZE,
-      room.width *
-        TILE_SIZE,
-      room.height *
-        TILE_SIZE,
+      startX,
+      startY,
+      width,
+      height,
     );
 
+    // Fine horizontal plank seams.
     for (
-      let row = 0;
-      row < room.height;
-      row += 1
+      let y = startY;
+      y <= startY + height;
+      y += 8
     ) {
-      const y =
-        (
-          room.row + row
-        ) * TILE_SIZE;
-
       ctx.strokeStyle =
-        "rgba(96,60,34,0.42)";
+        y % 16 === 0
+          ? "rgba(89,55,31,0.60)"
+          : "rgba(147,94,57,0.20)";
 
       ctx.beginPath();
       ctx.moveTo(
-        room.col *
-          TILE_SIZE,
+        startX,
         y + 0.5,
       );
       ctx.lineTo(
-        (
-          room.col +
-          room.width
-        ) * TILE_SIZE,
+        startX + width,
         y + 0.5,
       );
       ctx.stroke();
     }
 
+    // Staggered short joins between planks.
     for (
-      let col = 1;
-      col < room.width;
-      col += 4
+      let rowBand = 0;
+      rowBand < height / 8;
+      rowBand += 1
     ) {
-      const x =
-        (
-          room.col + col
-        ) * TILE_SIZE;
+      const y =
+        startY +
+        rowBand * 8;
 
-      ctx.strokeStyle =
-        "rgba(122,78,45,0.18)";
+      const offset =
+        rowBand % 2 === 0
+          ? 22
+          : 40;
 
-      ctx.beginPath();
-      ctx.moveTo(
-        x + 0.5,
-        room.row *
-          TILE_SIZE,
-      );
-      ctx.lineTo(
-        x + 0.5,
-        (
-          room.row +
-          room.height
-        ) * TILE_SIZE,
-      );
-      ctx.stroke();
+      for (
+        let x = startX + offset;
+        x < startX + width - 8;
+        x += 36
+      ) {
+        ctx.strokeStyle =
+          "rgba(94,58,34,0.38)";
+
+        ctx.beginPath();
+        ctx.moveTo(
+          x + 0.5,
+          y + 1,
+        );
+        ctx.lineTo(
+          x + 0.5,
+          y + 7,
+        );
+        ctx.stroke();
+      }
     }
   }
 
@@ -2479,7 +2492,7 @@ export class JacePixelOfficeEngine {
       OfficeRoomZone,
   ) {
     ctx.fillStyle =
-      "#56799E";
+      "#5A7FA8";
 
     ctx.fillRect(
       room.col *
@@ -2500,7 +2513,7 @@ export class JacePixelOfficeEngine {
       OfficeRoomZone,
   ) {
     const colors = [
-      "#ECEFF2",
+      "#F0F2F4",
       "#4A4F57",
     ];
 
@@ -2530,8 +2543,7 @@ export class JacePixelOfficeEngine {
           colors[
             (
               rowOffset +
-              colOffset +
-              1
+              colOffset
             ) % 2
           ];
 
@@ -2892,7 +2904,7 @@ export class JacePixelOfficeEngine {
 
     if (!drawn) {
       ctx.fillStyle =
-        "#223447";
+        "#203246";
 
       ctx.fillRect(
         col *

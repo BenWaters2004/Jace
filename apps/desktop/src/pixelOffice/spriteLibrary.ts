@@ -1507,9 +1507,9 @@ export class PixelSpriteLibrary {
         255;
 
       const amount =
-        0.46 +
+        0.36 +
         luminance *
-          1.02;
+          0.82;
 
       pixels.data[offset] =
         Math.min(
