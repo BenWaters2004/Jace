@@ -19,7 +19,6 @@ export interface RuntimeEvent {
 
   state?: JaceRuntimeState;
   reason?: string;
-
   tool_name?: string;
   label?: string;
   status?: string;
@@ -43,7 +42,6 @@ export interface RuntimeEvent {
 type RuntimeListener = (event: RuntimeEvent) => void;
 
 const listeners = new Set<RuntimeListener>();
-
 let socket: WebSocket | null = null;
 let retryTimer: number | null = null;
 let transportConnected = false;
@@ -58,7 +56,6 @@ function websocketUrl(): string {
 
 function emit(event: RuntimeEvent) {
   latestEvent = event;
-
   for (const listener of listeners) {
     try {
       listener(event);
@@ -107,7 +104,6 @@ function ensureRuntimeConnection() {
     if (socket !== nextSocket) return;
 
     transportConnected = true;
-
     emit({
       type: "runtime.transport.connected",
       connected: true,
