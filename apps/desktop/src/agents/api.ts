@@ -3,6 +3,7 @@ import type {
   AgentDefinitionListResponse,
   AgentStatus,
   AgentTask,
+  AgentTaskCreateRequest,
   AgentTaskEventsResponse,
   AgentTaskListResponse,
 } from "./types";
@@ -50,6 +51,12 @@ export const getAgentTasks = (limit = 100) =>
   agentRequest<AgentTaskListResponse>(
     `/agents/tasks?limit=${encodeURIComponent(String(limit))}`,
   );
+
+export const createAgentTask = (payload: AgentTaskCreateRequest) =>
+  agentRequest<AgentTask>("/agents/tasks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 
 export const getAgentTask = (taskId: string) =>
   agentRequest<AgentTask>(

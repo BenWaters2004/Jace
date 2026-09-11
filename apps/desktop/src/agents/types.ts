@@ -8,6 +8,8 @@ export type AgentTaskStatus =
   | "failed"
   | "cancelled";
 
+export type AgentReasoningMode = "fast" | "balanced" | "deep";
+
 export interface AgentDefinition {
   id: string;
   name: string;
@@ -21,6 +23,19 @@ export interface AgentDefinition {
 
 export interface AgentDefinitionListResponse {
   agents: AgentDefinition[];
+}
+
+export interface AgentTaskCreateRequest {
+  agent_id: string;
+  title: string;
+  instruction: string;
+  conversation_id?: string | null;
+  parent_task_id?: string | null;
+  priority?: number;
+  model?: string | null;
+  reasoning_mode?: AgentReasoningMode;
+  allowed_tools?: string[] | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AgentTask {
@@ -45,7 +60,6 @@ export interface AgentTask {
   allowed_tools: string[];
   used_tools: string[];
   metadata: Record<string, unknown>;
-
   result: string | null;
   error: string | null;
   cancel_requested: boolean;

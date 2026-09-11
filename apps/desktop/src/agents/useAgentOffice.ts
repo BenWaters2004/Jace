@@ -7,35 +7,32 @@ import {
 } from "react";
 import {
   cancelAgentTask,
+  createAgentTask,
   getAgentDefinitions,
   getAgentStatus,
   getAgentTask,
+  getAgentTaskEvents,
   getAgentTasks,
   retryAgentTask,
 } from "./api";
+import {
+  ACTIVE_AGENT_TASK_STATUSES,
+  TERMINAL_AGENT_TASK_STATUSES,
+  isAgentTaskActive,
+  taskTimestamp,
+} from "./activity";
 import type {
   AgentDefinition,
   AgentStatus,
   AgentTask,
+  AgentTaskCreateRequest,
+  AgentTaskEvent,
 } from "./types";
 import {
   runtimeTransportConnected,
   subscribeRuntimeEvents,
   type RuntimeEvent,
 } from "../shell/runtime";
-
-const ACTIVE_STATUSES = new Set([
-  "queued",
-  "running",
-  "thinking",
-  "using_tool",
-  "waiting_permission",
-]);
-
-const TERMINAL_STATUSES = new Set([
-  "completed",
-  "failed",
-]);
 
 const RECENT_TERMINAL_RETENTION_MS = 2 * 60 * 1000;
 
@@ -47,6 +44,7 @@ export interface OfficeWorker {
   definition: AgentDefinition;
   task: AgentTask | null;
   overflowIndex: number;
+  latestEvent: AgentTaskEvent | null;
 }
 
 export interface AgentOfficeNotice {
@@ -54,16 +52,10 @@ export interface AgentOfficeNotice {
   kind: "completed" | "failed";
 }
 
-function taskTimestamp(task: AgentTask): number {
-  const value =
-    task.completed_at ??
-    task.updated_at ??
-    task.started_at ??
-    task.created_at;
-
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
+export type AgentAssignmentRequest = Omit<
+  AgentTaskCreateRequest,
+  "agent_id"
+>;
 
 function sortNewestFirst(tasks: AgentTask[]): AgentTask[] {
   return [...tasks].sort(
@@ -83,14 +75,25 @@ function isAgentTaskEvent(event: RuntimeEvent): boolean {
 export function useAgentOffice() {
   const [definitions, setDefinitions] =
     useState<AgentDefinition[]>([]);
-  const [tasks, setTasks] =
-    useState<AgentTask[]>([]);
-  const [status, setStatus] =
-    useState<AgentStatus | null>(null);
-  const [error, setError] =
+  const [tasks, setTasks] = useState<AgentTask[]>([]);
+  const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectedAgentId, setSelectedAgentId] =
+    useState<string | null>(null);
+  const [selectedWorkerId, setSelectedWorkerId] =
     useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] =
     useState<string | null>(null);
+  const [selectedTaskEvents, setSelectedTaskEvents] =
+    useState<AgentTaskEvent[]>([]);
+  const [selectedTaskEventsLoading, setSelectedTaskEventsLoading] =
+    useState(false);
+  const [selectedTaskEventsError, setSelectedTaskEventsError] =
+    useState<string | null>(null);
+  const [latestTaskEventsById, setLatestTaskEventsById] =
+    useState<Record<string, AgentTaskEvent>>({});
+
   const [realtimeConnected, setRealtimeConnected] =
     useState(runtimeTransportConnected());
   const [notice, setNotice] =
@@ -109,10 +112,34 @@ export function useAgentOffice() {
     useRef<Map<string, number>>(new Map());
   const noticeTimerRef = useRef<number | null>(null);
 
+  const refreshLatestTaskEvent = useCallback(async (taskId: string) => {
+    try {
+      const response = await getAgentTaskEvents(taskId, 24);
+      if (!mountedRef.current) return;
+
+      const latestEvent = [...response.events]
+        .sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime(),
+        )
+        .find((event) => event.event_type === "tool_started") ?? null;
+
+      if (latestEvent) {
+        setLatestTaskEventsById((current) => ({
+          ...current,
+          [taskId]: latestEvent,
+        }));
+      }
+    } catch {
+      // Bubble detail is optional. Task/event inspection still works normally.
+    }
+  }, []);
+
   const publishTerminalTransition = useCallback(
     (task: AgentTask, previousStatus?: string) => {
       if (
-        !TERMINAL_STATUSES.has(task.status) ||
+        !TERMINAL_AGENT_TASK_STATUSES.has(task.status) ||
         previousStatus === task.status
       ) {
         return;
@@ -127,10 +154,7 @@ export function useAgentOffice() {
 
       setNotice({
         task,
-        kind:
-          task.status === "failed"
-            ? "failed"
-            : "completed",
+        kind: task.status === "failed" ? "failed" : "completed",
       });
 
       if (noticeTimerRef.current !== null) {
@@ -182,15 +206,12 @@ export function useAgentOffice() {
     hydrateRunningRef.current = true;
 
     try {
-      const [
-        definitionResponse,
-        taskResponse,
-        statusResponse,
-      ] = await Promise.all([
-        getAgentDefinitions(),
-        getAgentTasks(100),
-        getAgentStatus(),
-      ]);
+      const [definitionResponse, taskResponse, statusResponse] =
+        await Promise.all([
+          getAgentDefinitions(),
+          getAgentTasks(100),
+          getAgentStatus(),
+        ]);
 
       if (!mountedRef.current) return;
 
@@ -198,6 +219,12 @@ export function useAgentOffice() {
       replaceSnapshot(taskResponse.tasks);
       setStatus(statusResponse);
       setError(null);
+
+      for (const task of taskResponse.tasks) {
+        if (task.status === "using_tool") {
+          void refreshLatestTaskEvent(task.id);
+        }
+      }
     } catch (nextError) {
       if (!mountedRef.current) return;
 
@@ -214,36 +241,24 @@ export function useAgentOffice() {
         void hydrate();
       }
     }
-  }, [replaceSnapshot]);
+  }, [refreshLatestTaskEvent, replaceSnapshot]);
 
   const refreshTask = useCallback(
-    async (
-      taskId: string,
-      eventSequence: number,
-    ) => {
+    async (taskId: string, eventSequence: number) => {
       const previousRequested =
         taskRequestSequenceRef.current.get(taskId) ?? -1;
 
-      if (eventSequence < previousRequested) {
-        return;
-      }
+      if (eventSequence < previousRequested) return;
 
-      taskRequestSequenceRef.current.set(
-        taskId,
-        eventSequence,
-      );
+      taskRequestSequenceRef.current.set(taskId, eventSequence);
 
       try {
         const task = await getAgentTask(taskId);
-
         if (!mountedRef.current) return;
 
         const latestRequested =
           taskRequestSequenceRef.current.get(taskId) ?? eventSequence;
-
-        if (eventSequence < latestRequested) {
-          return;
-        }
+        if (eventSequence < latestRequested) return;
 
         setTasks((current) => {
           const previousTask =
@@ -252,23 +267,18 @@ export function useAgentOffice() {
             previousTask?.status ??
             statusSnapshotRef.current.get(task.id);
 
-          statusSnapshotRef.current.set(
-            task.id,
-            task.status,
-          );
-
-          publishTerminalTransition(
-            task,
-            previousStatus,
-          );
+          statusSnapshotRef.current.set(task.id, task.status);
+          publishTerminalTransition(task, previousStatus);
 
           return sortNewestFirst([
             task,
-            ...current.filter(
-              (item) => item.id !== task.id,
-            ),
+            ...current.filter((item) => item.id !== task.id),
           ]);
         });
+
+        if (task.status === "using_tool") {
+          void refreshLatestTaskEvent(task.id);
+        }
 
         setError(null);
       } catch (nextError) {
@@ -281,59 +291,55 @@ export function useAgentOffice() {
         );
       }
     },
-    [publishTerminalTransition],
+    [publishTerminalTransition, refreshLatestTaskEvent],
   );
 
   useEffect(() => {
     mountedRef.current = true;
     void hydrate();
 
-    const unsubscribe = subscribeRuntimeEvents(
-      (event) => {
-        if (event.type === "runtime.transport.connected") {
-          setRealtimeConnected(true);
-          return;
-        }
+    const unsubscribe = subscribeRuntimeEvents((event) => {
+      if (event.type === "runtime.transport.connected") {
+        setRealtimeConnected(true);
+        return;
+      }
 
-        if (event.type === "runtime.transport.disconnected") {
-          setRealtimeConnected(false);
-          return;
-        }
+      if (event.type === "runtime.transport.disconnected") {
+        setRealtimeConnected(false);
+        return;
+      }
 
-        if (event.type === "runtime.snapshot") {
-          setRealtimeConnected(true);
-          latestSequenceRef.current =
-            typeof event.sequence === "number"
-              ? event.sequence
-              : null;
-          void hydrate();
-          return;
-        }
+      if (event.type === "runtime.snapshot") {
+        setRealtimeConnected(true);
+        latestSequenceRef.current =
+          typeof event.sequence === "number" ? event.sequence : null;
+        void hydrate();
+        return;
+      }
 
-        if (typeof event.sequence === "number") {
-          const previous = latestSequenceRef.current;
-
-          if (
-            previous !== null &&
-            event.sequence > previous + 1
-          ) {
-            void hydrate();
-          }
-
-          latestSequenceRef.current = event.sequence;
-        }
+      if (typeof event.sequence === "number") {
+        const previous = latestSequenceRef.current;
 
         if (
-          isAgentTaskEvent(event) &&
-          typeof event.task_id === "string"
+          previous !== null &&
+          event.sequence > previous + 1
         ) {
-          void refreshTask(
-            event.task_id,
-            event.sequence ?? Date.now(),
-          );
+          void hydrate();
         }
-      },
-    );
+
+        latestSequenceRef.current = event.sequence;
+      }
+
+      if (
+        isAgentTaskEvent(event) &&
+        typeof event.task_id === "string"
+      ) {
+        void refreshTask(
+          event.task_id,
+          event.sequence ?? Date.now(),
+        );
+      }
+    });
 
     return () => {
       mountedRef.current = false;
@@ -357,7 +363,7 @@ export function useAgentOffice() {
   const activeTasks = useMemo(
     () =>
       tasks.filter((task) =>
-        ACTIVE_STATUSES.has(task.status),
+        ACTIVE_AGENT_TASK_STATUSES.has(task.status),
       ),
     [tasks],
   );
@@ -365,12 +371,11 @@ export function useAgentOffice() {
   const recentTerminalTasks = useMemo(
     () =>
       tasks.filter((task) => {
-        if (!TERMINAL_STATUSES.has(task.status)) {
+        if (!TERMINAL_AGENT_TASK_STATUSES.has(task.status)) {
           return false;
         }
 
         const timestamp = taskTimestamp(task);
-
         return (
           timestamp > 0 &&
           clock - timestamp <= RECENT_TERMINAL_RETENTION_MS
@@ -389,7 +394,6 @@ export function useAgentOffice() {
           if (a.priority !== b.priority) {
             return b.priority - a.priority;
           }
-
           return a.created_at.localeCompare(b.created_at);
         });
 
@@ -405,6 +409,10 @@ export function useAgentOffice() {
           matchingRecent[0] ??
           null,
         overflowIndex: 0,
+        latestEvent:
+          latestTaskEventsById[
+            (matchingActive[0] ?? matchingRecent[0])?.id ?? ""
+          ] ?? null,
       });
 
       for (
@@ -420,16 +428,42 @@ export function useAgentOffice() {
           },
           task: matchingActive[index],
           overflowIndex: index,
+          latestEvent:
+            latestTaskEventsById[matchingActive[index].id] ?? null,
         });
       }
     }
 
     return output;
-  }, [
-    activeTasks,
-    definitions,
-    recentTerminalTasks,
-  ]);
+  }, [activeTasks, definitions, latestTaskEventsById, recentTerminalTasks]);
+
+  const selectedWorker = useMemo(
+    () =>
+      selectedWorkerId
+        ? workers.find((worker) => worker.id === selectedWorkerId) ?? null
+        : null,
+    [selectedWorkerId, workers],
+  );
+
+  const selectedAgentDefinition = useMemo(
+    () =>
+      selectedAgentId
+        ? definitions.find(
+            (definition) => definition.id === selectedAgentId,
+          ) ?? null
+        : null,
+    [definitions, selectedAgentId],
+  );
+
+  const selectedAgentTasks = useMemo(
+    () =>
+      selectedAgentId
+        ? sortNewestFirst(
+            tasks.filter((task) => task.agent_id === selectedAgentId),
+          )
+        : [],
+    [selectedAgentId, tasks],
+  );
 
   const selectedTask = useMemo(
     () =>
@@ -438,6 +472,87 @@ export function useAgentOffice() {
         : null,
     [selectedTaskId, tasks],
   );
+
+  const selectedCurrentTask = useMemo(() => {
+    if (selectedWorker?.task && isAgentTaskActive(selectedWorker.task)) {
+      return selectedWorker.task;
+    }
+
+    if (!selectedAgentId) return null;
+
+    return (
+      activeTasks.find((task) => task.agent_id === selectedAgentId) ?? null
+    );
+  }, [activeTasks, selectedAgentId, selectedWorker]);
+
+  useEffect(() => {
+    if (!selectedWorkerId || selectedWorker) return;
+
+    const fallbackWorker = selectedAgentId
+      ? workers.find(
+          (worker) =>
+            worker.definition.id === selectedAgentId &&
+            worker.overflowIndex === 0,
+        ) ?? null
+      : null;
+
+    setSelectedWorkerId(fallbackWorker?.id ?? null);
+  }, [selectedAgentId, selectedWorker, selectedWorkerId, workers]);
+
+  const selectWorker = useCallback(
+    (workerId: string | null) => {
+      if (!workerId) {
+        setSelectedWorkerId(null);
+        setSelectedAgentId(null);
+        setSelectedTaskId(null);
+        return;
+      }
+
+      const worker = workers.find((candidate) => candidate.id === workerId);
+      if (!worker) return;
+
+      setSelectedWorkerId(worker.id);
+      setSelectedAgentId(worker.definition.id);
+      setSelectedTaskId(worker.task?.id ?? null);
+    },
+    [workers],
+  );
+
+  useEffect(() => {
+    if (!selectedTaskId) {
+      setSelectedTaskEvents([]);
+      setSelectedTaskEventsLoading(false);
+      setSelectedTaskEventsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSelectedTaskEventsLoading(true);
+    setSelectedTaskEventsError(null);
+
+    void getAgentTaskEvents(selectedTaskId, 200)
+      .then((response) => {
+        if (cancelled || !mountedRef.current) return;
+        setSelectedTaskEvents(response.events);
+      })
+      .catch((nextError) => {
+        if (cancelled || !mountedRef.current) return;
+        setSelectedTaskEvents([]);
+        setSelectedTaskEventsError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Could not load the task activity history.",
+        );
+      })
+      .finally(() => {
+        if (cancelled || !mountedRef.current) return;
+        setSelectedTaskEventsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTask?.updated_at, selectedTaskId]);
 
   const derivedStatus = useMemo<AgentStatus | null>(() => {
     if (!status) return null;
@@ -453,11 +568,18 @@ export function useAgentOffice() {
     };
   }, [activeTasks, status]);
 
-  const cancel = useCallback(
-    async (taskId: string) => {
+  const assign = useCallback(
+    async (
+      agentId: string,
+      request: AgentAssignmentRequest,
+    ): Promise<AgentTask> => {
       try {
-        const task = await cancelAgentTask(taskId);
+        const task = await createAgentTask({
+          agent_id: agentId,
+          ...request,
+        });
 
+        statusSnapshotRef.current.set(task.id, task.status);
         setTasks((current) =>
           sortNewestFirst([
             task,
@@ -465,46 +587,70 @@ export function useAgentOffice() {
           ]),
         );
 
+        setSelectedAgentId(agentId);
+        setSelectedWorkerId(agentId);
+        setSelectedTaskId(task.id);
         setError(null);
+
+        return task;
       } catch (nextError) {
-        setError(
+        const message =
           nextError instanceof Error
             ? nextError.message
-            : "Could not cancel the task.",
-        );
+            : "Could not assign work to the agent.";
+        setError(message);
+        throw nextError instanceof Error
+          ? nextError
+          : new Error(message);
       }
     },
     [],
   );
 
-  const retry = useCallback(
-    async (taskId: string) => {
-      try {
-        const task = await retryAgentTask(taskId);
+  const cancel = useCallback(async (taskId: string) => {
+    try {
+      const task = await cancelAgentTask(taskId);
+      statusSnapshotRef.current.set(task.id, task.status);
 
-        setTasks((current) =>
-          sortNewestFirst([
-            task,
-            ...current.filter((item) => item.id !== task.id),
-          ]),
-        );
+      setTasks((current) =>
+        sortNewestFirst([
+          task,
+          ...current.filter((item) => item.id !== task.id),
+        ]),
+      );
 
-        statusSnapshotRef.current.set(
-          task.id,
-          task.status,
-        );
+      setError(null);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Could not cancel the task.",
+      );
+    }
+  }, []);
 
-        setError(null);
-      } catch (nextError) {
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "Could not retry the task.",
-        );
-      }
-    },
-    [],
-  );
+  const retry = useCallback(async (taskId: string) => {
+    try {
+      const task = await retryAgentTask(taskId);
+
+      setTasks((current) =>
+        sortNewestFirst([
+          task,
+          ...current.filter((item) => item.id !== task.id),
+        ]),
+      );
+
+      statusSnapshotRef.current.set(task.id, task.status);
+      setSelectedTaskId(task.id);
+      setError(null);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Could not retry the task.",
+      );
+    }
+  }, []);
 
   return {
     definitions,
@@ -516,10 +662,23 @@ export function useAgentOffice() {
     activeTasks,
     recentTerminalTasks,
     workers,
+
+    selectedAgentId,
+    selectedAgentDefinition,
+    selectedAgentTasks,
+    selectedWorker,
+    selectedWorkerId,
+    selectedCurrentTask,
     selectedTask,
     selectedTaskId,
+    selectedTaskEvents,
+    selectedTaskEventsLoading,
+    selectedTaskEventsError,
+
+    selectWorker,
     setSelectedTaskId,
     refresh: hydrate,
+    assign,
     cancel,
     retry,
   };

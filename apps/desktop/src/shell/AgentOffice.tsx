@@ -1,6 +1,17 @@
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+} from "react";
+import type { ToolActivity } from "../types";
+import {
+  isAgentTaskActive,
+} from "../agents/activity";
 import type {
-  ToolActivity,
-} from "../types";
+  AgentReasoningMode,
+  AgentTask,
+  AgentTaskEvent,
+} from "../agents/types";
 import {
   useAgentOffice,
 } from "../agents/useAgentOffice";
@@ -9,449 +20,687 @@ import {
 } from "./PixelAgentOffice";
 import "./AgentOffice.css";
 import "./AgentOfficeVisuals.css";
+import "./AgentInteractions.css";
 
 function formatElapsed(
-  start:
-    string | null,
-  end:
-    string | null,
+  start: string | null,
+  end: string | null,
 ): string {
-  if (!start) {
-    return "—";
+  if (!start) return "—";
+
+  const startMs = new Date(start).getTime();
+  const endMs = end ? new Date(end).getTime() : Date.now();
+  const seconds = Math.max(
+    0,
+    Math.floor((endMs - startMs) / 1000),
+  );
+
+  if (seconds < 60) return `${seconds}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainder}s`;
+
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function formatTimestamp(value: string | null): string {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleString([], {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function statusLabel(task: AgentTask): string {
+  return task.status.replace(/_/g, " ");
+}
+
+function eventLabel(event: AgentTaskEvent): string {
+  return event.event_type
+    .replace(/^agent\.task\./, "")
+    .replace(/[._-]/g, " ");
+}
+
+function taskActivityText(task: AgentTask): string {
+  if (task.progress_message?.trim()) return task.progress_message.trim();
+
+  switch (task.status) {
+    case "queued":
+      return "Waiting for an agent worker";
+    case "thinking":
+      return "Thinking through the task";
+    case "using_tool":
+      return "Using a tool";
+    case "waiting_permission":
+      return "Waiting for permission";
+    case "completed":
+      return "Task complete";
+    case "failed":
+      return "Task failed";
+    case "cancelled":
+      return "Task cancelled";
+    default:
+      return "Working";
   }
+}
 
-  const startMs =
-    new Date(
-      start,
-    ).getTime();
+type AgentOfficeState = ReturnType<typeof useAgentOffice>;
 
-  const endMs =
-    end
-      ? new Date(
-          end,
-        ).getTime()
-      : Date.now();
+function TaskTools(props: {
+  task: AgentTask;
+}) {
+  const used = new Set(props.task.used_tools);
 
-  const seconds =
-    Math.max(
-      0,
-      Math.floor(
-        (
-          endMs -
-          startMs
-        ) /
-          1000,
-      ),
-    );
-
-  if (
-    seconds <
-    60
-  ) {
-    return `${seconds}s`;
-  }
-
-  const minutes =
-    Math.floor(
-      seconds /
-        60,
-    );
-
-  const remainder =
-    seconds %
-    60;
-
-  if (
-    minutes <
-    60
-  ) {
+  if (props.task.allowed_tools.length === 0) {
     return (
-      `${minutes}m ` +
-      `${remainder}s`
+      <div className="agent-interaction-empty compact">
+        This task is running without tools.
+      </div>
     );
   }
-
-  const hours =
-    Math.floor(
-      minutes /
-        60,
-    );
 
   return (
-    `${hours}h ` +
-    `${minutes % 60}m`
+    <div className="agent-interaction-tool-grid">
+      {props.task.allowed_tools.map((tool) => (
+        <span
+          key={tool}
+          className={used.has(tool) ? "used" : ""}
+          title={used.has(tool) ? "Used during this task" : "Allowed for this task"}
+        >
+          {used.has(tool) ? "● " : "○ "}
+          {tool}
+        </span>
+      ))}
+    </div>
   );
 }
 
-export function AgentOffice(
-  props: {
-    activities:
-      ToolActivity[];
-    onExpand:
-      () => void;
-  },
-) {
-  void props.activities;
+function AgentToolCapabilities(props: {
+  office: AgentOfficeState;
+}) {
+  const definition = props.office.selectedAgentDefinition;
+  if (!definition) return null;
 
-  const office =
-    useAgentOffice();
+  const tools = [
+    ...definition.default_tools.map((tool) => ({ tool, kind: "default" })),
+    ...definition.optional_tools
+      .filter((tool) => !definition.default_tools.includes(tool))
+      .map((tool) => ({ tool, kind: "optional" })),
+  ];
 
-  const busyCount =
-    office.activeTasks.length;
-
-  const workerCount =
-    office.status
-      ?.workers ??
-    0;
+  if (tools.length === 0) {
+    return (
+      <div className="agent-interaction-empty compact">
+        No agent tools are configured.
+      </div>
+    );
+  }
 
   return (
-    <section
-      className={
-        "cc-panel " +
-        "agent-office-panel " +
-        "phase11-agent-office"
-      }
-    >
-      <div
-        className={
-          "cc-panel-topline " +
-          "agent-office-topline"
-        }
-      >
+    <div className="agent-interaction-tool-grid capabilities">
+      {tools.map(({ tool, kind }) => (
+        <span key={`${kind}-${tool}`} className={kind}>
+          {tool}
+          <small>{kind}</small>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AgentAssignmentForm(props: {
+  office: AgentOfficeState;
+}) {
+  const agent = props.office.selectedAgentDefinition;
+  const [title, setTitle] = useState("");
+  const [instruction, setInstruction] = useState("");
+  const [priority, setPriority] = useState(0);
+  const [reasoningMode, setReasoningMode] =
+    useState<AgentReasoningMode>("balanced");
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTitle("");
+    setInstruction("");
+    setPriority(0);
+    setReasoningMode("balanced");
+    setFormError(null);
+  }, [agent?.id]);
+
+  if (!agent) return null;
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const cleanInstruction = instruction.trim();
+    if (!cleanInstruction || submitting) return;
+
+    const cleanTitle =
+      title.trim() ||
+      cleanInstruction
+        .split(/\r?\n/)[0]
+        .slice(0, 90)
+        .trim() ||
+      "Assigned from pixel office";
+
+    setSubmitting(true);
+    setFormError(null);
+
+    try {
+      await props.office.assign(agent.id, {
+        title: cleanTitle,
+        instruction: cleanInstruction,
+        priority,
+        reasoning_mode: reasoningMode,
+        metadata: {
+          source: "pixel_office",
+          assigned_directly: true,
+        },
+      });
+
+      setTitle("");
+      setInstruction("");
+      setPriority(0);
+    } catch (nextError) {
+      setFormError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Could not assign the task.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form className="agent-direct-assignment" onSubmit={submit}>
+      <div className="agent-interaction-section-heading">
         <div>
-          <span
-            className={
-              "cc-kicker"
+          <span>Direct assignment</span>
+          <strong>Give {agent.name} some work</strong>
+        </div>
+        <span className="agent-idle-pill">IDLE</span>
+      </div>
+
+      <label>
+        <span>Task title <small>optional</small></span>
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          maxLength={200}
+          placeholder="e.g. Review the App.tsx chat flow"
+        />
+      </label>
+
+      <label>
+        <span>What should the agent do?</span>
+        <textarea
+          value={instruction}
+          onChange={(event) => setInstruction(event.target.value)}
+          maxLength={30_000}
+          rows={5}
+          placeholder="Describe the work just as you would in chat…"
+          required
+        />
+      </label>
+
+      <div className="agent-direct-assignment-row">
+        <label>
+          <span>Priority</span>
+          <select
+            value={priority}
+            onChange={(event) => setPriority(Number(event.target.value))}
+          >
+            <option value={-2}>Low</option>
+            <option value={0}>Normal</option>
+            <option value={5}>High</option>
+            <option value={10}>Urgent</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Reasoning</span>
+          <select
+            value={reasoningMode}
+            onChange={(event) =>
+              setReasoningMode(event.target.value as AgentReasoningMode)
             }
           >
-            Jace office
-          </span>
+            <option value="fast">Fast</option>
+            <option value="balanced">Balanced</option>
+            <option value="deep">Deep</option>
+          </select>
+        </label>
+      </div>
 
+      {formError && (
+        <div className="agent-assignment-error">{formError}</div>
+      )}
+
+      <button
+        type="submit"
+        className="agent-primary-action"
+        disabled={submitting || !instruction.trim()}
+      >
+        {submitting ? "Assigning…" : `Assign to ${agent.name}`}
+      </button>
+    </form>
+  );
+}
+
+function TaskActivityHistory(props: {
+  office: AgentOfficeState;
+}) {
+  if (!props.office.selectedTaskId) {
+    return (
+      <div className="agent-interaction-empty compact">
+        Select a task from the history to inspect its activity.
+      </div>
+    );
+  }
+
+  if (props.office.selectedTaskEventsLoading) {
+    return (
+      <div className="agent-interaction-empty compact">
+        Loading task activity…
+      </div>
+    );
+  }
+
+  if (props.office.selectedTaskEventsError) {
+    return (
+      <div className="agent-interaction-empty error compact">
+        {props.office.selectedTaskEventsError}
+      </div>
+    );
+  }
+
+  if (props.office.selectedTaskEvents.length === 0) {
+    return (
+      <div className="agent-interaction-empty compact">
+        No activity events have been recorded yet.
+      </div>
+    );
+  }
+
+  const events = [...props.office.selectedTaskEvents]
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() -
+        new Date(a.created_at).getTime(),
+    )
+    .slice(0, 14);
+
+  return (
+    <div className="agent-event-history">
+      {events.map((event) => (
+        <div className="agent-event-row" key={event.id}>
+          <span className="agent-event-dot" />
+          <div>
+            <div className="agent-event-row-head">
+              <strong>{eventLabel(event)}</strong>
+              <time>{formatTimestamp(event.created_at)}</time>
+            </div>
+            {event.message && <p>{event.message}</p>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AgentTaskHistory(props: {
+  office: AgentOfficeState;
+}) {
+  const tasks = props.office.selectedAgentTasks.slice(0, 10);
+
+  if (tasks.length === 0) {
+    return (
+      <div className="agent-interaction-empty compact">
+        This agent has no previous tasks yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="agent-task-history-list">
+      {tasks.map((task) => {
+        const selected = task.id === props.office.selectedTaskId;
+        const current = task.id === props.office.selectedCurrentTask?.id;
+
+        return (
+          <button
+            key={task.id}
+            type="button"
+            className={selected ? "selected" : ""}
+            onClick={() => props.office.setSelectedTaskId(task.id)}
+          >
+            <div>
+              <strong>{task.title}</strong>
+              <span>{formatTimestamp(task.created_at)}</span>
+            </div>
+            <div className="agent-task-history-statuses">
+              {current && <span className="current">CURRENT</span>}
+              <span className={`agent-task-status ${task.status}`}>
+                {statusLabel(task)}
+              </span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SelectedTaskDetails(props: {
+  office: AgentOfficeState;
+  task: AgentTask;
+}) {
+  const task = props.task;
+  const current = task.id === props.office.selectedCurrentTask?.id;
+  const active = isAgentTaskActive(task);
+
+  return (
+    <div className="agent-selected-task-card">
+      <div className="agent-interaction-section-heading">
+        <div>
+          <span>{current ? "Current task" : "Selected history task"}</span>
+          <strong>{task.title}</strong>
+        </div>
+        <span className={`agent-task-status ${task.status}`}>
+          {statusLabel(task)}
+        </span>
+      </div>
+
+      <div className="agent-task-meta interaction-meta">
+        <span>{Math.round(task.progress * 100)}%</span>
+        <span>{formatElapsed(task.started_at, task.completed_at)}</span>
+        <span>P{task.priority}</span>
+        <span>{task.reasoning_mode}</span>
+      </div>
+
+      <div className="agent-progress-track" aria-hidden="true">
+        <span style={{ width: `${Math.max(0, Math.min(100, task.progress * 100))}%` }} />
+      </div>
+
+      <p className="agent-task-instruction">{task.instruction}</p>
+
+      <div className="agent-current-action interaction-current-action">
+        <span>NOW</span>
+        <strong>{taskActivityText(task)}</strong>
+      </div>
+
+      <section className="agent-interaction-subsection">
+        <div className="agent-subsection-title">
+          <strong>Tools</strong>
+          <span>
+            {task.used_tools.length} used / {task.allowed_tools.length} allowed
+          </span>
+        </div>
+        <TaskTools task={task} />
+      </section>
+
+      {task.result && (
+        <section className="agent-result-preview interaction-result">
+          <strong>Result</strong>
+          <pre>{task.result}</pre>
+        </section>
+      )}
+
+      {task.error && (
+        <section className="agent-result-preview error interaction-result">
+          <strong>Error</strong>
+          <pre>{task.error}</pre>
+        </section>
+      )}
+
+      <div className="agent-task-inspector-actions interaction-controls">
+        {active && (
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void props.office.cancel(task.id)}
+          >
+            Cancel job
+          </button>
+        )}
+
+        {(["failed", "cancelled"] as AgentTask["status"][]).includes(
+          task.status,
+        ) && (
+          <button
+            type="button"
+            onClick={() => void props.office.retry(task.id)}
+          >
+            Retry job
+          </button>
+        )}
+
+        {!current && props.office.selectedCurrentTask && (
+          <button
+            type="button"
+            onClick={() =>
+              props.office.setSelectedTaskId(
+                props.office.selectedCurrentTask!.id,
+              )
+            }
+          >
+            View current task
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AgentInteractionPanel(props: {
+  office: AgentOfficeState;
+}) {
+  const agent = props.office.selectedAgentDefinition;
+  const worker = props.office.selectedWorker;
+
+  if (!agent || !worker) return null;
+
+  const detailTask =
+    props.office.selectedTask ?? props.office.selectedCurrentTask;
+  const workerIsIdle =
+    !worker.task || !isAgentTaskActive(worker.task);
+
+  return (
+    <aside className="agent-interaction-panel" aria-label={`${agent.name} details`}>
+      <div className="agent-interaction-head">
+        <div
+          className="agent-interaction-avatar"
+          style={{ borderColor: agent.accent }}
+        >
+          {agent.glyph || "J"}
+        </div>
+        <div className="agent-interaction-identity">
+          <span>{agent.role}</span>
+          <strong>{worker.definition.name}</strong>
+          <small>
+            {workerIsIdle
+              ? "Standing by"
+              : taskActivityText(worker.task!)}
+          </small>
+        </div>
+        <button
+          type="button"
+          className="agent-interaction-close"
+          onClick={() => props.office.selectWorker(null)}
+          aria-label="Close agent details"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="agent-interaction-scroll">
+        {workerIsIdle && <AgentAssignmentForm office={props.office} />}
+
+        {detailTask ? (
+          <SelectedTaskDetails office={props.office} task={detailTask} />
+        ) : (
+          <div className="agent-interaction-empty">
+            <strong>No task selected</strong>
+            <span>
+              {agent.name} is idle. Assign work above or pick a previous task below.
+            </span>
+          </div>
+        )}
+
+        <section className="agent-interaction-section">
+          <div className="agent-interaction-section-heading simple">
+            <div>
+              <span>Activity</span>
+              <strong>Task event history</strong>
+            </div>
+          </div>
+          <TaskActivityHistory office={props.office} />
+        </section>
+
+        <section className="agent-interaction-section">
+          <div className="agent-interaction-section-heading simple">
+            <div>
+              <span>History</span>
+              <strong>{agent.name}'s tasks</strong>
+            </div>
+            <span className="agent-history-count">
+              {props.office.selectedAgentTasks.length}
+            </span>
+          </div>
+          <AgentTaskHistory office={props.office} />
+        </section>
+
+        <section className="agent-interaction-section">
+          <div className="agent-interaction-section-heading simple">
+            <div>
+              <span>Capabilities</span>
+              <strong>Agent tools</strong>
+            </div>
+          </div>
+          <AgentToolCapabilities office={props.office} />
+        </section>
+      </div>
+    </aside>
+  );
+}
+
+export function AgentOffice(props: {
+  activities: ToolActivity[];
+  onExpand: () => void;
+}) {
+  void props.activities;
+
+  const office = useAgentOffice();
+  const busyCount = office.activeTasks.length;
+  const workerCount = office.status?.workers ?? 0;
+
+  return (
+    <section className="cc-panel agent-office-panel phase11-agent-office">
+      <div className="cc-panel-topline agent-office-topline">
+        <div>
+          <span className="cc-kicker">Jace office</span>
           <strong>
             {office.error
               ? "Agent office unavailable"
-              : busyCount >
-                  0
-                ? (
-                    `${busyCount} background job` +
-                    `${busyCount === 1 ? "" : "s"} active`
-                  )
+              : busyCount > 0
+                ? `${busyCount} background job${busyCount === 1 ? "" : "s"} active`
                 : "Agents standing by"}
           </strong>
         </div>
 
-        <div
-          className={
-            "agent-office-actions"
-          }
-        >
+        <div className="agent-office-actions">
+          <span
+            className={`agent-realtime-pill ${
+              office.realtimeConnected ? "online" : "fallback"
+            }`}
+            title={
+              office.realtimeConnected
+                ? "Receiving live runtime events"
+                : "Runtime event stream disconnected"
+            }
+          >
+            {office.realtimeConnected ? "LIVE" : "SYNC"}
+          </span>
+
           {office.status && (
             <span
-              className={
-                `agent-manager-pill ${
-                  office.status
-                    .manager_running
-                    ? "online"
-                    : "offline"
-                }`
-              }
+              className={`agent-manager-pill ${
+                office.status.manager_running ? "online" : "offline"
+              }`}
             >
-              {office.status
-                .manager_running
-                ? "●"
-                : "○"}{" "}
-              {workerCount} worker
-              {workerCount === 1
-                ? ""
-                : "s"}
+              {office.status.manager_running ? "●" : "○"} {workerCount} worker
+              {workerCount === 1 ? "" : "s"}
             </span>
           )}
 
           <button
-            className={
-              "cc-icon-button"
-            }
-            onClick={
-              props.onExpand
-            }
-            title={
-              "Focus agent office"
-            }
+            className="cc-icon-button"
+            onClick={props.onExpand}
+            title="Focus agent office"
           >
             □
           </button>
         </div>
       </div>
 
-      {office.error &&
-      office.tasks.length === 0 ? (
-        <div
-          className={
-            "agent-office-error"
-          }
-        >
-          <strong>
-            Could not connect to
-            background agents
-          </strong>
-
-          <span>
-            {office.error}
-          </span>
-
+      {office.error && office.tasks.length === 0 ? (
+        <div className="agent-office-error">
+          <strong>Could not connect to background agents</strong>
+          <span>{office.error}</span>
           <button
             type="button"
-            onClick={
-              () =>
-                void office.refresh()
-            }
+            onClick={() => void office.refresh()}
           >
             Retry
           </button>
         </div>
       ) : (
-        <div
-          className={
-            "agent-office-stage"
-          }
-        >
+        <div className="agent-office-stage">
           <PixelAgentOffice
-            workers={
-              office.workers
-            }
-            selectedTaskId={
-              office.selectedTaskId
-            }
-            onSelectTask={
-              office.setSelectedTaskId
-            }
+            workers={office.workers}
+            selectedWorkerId={office.selectedWorkerId}
+            onSelectWorker={office.selectWorker}
           />
 
-          {office.selectedTask && (
-            <div
-              className={
-                "agent-task-inspector overlay"
-              }
+          <AgentInteractionPanel office={office} />
+
+          {office.notice && (
+            <button
+              type="button"
+              className={`agent-office-notice ${office.notice.kind}`}
+              onClick={() => {
+                const primaryWorker = office.workers.find(
+                  (worker) =>
+                    worker.definition.id === office.notice!.task.agent_id &&
+                    worker.overflowIndex === 0,
+                );
+
+                if (primaryWorker) office.selectWorker(primaryWorker.id);
+                office.setSelectedTaskId(office.notice!.task.id);
+              }}
             >
-              <div
-                className={
-                  "agent-task-inspector-head"
-                }
-              >
-                <div>
-                  <span>
-                    {
-                      office.selectedTask
-                        .agent_name
-                    }
-                  </span>
-
-                  <strong>
-                    {
-                      office.selectedTask
-                        .title
-                    }
-                  </strong>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={
-                    () =>
-                      office
-                        .setSelectedTaskId(
-                          null,
-                        )
-                  }
-                  aria-label={
-                    "Close task details"
-                  }
-                >
-                  ×
-                </button>
+              <span>{office.notice.kind === "failed" ? "!" : "✓"}</span>
+              <div>
+                <strong>{office.notice.task.agent_name}</strong>
+                <small>
+                  {office.notice.kind === "failed"
+                    ? "Task failed"
+                    : "Task complete"}
+                  {": "}
+                  {office.notice.task.title}
+                </small>
               </div>
-
-              <div
-                className={
-                  "agent-task-meta"
-                }
-              >
-                <span
-                  className={
-                    `agent-task-status ${
-                      office.selectedTask
-                        .status
-                    }`
-                  }
-                >
-                  {office.selectedTask
-                    .status
-                    .replace(
-                      /_/g,
-                      " ",
-                    )}
-                </span>
-
-                <span>
-                  {Math.round(
-                    office.selectedTask
-                      .progress *
-                      100,
-                  )}
-                  %
-                </span>
-
-                <span>
-                  {formatElapsed(
-                    office.selectedTask
-                      .started_at,
-                    office.selectedTask
-                      .completed_at,
-                  )}
-                </span>
-              </div>
-
-              <p>
-                {
-                  office.selectedTask
-                    .instruction
-                }
-              </p>
-
-              {office.selectedTask
-                .progress_message && (
-                <div
-                  className={
-                    "agent-current-action"
-                  }
-                >
-                  {
-                    office.selectedTask
-                      .progress_message
-                  }
-                </div>
-              )}
-
-              {office.selectedTask
-                .used_tools.length >
-                0 && (
-                <div
-                  className={
-                    "agent-tool-chips"
-                  }
-                >
-                  {office.selectedTask
-                    .used_tools
-                    .map(
-                      (tool) => (
-                        <span
-                          key={
-                            tool
-                          }
-                        >
-                          {tool}
-                        </span>
-                      ),
-                    )}
-                </div>
-              )}
-
-              {office.selectedTask
-                .result && (
-                <div
-                  className={
-                    "agent-result-preview"
-                  }
-                >
-                  <strong>
-                    Result
-                  </strong>
-
-                  <pre>
-                    {
-                      office.selectedTask
-                        .result
-                    }
-                  </pre>
-                </div>
-              )}
-
-              {office.selectedTask
-                .error && (
-                <div
-                  className={
-                    "agent-result-preview error"
-                  }
-                >
-                  <strong>
-                    Error
-                  </strong>
-
-                  <pre>
-                    {
-                      office.selectedTask
-                        .error
-                    }
-                  </pre>
-                </div>
-              )}
-
-              <div
-                className={
-                  "agent-task-inspector-actions"
-                }
-              >
-                {[
-                  "queued",
-                  "running",
-                  "thinking",
-                  "using_tool",
-                  "waiting_permission",
-                ].includes(
-                  office.selectedTask
-                    .status,
-                ) && (
-                  <button
-                    type="button"
-                    className={
-                      "danger"
-                    }
-                    onClick={
-                      () =>
-                        void office.cancel(
-                          office
-                            .selectedTask!
-                            .id,
-                        )
-                    }
-                  >
-                    Cancel job
-                  </button>
-                )}
-
-                {[
-                  "failed",
-                  "cancelled",
-                ].includes(
-                  office.selectedTask
-                    .status,
-                ) && (
-                  <button
-                    type="button"
-                    onClick={
-                      () =>
-                        void office.retry(
-                          office
-                            .selectedTask!
-                            .id,
-                        )
-                    }
-                  >
-                    Retry job
-                  </button>
-                )}
-              </div>
-            </div>
+            </button>
           )}
         </div>
       )}
