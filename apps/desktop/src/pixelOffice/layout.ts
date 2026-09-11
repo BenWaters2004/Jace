@@ -16,7 +16,7 @@ export const TILE_SIZE = 16;
  * default after the upgrade.
  */
 export const OFFICE_LAYOUT_STORAGE_KEY =
-  "jace.pixelOffice.layout.pixelAgents.default.v6";
+  "jace.pixelOffice.layout.pixelAgents.default.v8";
 
 export const OFFICE_CAMERA_STORAGE_KEY =
   "jace.pixelOffice.camera.pixelAgents.v3";
@@ -28,7 +28,7 @@ export const OFFICE_CAMERA_STORAGE_KEY =
 export const WALL_TINT =
   "#2E435B";
 
-const LAYOUT_VERSION = 11;
+const LAYOUT_VERSION = 13;
 
 /**
  * Pixel Agents derives seats from chair furniture. Jace currently keeps seats
@@ -304,14 +304,17 @@ export function createDefaultOfficeLayout():
       1,
       2,
     ),
-    wallItem(
-      "default-bw-plaque",
-      "BW_LOGO_PLAQUE",
-      5,
-      10,
-      2,
-      2,
-    ),
+    {
+      id: "default-bw-plaque",
+      assetGroup: "BW_LOGO_PLAQUE",
+      col: 5,
+      row: 9,
+      footprintW: 2,
+      footprintH: 2,
+      wallMounted: true,
+      blocks: false,
+      offsetX: 8,
+    },
 
     {
       id: "default-plant-right",
@@ -447,7 +450,7 @@ export function createDefaultOfficeLayout():
       orientation: "side",
       linkedSeatId: "files",
       col: 5,
-      row: 15,
+      row: 16,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
@@ -459,7 +462,7 @@ export function createDefaultOfficeLayout():
       orientation: "side",
       linkedSeatId: "general",
       col: 5,
-      row: 17,
+      row: 18,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
@@ -472,7 +475,7 @@ export function createDefaultOfficeLayout():
       mirrorX: true,
       linkedSeatId: "analyst",
       col: 7,
-      row: 15,
+      row: 16,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
@@ -485,7 +488,7 @@ export function createDefaultOfficeLayout():
       mirrorX: true,
       linkedSeatId: "overflow-1",
       col: 7,
-      row: 17,
+      row: 18,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
@@ -533,7 +536,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "SMALL_TABLE",
       orientation: "side",
       col: 2,
-      row: 18,
+      row: 19,
       footprintW: 2,
       footprintH: 2,
       blocks: true,
