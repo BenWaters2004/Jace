@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from jace.agents.config import agent_settings
@@ -155,121 +156,132 @@ async def _effective_tool_names(task: AgentTask) -> list[str]:
     return sorted(usable)
 
 
-def _director_requires_local_source(task: AgentTask) -> bool:
+def _director_work_mode(task: AgentTask) -> str:
     metadata = task_metadata(task)
-    return (
-        metadata.get("director_managed") is True
-        and task.agent_id in {"code", "files"}
-    )
+    value = str(metadata.get("director_work_mode") or "").strip().casefold()
+    if value in {"inspect", "modify", "create", "files", "research", "analysis", "general"}:
+        return value
+    return "inspect" if task.agent_id == "code" else "files" if task.agent_id == "files" else "general"
 
 
-async def _readable_workspace_context() -> tuple[str, int]:
-    """Return the approved readable workspace catalogue for a Director worker.
+def _director_required_source_reads(task: AgentTask) -> int:
+    metadata = task_metadata(task)
+    raw = metadata.get("director_required_source_reads")
+    try:
+        return max(0, min(4, int(raw)))
+    except (TypeError, ValueError):
+        return 0
 
-    Small local models are much more reliable when they are given the concrete
-    workspace IDs up-front rather than having to discover an ID and then remember
-    to use it in a second tool call.  This does not create or approve any
-    workspace; it only exposes workspaces the user has already configured with
-    read access.
-    """
+
+def _director_requires_workspace_context(task: AgentTask) -> bool:
+    metadata = task_metadata(task)
+    return metadata.get("director_managed") is True and task.agent_id in {"code", "files"}
+
+
+def _director_requires_local_source(task: AgentTask) -> bool:
+    if not _director_requires_workspace_context(task) or task.agent_id != "code":
+        return False
+    return _director_work_mode(task) in {"inspect", "modify"} and _director_required_source_reads(task) > 0
+
+
+def _safe_workspace_inventory(root_path: str, *, max_entries: int = 80) -> list[str]:
+    """Return names/types only from an already-approved readable workspace root."""
+    try:
+        root = Path(root_path)
+        children = sorted(root.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold()))
+    except OSError:
+        return []
+    output: list[str] = []
+    for child in children:
+        if child.name.startswith("."):
+            continue
+        try:
+            kind = "dir" if child.is_dir() else "file"
+        except OSError:
+            continue
+        output.append(f"{kind}:{child.name}")
+        if len(output) >= max_entries:
+            break
+    return output
+
+
+async def _readable_workspace_context() -> tuple[str, list[dict[str, Any]]]:
+    """Describe user-approved readable workspaces without assuming any repository layout."""
     async with SessionLocal() as session:
         workspaces = await list_workspaces(session, active_only=True)
 
     readable = [
-        workspace
-        for workspace in workspaces
+        workspace for workspace in workspaces
         if bool(getattr(workspace, "is_active", False))
         and bool(getattr(workspace, "read_enabled", False))
     ]
+    catalog: list[dict[str, Any]] = []
     if not readable:
         return (
             "APPROVED READABLE WORKSPACES\n"
-            "None are configured. Do not invent source evidence.\n"
+            "None are configured. Do not invent local evidence.\n"
             "END APPROVED READABLE WORKSPACES",
-            0,
+            catalog,
         )
 
     lines = ["APPROVED READABLE WORKSPACES"]
     for workspace in readable:
+        inventory = _safe_workspace_inventory(str(workspace.root_path))
+        catalog.append({
+            "id": str(workspace.id),
+            "label": str(workspace.label),
+            "root_path": str(workspace.root_path),
+            "write_enabled": bool(getattr(workspace, "write_enabled", False)),
+            "inventory": inventory,
+        })
         lines.append(
-            f"- id={workspace.id} | label={workspace.label} | root={workspace.root_path}"
+            f"- id={workspace.id} | label={workspace.label} | root={workspace.root_path} | "
+            f"write_enabled={bool(getattr(workspace, 'write_enabled', False))}"
         )
+        if inventory:
+            lines.append("  top-level: " + ", ".join(inventory[:50]))
     lines.extend([
-        "Use the exact workspace id from this list in workspace tool calls.",
+        "Workspace tool paths are ALWAYS relative to the selected workspace root.",
+        "For list_workspace_files, begin with path='.' unless a listed relative directory is known to exist.",
+        "Never pass the absolute root path as the tool path.",
+        "Use the exact workspace id shown above.",
         "END APPROVED READABLE WORKSPACES",
     ])
-    return "\n".join(lines), len(readable)
+    return "\n".join(lines), catalog
 
 
 def _director_source_rules(workspace_context: str, task: AgentTask) -> str:
-    metadata = task_metadata(task)
-    objective = str(metadata.get("director_objective") or task.instruction or "").casefold()
-    handoff_flow = any(marker in objective for marker in ("handoff", "background result", "background task", "event flow"))
-    coverage_rule = (
-        "- This is a handoff/event-flow investigation: inspect DISTINCT files on both sides of the flow: "
-        "at least one desktop/frontend event-consumer file and at least one backend event-producer/persistence file.\n"
-        if handoff_flow else
-        "- For broad cross-component investigations, successful rereads of the same path count only once; inspect distinct relevant files.\n"
-    )
+    mode = _director_work_mode(task)
+    required = _director_required_source_reads(task)
+    if mode == "create":
+        return (
+            "DIRECTOR PROJECT CREATION RULES\n"
+            "This is a new-project/software creation task. Do not require source files that do not exist yet.\n"
+            "- Inspect the workspace root and existing conventions if present.\n"
+            "- If write/execute tools were explicitly authorised, create the requested artifacts and verify what you created.\n"
+            "- If write tools are not available, produce a precise implementation/file plan and state that execution requires authorised write capability.\n"
+            "- Never claim a file was created, modified, tested, or executed without successful tool evidence.\n"
+            f"{workspace_context}\n"
+            "END DIRECTOR PROJECT CREATION RULES"
+        )
     return (
-        "DIRECTOR SOURCE VERIFICATION RULES\n"
-        "This task is a local workspace investigation. A textual answer from memory is not acceptable.\n"
-        "- You MUST inspect the approved workspace with tools before giving a final handoff.\n"
-        "- Use search_workspace_files/list_workspace_files to locate relevant code, then use read_workspace_file on the relevant source.\n"
-        "- You MUST successfully read the required number of DISTINCT relevant source files; rereading the same path never increases evidence coverage.\n"
-        + coverage_rule
-        + "- Cite the exact relative file path(s) you actually read and at least one exact function/class/symbol present in those reads.\n"
-        "- Never invent file names, classes, functions, registries, handlers, or architecture.\n"
-        "- If no readable workspace is configured or a source read cannot be completed, return UNVERIFIED and explain the exact limitation.\n"
+        "DIRECTOR PROJECT EVIDENCE RULES\n"
+        "This is an existing-project investigation/change task. Do not answer project-specific implementation questions from memory.\n"
+        "- Discover the project structure from the approved workspace rather than assuming folders, languages, or architecture.\n"
+        "- Use list/search tools to locate relevant artifacts, then read the source that supports your conclusion.\n"
+        f"- Successfully read at least {required} DISTINCT relevant source file(s) before presenting implementation claims.\n"
+        "- Distinct means different paths; rereading one file never increases coverage.\n"
+        "- Choose files because they are relevant to the observed flow/problem, not because of any predetermined directory naming convention.\n"
+        "- Cite exact relative paths you actually read and at least one exact function/class/symbol present in those reads.\n"
+        "- Never invent file names, functions, handlers, registries, layers, or architecture.\n"
+        "- If evidence is incomplete, name the additional component/artifact that still needs inspection instead of guessing.\n"
         f"{workspace_context}\n"
-        "END DIRECTOR SOURCE VERIFICATION RULES"
+        "END DIRECTOR PROJECT EVIDENCE RULES"
     )
 
 
 def _required_source_read_count(task: AgentTask) -> int:
-    """Require broader evidence for cross-component/system investigations.
-
-    One source file is enough for a narrow implementation question.  Problems
-    describing a system/flow/race/handoff usually span at least two components,
-    so a Director-managed Code worker must inspect more than one relevant file
-    before Jace accepts a conclusion.
-    """
-    metadata = task_metadata(task)
-    objective = str(metadata.get("director_objective") or task.instruction or "").casefold()
-    broad_markers = (
-        "handoff",
-        "workflow",
-        "background result",
-        "background task",
-        "race condition",
-        "event flow",
-        "end-to-end",
-        "integration",
-        "system",
-    )
-    return 2 if any(marker in objective for marker in broad_markers) else 1
-
-
-def _director_objective_text(task: AgentTask) -> str:
-    metadata = task_metadata(task)
-    return str(metadata.get("director_objective") or task.instruction or "").casefold()
-
-
-def _requires_frontend_backend_source_coverage(task: AgentTask) -> bool:
-    objective = _director_objective_text(task)
-    return any(
-        marker in objective
-        for marker in ("handoff", "background result", "background task", "event flow")
-    )
-
-
-def _source_side(path: str) -> str | None:
-    normalized = str(path or "").replace("\\", "/").casefold().lstrip("./")
-    if normalized.startswith("apps/desktop/") or "/apps/desktop/" in normalized:
-        return "desktop"
-    if normalized.startswith("backend/") or "/backend/" in normalized:
-        return "backend"
-    return None
+    return _director_required_source_reads(task) if _director_requires_local_source(task) else 0
 
 
 def _source_coverage_status(
@@ -277,50 +289,103 @@ def _source_coverage_status(
     source_paths: set[str],
     required_source_reads: int,
 ) -> tuple[bool, str]:
+    del task
     distinct_count = len(source_paths)
     if distinct_count < required_source_reads:
-        return (
-            False,
-            f"{distinct_count}/{required_source_reads} distinct source files read",
-        )
-
-    if _requires_frontend_backend_source_coverage(task):
-        sides = {side for path in source_paths if (side := _source_side(path))}
-        missing = [side for side in ("desktop", "backend") if side not in sides]
-        if missing:
-            return (
-                False,
-                "distinct-file count met, but cross-layer coverage is missing "
-                + " and ".join(missing),
-            )
-
+        return False, f"{distinct_count}/{required_source_reads} distinct relevant source files read"
     return True, f"source requirements satisfied with {distinct_count} distinct file(s)"
 
 
 def _source_coverage_nudge(task: AgentTask, source_paths: set[str]) -> str:
-    if not _requires_frontend_backend_source_coverage(task):
+    del task
+    if not source_paths:
         return (
-            "Inspect a DIFFERENT relevant source file that has not already been counted. "
-            "Use search_workspace_files if needed, then read_workspace_file on that path."
-        )
-
-    sides = {side for path in source_paths if (side := _source_side(path))}
-    if "backend" not in sides:
-        return (
-            "You still need BACKEND evidence. Search under backend/ for the event producer, "
-            "handoff persistence, conversation write, or runtime publish path, then use "
-            "read_workspace_file on a backend source file. Do not read another desktop file."
-        )
-    if "desktop" not in sides:
-        return (
-            "You still need DESKTOP/FRONTEND evidence. Search under apps/desktop/ for the event "
-            "consumer or conversation refresh path, then use read_workspace_file on that source file. "
-            "Do not read another backend file."
+            "Start from the approved workspace inventory. Use path='.' for a root listing or search_workspace_files "
+            "with terms from the task, then read the most relevant source file."
         )
     return (
-        "The required desktop and backend layers are covered. Use the captured evidence to produce "
-        "a source-backed handoff and do not add unsupported implementation claims."
+        "Inspect a DIFFERENT relevant source file that has not already been counted. Use the evidence already found "
+        "to decide which adjacent component, caller/callee, configuration, test, or integration point needs inspection. "
+        "Do not assume a directory name or project architecture."
     )
+
+
+def _workspace_by_id(catalog: list[dict[str, Any]], workspace_id: str) -> dict[str, Any] | None:
+    for item in catalog:
+        if str(item.get("id") or "") == str(workspace_id or ""):
+            return item
+    return None
+
+
+def _relative_if_inside_root(raw_path: str, root_path: str) -> str | None:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return "."
+    raw_norm = raw.replace("\\", "/").rstrip("/")
+    root_norm = str(root_path or "").replace("\\", "/").rstrip("/")
+    if raw_norm.casefold() == root_norm.casefold():
+        return "."
+    prefix = root_norm + "/"
+    if raw_norm.casefold().startswith(prefix.casefold()):
+        relative = raw_norm[len(prefix):].lstrip("/")
+        return relative or "."
+    return None
+
+
+def _repair_workspace_tool_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+    catalog: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str]]:
+    """Repair only safe, unambiguous workspace argument mistakes made by small local models."""
+    workspace_tools = {
+        "list_workspace_files", "read_workspace_file", "search_workspace_files", "workspace_file_info",
+        "inspect_workspace_media", "create_workspace_directory", "write_workspace_file", "replace_workspace_text",
+        "move_workspace_path", "delete_workspace_file", "run_workspace_command",
+    }
+    if tool_name not in workspace_tools or not catalog:
+        return dict(arguments), []
+
+    fixed = dict(arguments)
+    notes: list[str] = []
+    valid_ids = {str(item.get("id") or "") for item in catalog}
+    supplied_id = str(fixed.get("workspace_id") or "")
+    if supplied_id not in valid_ids and len(catalog) == 1:
+        fixed["workspace_id"] = str(catalog[0]["id"])
+        notes.append("replaced missing/invalid workspace_id with the sole approved workspace id")
+
+    selected = _workspace_by_id(catalog, str(fixed.get("workspace_id") or ""))
+    if selected is not None and "path" in fixed:
+        raw_path = str(fixed.get("path") or "")
+        relative = _relative_if_inside_root(raw_path, str(selected.get("root_path") or ""))
+        if relative is not None and relative != raw_path:
+            fixed["path"] = relative
+            notes.append("converted an absolute workspace path to a workspace-relative path")
+    if tool_name == "list_workspace_files" and not str(fixed.get("path") or "").strip():
+        fixed["path"] = "."
+        notes.append("defaulted list_workspace_files path to '.'")
+    return fixed, notes
+
+
+def _workspace_failure_nudge(
+    tool_name: str,
+    error: str,
+    catalog: list[dict[str, Any]],
+) -> str | None:
+    if not catalog:
+        return None
+    lowered = (error or "").casefold()
+    if tool_name == "list_workspace_files" and (
+        "does not exist" in lowered or "cannot be accessed" in lowered or "not a directory" in lowered
+    ):
+        return (
+            "WORKSPACE PATH CORRECTION: that directory path failed. Paths are relative to the approved workspace root. "
+            "Call list_workspace_files with path='.' to rediscover the actual top-level structure, then choose an existing relative path."
+        )
+    if "unknown computer workspace" in lowered:
+        ids = ", ".join(str(item.get("id") or "") for item in catalog)
+        return f"WORKSPACE ID CORRECTION: use one of the approved workspace ids exactly as provided: {ids}."
+    return None
 
 
 def _source_evidence_dossier(records: list[dict[str, Any]]) -> str:
@@ -891,22 +956,26 @@ async def execute_agent_task(
     tool_names = await _effective_tool_names(task)
     tool_schemas = registry.schemas(set(tool_names)) if tool_names else []
 
+    requires_workspace_context = _director_requires_workspace_context(task)
     requires_local_source = _director_requires_local_source(task)
     workspace_context = ""
+    workspace_catalog: list[dict[str, Any]] = []
     readable_workspace_count = 0
     worker_system_prompt = definition.system_prompt
-    if requires_local_source:
-        workspace_context, readable_workspace_count = await _readable_workspace_context()
+    if requires_workspace_context:
+        workspace_context, workspace_catalog = await _readable_workspace_context()
+        readable_workspace_count = len(workspace_catalog)
         worker_system_prompt = (
             definition.system_prompt
             + "\n\n"
             + _director_source_rules(workspace_context, task)
         )
         logger.info(
-            "Director-managed %s task %s has %d approved readable workspace(s).",
+            "Director-managed %s task %s has %d approved readable workspace(s); mode=%s.",
             definition.name,
             task_id,
             readable_workspace_count,
+            _director_work_mode(task),
         )
 
     context_messages = await _conversation_context(task)
@@ -921,7 +990,7 @@ async def execute_agent_task(
                 "You are the worker who must perform this task.\n\n"
                 f"Task: {task.title}\n"
                 f"Instruction: {task.instruction}\n"
-                + (f"\n{workspace_context}\n" if requires_local_source else "")
+                + (f"\n{workspace_context}\n" if requires_workspace_context else "")
                 + "Return your findings as a handoff to Jace.\n"
                 "END BACKGROUND SPECIALIST ASSIGNMENT"
             ),
@@ -933,21 +1002,20 @@ async def execute_agent_task(
     successful_source_paths: set[str] = set()
     source_evidence_records: list[dict[str, Any]] = []
     required_source_reads = _required_source_read_count(task) if requires_local_source else 0
-    requires_cross_layer_coverage = (
-        _requires_frontend_backend_source_coverage(task) if requires_local_source else False
-    )
     evidence_nudges = 0
-    max_evidence_nudges = 3 if requires_cross_layer_coverage else 2
+    max_evidence_nudges = 4 if requires_local_source else 0
     if requires_local_source:
         logger.info(
-            "Director-managed %s task %s requires %d DISTINCT successful source read(s)%s.",
+            "Director-managed %s task %s requires %d DISTINCT relevant source read(s) using project-discovered paths.",
             definition.name,
             task_id,
             required_source_reads,
-            " across desktop + backend" if requires_cross_layer_coverage else "",
         )
 
-    tool_step_limit = agent_settings.max_tool_steps + (4 if requires_local_source else 0)
+    # Director work is intentionally allowed a larger investigation budget than a
+    # simple one-off agent task. The cap remains bounded by the global maximum.
+    extra_steps = 8 if requires_local_source else 4 if requires_workspace_context else 0
+    tool_step_limit = min(20, agent_settings.max_tool_steps + extra_steps)
     for step in range(tool_step_limit):
         if cancel_event.is_set():
             raise AgentTaskCancelled()
@@ -994,7 +1062,7 @@ async def execute_agent_task(
                 if readable_workspace_count <= 0:
                     final_text = (
                         "UNVERIFIED: no approved readable computer workspace is configured, so I could not "
-                        "inspect the requested local source code. Configure the Jace repository as a readable "
+                        "inspect the requested project source. Configure the intended project directory as a readable "
                         "Computer workspace and rerun this task."
                     )
                     break
@@ -1038,6 +1106,19 @@ async def execute_agent_task(
                 raise AgentTaskCancelled()
             name = call["function"]["name"]
             arguments = call["function"].get("arguments") or {}
+            if requires_workspace_context:
+                repaired_arguments, repair_notes = _repair_workspace_tool_arguments(
+                    name, arguments, workspace_catalog
+                )
+                if repair_notes:
+                    logger.info(
+                        "Agent task %s repaired %s arguments: %s",
+                        task_id,
+                        name,
+                        "; ".join(repair_notes),
+                    )
+                    arguments = repaired_arguments
+                    call["function"]["arguments"] = arguments
             used_tools.append(name)
             await _set_state(
                 task_id,
@@ -1121,12 +1202,15 @@ async def execute_agent_task(
                                     + _source_coverage_nudge(task, successful_source_paths)
                                 )
             elif tool_execution.get("success") is not True:
+                tool_error = str(tool_execution.get("error") or "unknown tool failure")
                 logger.warning(
                     "Agent task %s tool %s failed: %s",
                     task_id,
                     name,
-                    str(tool_execution.get("error") or "unknown tool failure")[:500],
+                    tool_error[:500],
                 )
+                if requires_workspace_context:
+                    post_tool_nudge = _workspace_failure_nudge(name, tool_error, workspace_catalog)
             messages.append(tool_message)
             if post_tool_nudge:
                 messages.append({"role": "user", "content": post_tool_nudge})
@@ -1184,7 +1268,7 @@ async def execute_agent_task(
             if readable_workspace_count <= 0:
                 final_text = (
                     "UNVERIFIED: no approved readable computer workspace is configured, so I could not "
-                    "inspect the requested local source code."
+                    "inspect the requested project source."
                 )
             else:
                 final_text = (
