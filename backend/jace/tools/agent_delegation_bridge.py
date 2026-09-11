@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any, Callable
 
@@ -181,49 +182,46 @@ def wrap_stream_agent(
                 "Deterministic Agent Director accepted: %s",
                 (public_summary or tool_content).replace("\n", " ")[:900],
             )
-            forced_context = (
-                "\n\nDETERMINISTIC AGENT DIRECTOR DELEGATION\n"
-                "The application has already accepted the user's objective and started "
-                "the Agent Director in the background. The authoritative result is:\n\n"
-                f"{tool_content}\n\n"
-                "Acknowledge it briefly and naturally. Do not perform the objective yourself. "
-                "Do not choose or launch another worker. Do not wait for the Director. Tell the "
-                "user the conversation remains available while the specialist workflow runs.\n"
-                "END DETERMINISTIC AGENT DIRECTOR DELEGATION"
+            match = re.search(
+                r"Workflow ID:\s*([0-9a-fA-F-]{20,})",
+                tool_content or public_summary,
             )
-        else:
-            logger.info(
-                "Deterministic background delegation resolved: %s",
-                (public_summary or tool_content).replace("\n", " ")[:900],
+            workflow_id = match.group(1) if match else "unknown"
+            answer = (
+                "Agent Director has started this in the background "
+                f"(Workflow ID: {workflow_id}). "
+                "This conversation stays available while it chooses and coordinates the specialists. "
+                "I’ll surface one combined handoff when the workflow finishes."
             )
-            forced_context = (
-                "\n\nDETERMINISTIC AGENT DELEGATION\n"
-                "The application has already processed the user's background-agent request. "
-                "The following is the authoritative application result:\n\n"
-                f"{tool_content}\n\n"
-                "Acknowledge it briefly and naturally. Do not perform the delegated task "
-                "yourself. Do not wait for the background specialist. Do not launch another "
-                "copy of the task. The main conversation remains available.\n"
-                "END DETERMINISTIC AGENT DELEGATION"
-            )
+            yield {"type": "token", "content": answer}
+            yield {
+                "type": "agent_done",
+                "model": model,
+                "done_reason": "application_result",
+                "metrics": _direct_done_metrics(),
+            }
+            return
 
-        async for event in base_stream_agent(
-            model=model,
-            messages=messages,
-            system_prompt=system_prompt + forced_context,
-            reasoning_mode=reasoning_mode,
-            temperature=temperature,
-            conversation_id=conversation_id,
-            user_message=user_message,
-            tool_names=[],
-            current_images=current_images,
-            attachment_context=attachment_context,
-        ):
-            if event.get("type") == "agent_done":
-                metrics = dict(event.get("metrics") or {})
-                metrics["tool_calls"] = int(metrics.get("tool_calls") or 0) + 1
-                event = {**event, "metrics": metrics}
-            yield event
+        logger.info(
+            "Deterministic background delegation resolved: %s",
+            (public_summary or tool_content).replace("\n", " ")[:900],
+        )
+        match = re.search(r"Task ID:\s*([0-9a-fA-F-]{20,})", tool_content or public_summary)
+        task_id = match.group(1) if match else "unknown"
+        agent_match = re.search(r"dispatched the ([^\n.]+?) to", tool_content, flags=re.IGNORECASE)
+        agent_name = agent_match.group(1).strip() if agent_match else "background specialist"
+        answer = (
+            f"Delegated to the {agent_name} in the background (Task ID: {task_id}). "
+            "This conversation stays available while it works; I’ll surface the result when it finishes."
+        )
+        yield {"type": "token", "content": answer}
+        yield {
+            "type": "agent_done",
+            "model": model,
+            "done_reason": "application_result",
+            "metrics": _direct_done_metrics(),
+        }
+        return
 
     setattr(stream_agent_with_delegation, "_jace_agent_delegation_bridge", True)
     return stream_agent_with_delegation

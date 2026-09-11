@@ -45,6 +45,17 @@ Rules:
 Importance ranges 0..1: 0 trivial, 0.5 potentially useful, 0.8 important, 1 critical.
 Confidence ranges 0..1 and represents how strongly the completed result supports the finding."""
 
+AGENT_EVIDENCE_TOOLS = {
+    "web_search",
+    "read_web_page",
+    "browser_read_page",
+    "read_workspace_file",
+    "search_workspace_files",
+    "workspace_file_info",
+    "inspect_workspace_media",
+    "run_workspace_command",
+}
+
 
 @dataclass
 class MemoryCommand:
@@ -217,7 +228,20 @@ async def extract_agent_candidates(
     """
     result_text = _clip_for_memory(agent_result, 12_000)
     instruction_text = _clip_for_memory(task_instruction, 4_000)
-    tool_text = ", ".join(sorted(set(used_tools or []))) or "none"
+    tool_set = set(used_tools or [])
+    tool_text = ", ".join(sorted(tool_set)) or "none"
+
+    # An agent's prose alone is not evidence for a new long-term project fact.
+    # Conversation/memory lookup can help a worker reason, but it must not be
+    # recycled into a newly "discovered" fact. Require at least one external or
+    # workspace evidence tool before agent-authored memory can be proposed.
+    evidence_tools = sorted(tool_set & AGENT_EVIDENCE_TOOLS)
+    if not evidence_tools:
+        logger.info(
+            "Agent memory extractor skipped %s because no evidence-producing tool was used.",
+            agent_name,
+        )
+        return []
 
     prompt = f"""Analyse this completed background-agent handoff for durable long-term memory.
 
@@ -227,6 +251,7 @@ TASK INSTRUCTION:
 {instruction_text}
 
 TOOLS USED: {tool_text}
+EVIDENCE-PRODUCING TOOLS: {", ".join(evidence_tools)}
 
 COMPLETED AGENT RESULT:
 {result_text}

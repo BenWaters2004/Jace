@@ -676,21 +676,28 @@ async def execute_agent_task(
         result=final_text,
     )
 
-    # A specialist handoff is written to conversation history, but it is not a
-    # normal user/assistant exchange and therefore would never reach the regular
-    # automatic memory extractor. Curate durable verified agent findings through
-    # the stricter agent-memory path. Direct Pixel Office assignments (which may
-    # have no conversation) are supported too.
-    schedule_agent_memory_extraction(
-        conversation_id=completed_conversation_id,
-        source_message_id=handoff_message_id,
-        agent_name=definition.name,
-        task_title=completed_title,
-        task_instruction=completed_instruction,
-        agent_result=final_text,
-        used_tools=sorted(set(used_tools)),
-        enabled=memory_auto_extract,
-    )
+    # Director child handoffs are intermediate reasoning/evidence, not durable
+    # truth. A later specialist may refute them and the Director may ultimately
+    # mark them unverified. Never let an intermediate Director branch write to
+    # long-term memory. Direct/single-agent tasks keep the normal 11B.3D curation.
+    completed_metadata = task_metadata(current)
+    if completed_metadata.get("director_managed") is True:
+        logger.info(
+            "Skipping automatic long-term memory extraction for Director child task %s (%s).",
+            task_id,
+            definition.name,
+        )
+    else:
+        schedule_agent_memory_extraction(
+            conversation_id=completed_conversation_id,
+            source_message_id=handoff_message_id,
+            agent_name=definition.name,
+            task_title=completed_title,
+            task_instruction=completed_instruction,
+            agent_result=final_text,
+            used_tools=sorted(set(used_tools)),
+            enabled=memory_auto_extract,
+        )
 
     await _publish_task(
         current,

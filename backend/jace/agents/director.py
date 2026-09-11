@@ -18,6 +18,7 @@ from jace.agents.service import (
     list_tasks,
     prepare_retry,
     task_metadata,
+    task_used_tools,
 )
 from jace.ai.engine import OllamaRequestError, stream_chat, structured_chat
 from jace.database import SessionLocal
@@ -50,6 +51,18 @@ class DirectorPlan(BaseModel):
     steps: list[DirectorStep] = Field(min_length=1, max_length=MAX_DIRECTOR_STEPS)
 
 
+class DirectorRoute(BaseModel):
+    """Small-model-friendly planning output.
+
+    The LLM chooses specialists only; Jace constructs the dependency graph and
+    specialist instructions deterministically. This is substantially more robust
+    than asking a 4B local model to emit a nested graph schema.
+    """
+
+    agents: list[AgentKind] = Field(min_length=1, max_length=MAX_DIRECTOR_STEPS)
+    rationale: str = Field(default="", max_length=800)
+
+
 @dataclass
 class StepOutcome:
     step_id: str
@@ -60,6 +73,9 @@ class StepOutcome:
     error: str = ""
     task_id: str | None = None
     retried: bool = False
+    used_tools: list[str] | None = None
+    verified: bool = False
+    evidence: str = ""
 
 
 _workflow_tasks: set[asyncio.Task[Any]] = set()
@@ -157,140 +173,184 @@ def _plan_valid(plan: DirectorPlan) -> bool:
     return True
 
 
-def _fallback_plan(objective: str, history: list[dict[str, str]]) -> DirectorPlan:
-    context = " ".join([objective, *(item["content"] for item in history)]).casefold()
+def _objective_traits(objective: str) -> tuple[bool, bool, bool, bool]:
+    """Classify only the current objective.
+
+    Recent conversation history is useful context for workers, but it must not
+    accidentally trigger a Research/Code/File route because an older message
+    happened to contain words such as "current", "web", or "file".
+    """
+    text = (objective or "").casefold()
     web_needed = bool(
         re.search(
-            r"\b(?:latest|current|today|online|web|internet|source|sources|research|"
-            r"public information|documentation|release|version|news)\b",
-            context,
+            r"\b(?:latest|current external|today|online|web|internet|public source|"
+            r"public sources|release notes|upstream documentation|official documentation|news)\b",
+            text,
         )
     )
     code_needed = bool(
         re.search(
             r"\b(?:code|bug|debug|error|repo|repository|typescript|javascript|python|"
             r"php|laravel|react|rust|tauri|backend|frontend|api|app\.tsx|fix|"
-            r"implementation|compile|build)\b",
-            context,
+            r"implementation|compile|build|source|handoff system|jace project)\b",
+            text,
         )
     )
     files_needed = bool(
-        re.search(r"\b(?:file|files|folder|directory|workspace|path|organise|organize)\b", context)
+        re.search(r"\b(?:file|files|folder|directory|workspace|path|organise|organize)\b", text)
     )
     analysis_needed = bool(
-        re.search(r"\b(?:analyse|analyze|assess|compare|evaluate|decide|root cause|diagnos)\w*\b", context)
+        re.search(
+            r"\b(?:analyse|analyze|assess|compare|evaluate|decide|root cause|diagnos|"
+            r"investigate|why|best fix|recommend)\w*",
+            text,
+        )
     )
+    return web_needed, code_needed, files_needed, analysis_needed
 
+
+def _normalise_route_agents(objective: str, agents: list[AgentKind]) -> list[AgentKind]:
+    web_needed, code_needed, files_needed, analysis_needed = _objective_traits(objective)
+    selected: list[AgentKind] = []
+    for agent in agents:
+        if agent not in selected:
+            selected.append(agent)
+
+    # Hard evidence guardrails. A local software diagnosis must include a worker
+    # that can inspect the approved workspace. Web Research cannot substitute for
+    # source inspection. Conversely, do not add Research merely because old chat
+    # context mentioned the web.
+    if code_needed and "code" not in selected:
+        selected.insert(0, "code")
+    if not web_needed and "research" in selected and code_needed:
+        selected.remove("research")
+    if files_needed and not code_needed and "files" not in selected:
+        selected.insert(0, "files")
+    if web_needed and "research" not in selected:
+        selected.insert(0, "research")
+    if analysis_needed and len(selected) > 1 and "analyst" not in selected:
+        selected.append("analyst")
+
+    # A Code worker already has the safe workspace-reading tools; a separate File
+    # worker is redundant for ordinary code diagnosis unless the objective is
+    # specifically about file organisation.
+    if code_needed and "files" in selected and not re.search(
+        r"\b(?:organise|organize|move|rename|delete|folder structure)\b",
+        (objective or "").casefold(),
+    ):
+        selected.remove("files")
+
+    if not selected:
+        selected = ["analyst" if analysis_needed else "general"]
+    return selected[:MAX_DIRECTOR_STEPS]
+
+
+def _plan_from_agents(objective: str, agents: list[AgentKind], rationale: str = "") -> DirectorPlan:
+    selected = _normalise_route_agents(objective, agents)
     steps: list[DirectorStep] = []
-    if web_needed and code_needed:
-        steps.append(
-            DirectorStep(
-                id="research",
-                agent_id="research",
-                title="Research relevant current information",
-                instruction=(
-                    "Investigate the objective using current authoritative public sources. "
-                    "Return only findings that materially affect the technical diagnosis or implementation."
-                ),
-                reasoning_mode="balanced",
-            )
-        )
-        steps.append(
-            DirectorStep(
-                id="analysis",
-                agent_id="analyst",
-                title="Analyse research and define the likely root cause",
-                instruction=(
-                    "Analyse the objective together with the Research Agent handoff. Distinguish confirmed facts "
-                    "from assumptions and give the Code Agent a concise technical direction."
-                ),
-                depends_on=["research"],
-                reasoning_mode="balanced",
-            )
-        )
-        steps.append(
-            DirectorStep(
-                id="code",
-                agent_id="code",
-                title="Inspect the code and prepare the fix",
-                instruction=(
-                    "Inspect the approved workspace, verify the root cause in the actual code, and produce the "
-                    "smallest coherent fix. This Director workflow grants only the Code Agent's safe default "
-                    "read capabilities, so report exact changes required rather than claiming source was modified."
-                ),
-                depends_on=["analysis"],
-                reasoning_mode="deep",
-            )
-        )
-    elif code_needed:
-        steps.append(
-            DirectorStep(
-                id="code",
-                agent_id="code",
-                title="Inspect the code and diagnose the issue",
-                instruction=(
-                    "Inspect the approved workspace, identify the root cause in the actual code, and provide an "
-                    "exact minimal fix plan. The Director intentionally grants only safe read capabilities; do not "
-                    "claim files were changed unless a write capability was explicitly present."
-                ),
-                reasoning_mode="deep",
-            )
-        )
-    elif web_needed:
-        steps.append(
-            DirectorStep(
-                id="research",
-                agent_id="research",
-                title="Research the objective",
-                instruction="Gather current, authoritative evidence needed to answer the objective.",
-                reasoning_mode="balanced",
-            )
-        )
-        if analysis_needed:
-            steps.append(
-                DirectorStep(
-                    id="analysis",
-                    agent_id="analyst",
-                    title="Analyse the research findings",
-                    instruction="Turn the research handoff into a clear conclusion and recommended action.",
-                    depends_on=["research"],
-                    reasoning_mode="balanced",
-                )
-            )
-    elif files_needed:
-        steps.append(
-            DirectorStep(
-                id="files",
-                agent_id="files",
-                title="Inspect the relevant workspace files",
-                instruction="Inspect the approved workspace and return the file-level findings needed for the objective.",
-                reasoning_mode="balanced",
-            )
-        )
-    elif analysis_needed:
-        steps.append(
-            DirectorStep(
-                id="analysis",
-                agent_id="analyst",
-                title="Analyse the objective",
-                instruction="Work through the objective, verify available Jace context, and return a clear conclusion.",
-                reasoning_mode="balanced",
-            )
-        )
-    else:
-        steps.append(
-            DirectorStep(
-                id="general",
-                agent_id="general",
-                title="Complete the directed background objective",
-                instruction="Complete the objective independently and return a focused handoff to Jace.",
-                reasoning_mode="balanced",
-            )
-        )
 
-    return DirectorPlan(
-        summary="Fallback Director plan selected from the objective and recent conversation context.",
-        steps=steps,
+    if "research" in selected:
+        steps.append(DirectorStep(
+            id="research",
+            agent_id="research",
+            title="Research relevant external evidence",
+            instruction=(
+                "Research only external/current facts that the objective genuinely requires. "
+                "Use authoritative sources and include the exact URLs or source names supporting "
+                "material claims. Do not infer Jace's local implementation from generic agent "
+                "framework articles or unrelated projects."
+            ),
+            reasoning_mode="balanced",
+        ))
+
+    if "code" in selected:
+        steps.append(DirectorStep(
+            id="code",
+            agent_id="code",
+            title="Inspect the Jace source and establish the actual behaviour",
+            instruction=(
+                "Inspect the approved Jace workspace before reaching a conclusion. Search for the "
+                "relevant implementation, read the surrounding files, and identify the actual data "
+                "flow. Cite concrete file paths/functions from tool output. Explicitly say UNVERIFIED "
+                "if the Jace workspace is unavailable or you cannot inspect the relevant source. "
+                "Prepare the smallest coherent fix, but do not claim files were modified because "
+                "Director-created Code tasks are read-only by default."
+            ),
+            reasoning_mode="deep",
+        ))
+
+    if "files" in selected:
+        steps.append(DirectorStep(
+            id="files",
+            agent_id="files",
+            title="Inspect the relevant workspace files",
+            instruction=(
+                "Inspect the approved workspace and support every project-specific claim with concrete "
+                "paths or file contents obtained through workspace tools. Say UNVERIFIED if the "
+                "workspace is unavailable."
+            ),
+            reasoning_mode="balanced",
+        ))
+
+    if "analyst" in selected:
+        deps = [step.id for step in steps if step.agent_id in {"research", "code", "files"}]
+        steps.append(DirectorStep(
+            id="analysis",
+            agent_id="analyst",
+            title="Review the evidence and recommend the best fix",
+            instruction=(
+                "Review only the supplied specialist evidence. Separate verified source-backed facts "
+                "from hypotheses. Never promote an upstream specialist's unsupported claim to a "
+                "confirmed fact. If Code/File could not inspect the local source, state that the local "
+                "root cause remains unverified."
+            ),
+            depends_on=deps,
+            reasoning_mode="balanced",
+        ))
+
+    if "general" in selected and not steps:
+        steps.append(DirectorStep(
+            id="general",
+            agent_id="general",
+            title="Complete the directed background objective",
+            instruction="Complete the objective methodically and label assumptions clearly.",
+            reasoning_mode="balanced",
+        ))
+
+    # If selection somehow reduced to nothing after de-duplication, stay useful.
+    if not steps:
+        steps.append(DirectorStep(
+            id="analysis",
+            agent_id="analyst",
+            title="Analyse the objective",
+            instruction="Analyse the objective conservatively and distinguish facts from assumptions.",
+            reasoning_mode="balanced",
+        ))
+
+    summary = (rationale or "Director route constructed with deterministic evidence guardrails.").strip()
+    return DirectorPlan(summary=summary[:1000], steps=steps[:MAX_DIRECTOR_STEPS])
+
+
+def _fallback_plan(objective: str, history: list[dict[str, str]]) -> DirectorPlan:
+    # `history` is intentionally unused for routing. It remains available to the
+    # workers via normal conversation context but cannot change specialist choice.
+    del history
+    web_needed, code_needed, files_needed, analysis_needed = _objective_traits(objective)
+    agents: list[AgentKind] = []
+    if web_needed:
+        agents.append("research")
+    if code_needed:
+        agents.append("code")
+    elif files_needed:
+        agents.append("files")
+    if analysis_needed and (agents or not code_needed):
+        agents.append("analyst")
+    if not agents:
+        agents.append("general")
+    return _plan_from_agents(
+        objective,
+        agents,
+        "Deterministic Director fallback selected from the current objective only.",
     )
 
 
@@ -303,58 +363,57 @@ async def _build_plan(
     model, temperature, history = await _profile_and_context(conversation_id)
     await chat_activity.wait_for_idle(0.18)
 
-    roster = """
-AVAILABLE SPECIALISTS
-- research: current/public web research; default tools include web search and page reading.
-- analyst: synthesis, calculations and Jace memory/history analysis.
-- code: approved-workspace code inspection and diagnosis. Director-created Code tasks are READ-ONLY by default.
-- files: approved-workspace file inspection and organisation analysis. Director-created File tasks are READ-ONLY by default.
-- general: background work that does not fit another specialist.
-END AVAILABLE SPECIALISTS
-""".strip()
-    context_text = "\n".join(
-        f"{item['role'].upper()}: {item['content']}" for item in history
-    ) or "No earlier conversation context is required."
-    system_prompt = f"""
-You are Jace's Agent Director planner. Build the smallest useful specialist workflow for the user's objective.
-{roster}
+    traits = _objective_traits(objective)
+    if any(traits):
+        plan = _fallback_plan(objective, history)
+        logger.info(
+            "Agent Director used deterministic evidence-first routing for objective traits web=%s code=%s files=%s analysis=%s.",
+            *traits,
+        )
+        return plan, model, temperature, history
 
-RULES
-- Use between 1 and {MAX_DIRECTOR_STEPS} steps.
-- A simple objective should use one specialist. Do not manufacture a multi-agent chain for show.
-- Use dependencies only when a later specialist genuinely needs an earlier handoff.
-- Research -> Analyst -> Code is appropriate when current external evidence must be interpreted before code inspection.
-- Never create a step that delegates to another agent. The Director owns orchestration.
-- Do not request tools. Each specialist receives only its safe default capabilities.
-- Code/File workers may inspect and diagnose but must not be assumed to have write/execute capability.
-- Step IDs must be short unique identifiers such as research, analysis, code, files, or step1.
-- Instructions must tell the selected specialist what it itself should do.
-END RULES
+    system_prompt = f"""
+You are Jace's Agent Director ROUTER. Choose the smallest useful set of specialists.
+Return JSON only. You are choosing specialist IDs, not writing the workflow graph.
+
+Available IDs:
+- research: external/current public information
+- code: inspect and diagnose an approved software workspace
+- files: inspect/organise approved local files
+- analyst: review evidence and synthesize conclusions
+- general: background work that fits none of the above
+
+Rules:
+- Use 1-{MAX_DIRECTOR_STEPS} IDs.
+- For a bug or implementation question about the local Jace project, include code.
+- Do not use research for a local code diagnosis unless current external evidence is explicitly required.
+- Do not invent specialist names.
+- Do not include dependencies or task instructions; Jace constructs those deterministically.
 """.strip()
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                f"DIRECTOR OBJECTIVE\n{objective}\nEND DIRECTOR OBJECTIVE\n\n"
-                f"RECENT CONVERSATION CONTEXT\n{context_text}\nEND RECENT CONVERSATION CONTEXT\n\n"
-                f"Preferred overall reasoning mode: {reasoning_mode}."
-            ),
-        }
-    ]
+
+    messages = [{
+        "role": "user",
+        "content": (
+            f"OBJECTIVE\n{objective}\nEND OBJECTIVE\n\n"
+            f"Preferred reasoning mode: {reasoning_mode}."
+        ),
+    }]
 
     try:
-        plan = await structured_chat(
+        route = await structured_chat(
             model=model,
             messages=messages,
             system_prompt=system_prompt,
-            response_model=DirectorPlan,
+            response_model=DirectorRoute,
         )
+        agents = _normalise_route_agents(objective, route.agents)
+        plan = _plan_from_agents(objective, agents, route.rationale)
         if not _plan_valid(plan):
-            raise OllamaRequestError("Director planner returned an invalid dependency graph.")
+            raise OllamaRequestError("Director router produced an invalid guarded plan.")
         return plan, model, temperature, history
     except Exception as exc:
         logger.warning(
-            "Agent Director planner fell back to deterministic routing: %s",
+            "Agent Director router fell back to deterministic routing: %s",
             exc,
         )
         return _fallback_plan(objective, history), model, temperature, history
@@ -412,10 +471,48 @@ def _dependency_context(step: DirectorStep, outcomes: dict[str, StepOutcome]) ->
         body = outcome.result or outcome.error or "No textual result was returned."
         chunks.append(
             f"DEPENDENCY {dependency} ({outcome.agent_id}, {outcome.status})\n"
+            f"Verification: {'VERIFIED' if outcome.verified else 'UNVERIFIED'} — {outcome.evidence}\n"
             f"{_trim_context(body, DIRECTOR_RESULT_CONTEXT_CHARS)}\n"
             f"END DEPENDENCY {dependency}"
         )
     return "\n\n".join(chunks)
+
+
+LOCAL_EVIDENCE_TOOLS = {
+    "read_workspace_file",
+    "search_workspace_files",
+    "workspace_file_info",
+    "inspect_workspace_media",
+}
+WEB_EVIDENCE_TOOLS = {"web_search", "read_web_page", "browser_read_page"}
+
+
+def _verification_for_step(
+    step: DirectorStep,
+    *,
+    used_tools: list[str],
+    outcomes: dict[str, StepOutcome],
+    result: str,
+) -> tuple[bool, str]:
+    tools = set(used_tools)
+    lowered = (result or "").casefold()
+    if "unverified" in lowered or "could not access" in lowered or "no approved workspace" in lowered:
+        return False, "Worker explicitly reported that verification was unavailable."
+    if step.agent_id in {"code", "files"}:
+        hits = sorted(tools & LOCAL_EVIDENCE_TOOLS)
+        if hits:
+            return True, "Local workspace evidence via: " + ", ".join(hits)
+        return False, "No source-reading workspace tool was used."
+    if step.agent_id == "research":
+        hits = sorted(tools & WEB_EVIDENCE_TOOLS)
+        if hits:
+            return True, "External evidence via: " + ", ".join(hits)
+        return False, "No web evidence tool was used."
+    if step.agent_id == "analyst":
+        if step.depends_on and all(outcomes.get(dep) and outcomes[dep].verified for dep in step.depends_on):
+            return True, "Analysis derived only from verified dependency handoffs."
+        return False, "Analysis included one or more unverified dependencies."
+    return False, "This specialist did not independently verify external or workspace evidence."
 
 
 async def _run_step(
@@ -507,6 +604,13 @@ async def _run_step(
         if row.status == "queued" and await _enqueue_task(row.id, row.priority):
             row = await _wait_for_terminal(row.id)
 
+    used_tools = task_used_tools(row)
+    verified, evidence = _verification_for_step(
+        step,
+        used_tools=used_tools,
+        outcomes=outcomes,
+        result=row.result or "",
+    )
     outcome = StepOutcome(
         step_id=step.id,
         agent_id=step.agent_id,
@@ -516,6 +620,9 @@ async def _run_step(
         error=row.error or "",
         task_id=row.id,
         retried=retried,
+        used_tools=used_tools,
+        verified=verified,
+        evidence=evidence,
     )
     await runtime_events.publish(
         "agent.director.step.completed",
@@ -538,6 +645,37 @@ async def _background_synthesis_turn(
     plan: DirectorPlan,
     outcomes: dict[str, StepOutcome],
 ) -> str:
+    _web_needed, code_needed, files_needed, _analysis_needed = _objective_traits(objective)
+    requires_local_source = code_needed or files_needed
+    local_outcomes = [
+        outcome for outcome in outcomes.values() if outcome.agent_id in {"code", "files"}
+    ]
+    local_verified = any(outcome.verified for outcome in local_outcomes)
+
+    # Do not let synthesis turn an unsupported specialist theory into a
+    # "confirmed root cause". If local source inspection was required but never
+    # actually happened, return a deterministic failure-to-verify handoff.
+    if requires_local_source and not local_verified:
+        hypotheses: list[str] = []
+        for outcome in outcomes.values():
+            if not outcome.result:
+                continue
+            hypotheses.append(
+                f"{outcome.title} ({outcome.agent_id}, UNVERIFIED):\n"
+                f"{_trim_context(outcome.result, 1800)}"
+            )
+        body = "\n\n".join(hypotheses) or "No usable specialist hypothesis was returned."
+        return (
+            "I could not verify the requested Jace root cause in the actual source code. "
+            "The Code/File specialist did not successfully use a source-reading workspace tool, "
+            "so this workflow must not present its theory as a confirmed implementation fact.\n\n"
+            "Unverified specialist hypotheses follow for reference only:\n\n"
+            f"{body}\n\n"
+            "No code change should be made from this run. Confirm that the Jace repository is "
+            "available as an approved computer workspace, then rerun the Director so the Code "
+            "Agent can inspect the relevant files and cite concrete paths/functions."
+        )
+
     report_parts: list[str] = []
     for step in plan.steps:
         outcome = outcomes.get(step.id)
@@ -550,6 +688,8 @@ async def _background_synthesis_turn(
             f"Title: {step.title}\n"
             f"Status: {outcome.status}\n"
             f"Retried: {'yes' if outcome.retried else 'no'}\n"
+            f"Used tools: {', '.join(outcome.used_tools or []) or 'none'}\n"
+            f"Verification: {'VERIFIED' if outcome.verified else 'UNVERIFIED'} — {outcome.evidence}\n"
             f"Handoff:\n{_trim_context(text, 9_000)}\n"
             f"END STEP {step.id}"
         )
@@ -559,6 +699,9 @@ You are Jace's Agent Director producing the final user-facing handoff from speci
 Write one coherent result, not a transcript of worker messages.
 - Lead with the answer/outcome.
 - Combine corroborating findings and resolve conflicts conservatively.
+- Treat a claim as verified only when its STEP block says Verification: VERIFIED.
+- Never call an implementation detail a confirmed root cause merely because Research/Analyst repeated it.
+- For Jace/local-project implementation claims, local Code/File verification outranks external research.
 - Mention failed/skipped specialist work only when it affects confidence or completeness.
 - State clearly what was actually done versus merely recommended.
 - Director-created Code/File workers receive safe read-only defaults. Never claim source files were edited unless a worker result explicitly proves a write occurred.
