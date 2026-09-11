@@ -24,6 +24,8 @@ class AgentManager:
 
     Tasks are persistent in SQLite. The asyncio queue is only the in-process
     dispatch mechanism, so a Jace restart can safely recover unfinished work.
+    11B.4 also asks the Agent Director to reconstruct any unfinished dependency
+    workflow after the worker pool has recovered its persisted child tasks.
     """
 
     def __init__(self) -> None:
@@ -59,7 +61,6 @@ class AgentManager:
             return
 
         self._running = True
-
         async with SessionLocal() as session:
             recovered = await recover_incomplete_tasks(session)
 
@@ -74,10 +75,16 @@ class AgentManager:
         for task in recovered:
             await self.enqueue(task.id, priority=task.priority)
 
+        # Import lazily to avoid a manager <-> director module cycle.
+        from jace.agents.director import resume_director_workflows
+
+        resumed_directors = await resume_director_workflows()
         logger.info(
-            "Jace agent manager started with %s worker(s); recovered %s task(s).",
+            "Jace agent manager started with %s worker(s); recovered %s task(s); "
+            "resumed %s Director workflow(s).",
             len(self._workers),
             len(recovered),
+            resumed_directors,
         )
 
     async def stop(self) -> None:
@@ -86,12 +93,15 @@ class AgentManager:
 
         self._running = False
 
+        from jace.agents.director import stop_director_workflows
+
+        await stop_director_workflows()
+
         for event in self._cancel_events.values():
             event.set()
 
         for worker in self._workers:
             worker.cancel()
-
         if self._workers:
             await asyncio.gather(*self._workers, return_exceptions=True)
 
@@ -105,7 +115,6 @@ class AgentManager:
     async def enqueue(self, task_id: str, *, priority: int | None = None) -> bool:
         if not self._running:
             return False
-
         async with self._lock:
             if task_id in self._queued_ids or task_id in self._running_ids:
                 return False
@@ -116,7 +125,6 @@ class AgentManager:
                     if task is None or task.status != "queued":
                         return False
                     priority = task.priority
-
             self._queued_ids.add(task_id)
             await self._queue.put((-int(priority), next(self._sequence), task_id))
             self._cancel_events.setdefault(task_id, asyncio.Event())
@@ -136,7 +144,6 @@ class AgentManager:
 
         event = self._cancel_events.setdefault(task_id, asyncio.Event())
         event.set()
-
         await runtime_events.publish(
             "agent.task.changed",
             task_id=task.id,
@@ -158,7 +165,6 @@ class AgentManager:
             self._queued_ids.discard(task_id)
             self._running_ids.add(task_id)
             cancel_event = self._cancel_events.setdefault(task_id, asyncio.Event())
-
             try:
                 async with SessionLocal() as session:
                     task = await get_task(session, task_id)
@@ -168,13 +174,11 @@ class AgentManager:
 
                 if task.cancel_requested or task.status == "cancelled":
                     continue
-
                 try:
                     await asyncio.wait_for(
                         execute_agent_task(task_id, cancel_event=cancel_event),
                         timeout=agent_settings.task_timeout_seconds,
                     )
-
                 except AgentTaskCancelled:
                     async with SessionLocal() as session:
                         current = await get_task(session, task_id)
@@ -201,7 +205,6 @@ class AgentManager:
                                 progress_message=current.progress_message,
                                 conversation_id=current.conversation_id,
                             )
-
                 except asyncio.TimeoutError:
                     await self._fail_task(
                         task_id,
@@ -215,7 +218,6 @@ class AgentManager:
                     if not self._running:
                         break
                     raise
-
                 except Exception as exc:
                     await self._fail_task(task_id, str(exc))
 
@@ -229,7 +231,6 @@ class AgentManager:
             task = await get_task(session, task_id)
             if task is None or task.status in {"completed", "cancelled"}:
                 return
-
             task = await update_task_state(
                 session,
                 task,
@@ -241,7 +242,6 @@ class AgentManager:
                 event_message="Background agent task failed.",
                 event_data_value={"error": error[:2000]},
             )
-
         await runtime_events.publish(
             "agent.task.failed",
             task_id=task.id,

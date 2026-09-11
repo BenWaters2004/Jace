@@ -421,6 +421,19 @@ async def _persist_completion_handoff(
             return None
 
         metadata = task_metadata(task)
+
+        # 11B.4: Director-managed child workers feed their result back to the
+        # Director, which persists one combined user-facing handoff after the
+        # dependency graph completes. Suppress each raw child result here so a
+        # Research -> Analyst -> Code workflow does not flood the chat with
+        # three separate specialist cards. The task/result remains fully
+        # visible in Pixel Office and its memory curation still runs below.
+        if (
+            metadata.get("director_managed") is True
+            or metadata.get("suppress_chat_handoff") is True
+        ):
+            return None
+
         existing_id = metadata.get("handoff_message_id")
         if isinstance(existing_id, str) and existing_id:
             return existing_id

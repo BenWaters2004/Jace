@@ -26,7 +26,7 @@ export const OFFICE_CAMERA_STORAGE_KEY =
  * preserving the Pixel Agents wall shapes and shading.
  */
 export const WALL_TINT =
-  "#2E435B";
+  "#28374B";
 
 const LAYOUT_VERSION = 13;
 

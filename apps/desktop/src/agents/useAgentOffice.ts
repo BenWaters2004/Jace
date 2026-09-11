@@ -145,6 +145,16 @@ export function useAgentOffice() {
         return;
       }
 
+      const directorManaged =
+        task.metadata?.director_managed === true ||
+        task.metadata?.suppress_chat_handoff === true;
+
+      // Director child tasks still animate and remain inspectable in Pixel
+      // Office, but only the Director's combined result should appear in chat.
+      if (directorManaged) {
+        return;
+      }
+
       window.dispatchEvent(
         new CustomEvent<AgentTask>(
           AGENT_TERMINAL_BROWSER_EVENT,

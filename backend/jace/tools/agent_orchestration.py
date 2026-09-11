@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from jace.agents.definitions import get_agent_definition
+from jace.agents.director import launch_director_workflow
 from jace.agents.manager import agent_manager
 from jace.agents.service import (
     create_task,
@@ -15,7 +16,6 @@ from jace.agents.service import (
 )
 from jace.tools.base import ToolContext, ToolDefinition, ToolExecutionResult, ToolError
 from jace.tools.registry import registry
-
 
 AgentKind = Literal["research", "code", "files", "analyst", "general"]
 ReasoningMode = Literal["fast", "balanced", "deep"]
@@ -41,6 +41,19 @@ class DelegateAgentTaskInput(BaseModel):
     priority: int = Field(default=0, ge=-10, le=10)
     reasoning_mode: ReasoningMode = "balanced"
     allowed_tools: list[str] | None = Field(default=None, max_length=40)
+
+
+class DelegateAgentDirectorInput(BaseModel):
+    objective: str = Field(
+        min_length=1,
+        max_length=30_000,
+        description=(
+            "The complete outcome Jace should achieve. The Agent Director will choose the "
+            "smallest useful set of specialists, create dependencies, monitor them, and "
+            "return one combined handoff."
+        ),
+    )
+    reasoning_mode: ReasoningMode = "balanced"
 
 
 class AgentTaskIdInput(BaseModel):
@@ -85,34 +98,28 @@ def _task_summary(row, *, include_result: bool = False) -> dict[str, Any]:
         "completed_at": row.completed_at.isoformat() if row.completed_at else None,
         "error": row.error,
     }
-
     if include_result:
         summary["result"] = row.result
     elif row.result:
         summary["result_preview"] = row.result[:800]
-
     return summary
 
 
 def _user_ready_task_result(row, *, scope: str | None = None) -> str:
     label = _agent_label(row.agent_id)
     scope_text = f" ({scope})" if scope else ""
-
     if row.status == "completed":
         return (
             f"{label} completed “{row.title}”{scope_text}.\n\n"
             f"{row.result or 'The agent completed but returned no textual result.'}"
         )
-
     if row.status == "failed":
         return (
             f"{label} failed “{row.title}”{scope_text}.\n\n"
             f"{row.error or 'No error detail was recorded.'}"
         )
-
     if row.status == "cancelled":
         return f"{label} task “{row.title}” was cancelled{scope_text}."
-
     return (
         f"{label} is still working on “{row.title}”{scope_text}.\n\n"
         f"Status: {row.status.replace('_', ' ')}\n"
@@ -127,11 +134,9 @@ async def _delegate(
 ) -> ToolExecutionResult:
     if not agent_manager.running:
         raise ToolError("The background agent manager is not running.")
-
     definition = get_agent_definition(payload.agent_id)
     if definition is None:
         raise ToolError(f"Unknown specialist: {payload.agent_id}")
-
     try:
         row = await create_task(
             context.session,
@@ -150,21 +155,17 @@ async def _delegate(
         )
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
-
     queued = await agent_manager.enqueue(row.id, priority=row.priority)
     if not queued:
         raise ToolError(
             "The task was created but the agent manager did not accept it. "
             f"Task ID: {row.id}"
         )
-
     capability_text = ", ".join(task_allowed_tools(row)) or "no tools"
     display = (
         f"Delegated to {definition.name}: {row.title}\n"
-        f"Task ID: {row.id}\n"
-        f"Capabilities: {capability_text}"
+        f"Task ID: {row.id}\nCapabilities: {capability_text}"
     )
-
     return ToolExecutionResult(
         content=(
             f"I've dispatched the {definition.name} to “{row.title}”. "
@@ -172,24 +173,42 @@ async def _delegate(
             f"Task ID: {row.id}."
         ),
         display=display,
+        metadata={"task_id": row.id, "agent_id": row.agent_id, "status": row.status},
+    )
+
+
+async def _delegate_director(
+    payload: DelegateAgentDirectorInput,
+    context: ToolContext,
+) -> ToolExecutionResult:
+    if not agent_manager.running:
+        raise ToolError("The background agent manager is not running.")
+    workflow_id = launch_director_workflow(
+        objective=payload.objective,
+        conversation_id=context.conversation_id,
+        reasoning_mode=payload.reasoning_mode,
+    )
+    content = (
+        "The Agent Director accepted the objective and is planning the specialist workflow "
+        "in the background. Jace does not need to wait for it before continuing this "
+        f"conversation. Workflow ID: {workflow_id}."
+    )
+    return ToolExecutionResult(
+        content=content,
+        display=f"Agent Director started\nWorkflow ID: {workflow_id}",
         metadata={
-            "task_id": row.id,
-            "agent_id": row.agent_id,
-            "status": row.status,
+            "workflow_id": workflow_id,
+            "status": "planning",
+            "objective": payload.objective,
         },
     )
 
 
-async def _check(
-    payload: AgentTaskIdInput,
-    context: ToolContext,
-) -> ToolExecutionResult:
+async def _check(payload: AgentTaskIdInput, context: ToolContext) -> ToolExecutionResult:
     row = await get_task(context.session, payload.task_id)
     if row is None:
         raise ToolError("Background agent task not found.")
-
     content = _user_ready_task_result(row)
-
     return ToolExecutionResult(
         content=content,
         display=content[:1500],
@@ -197,10 +216,7 @@ async def _check(
     )
 
 
-async def _list(
-    payload: ListAgentTasksInput,
-    context: ToolContext,
-) -> ToolExecutionResult:
+async def _list(payload: ListAgentTasksInput, context: ToolContext) -> ToolExecutionResult:
     rows = await list_tasks(
         context.session,
         status=payload.status,
@@ -208,17 +224,14 @@ async def _list(
         conversation_id=None,
         limit=payload.limit,
     )
-
     if not rows:
         return ToolExecutionResult(
             content="No background agent tasks matched that request.",
             display="No background agent tasks matched.",
             metadata={"tasks": []},
         )
-
     lines = ["Background agent tasks:"]
     metadata_tasks: list[dict[str, Any]] = []
-
     for row in rows:
         metadata_tasks.append(_task_summary(row))
         result_suffix = ""
@@ -226,12 +239,10 @@ async def _list(
             result_suffix = f" — {row.result[:180].replace(chr(10), ' ')}"
         elif row.status == "failed" and row.error:
             result_suffix = f" — ERROR: {row.error[:180].replace(chr(10), ' ')}"
-
         lines.append(
             f"- {row.id} | {_agent_label(row.agent_id)} | {row.status} | "
             f"{row.title}{result_suffix}"
         )
-
     content = "\n".join(lines)
     return ToolExecutionResult(
         content=content,
@@ -250,9 +261,7 @@ async def _latest_result(
         conversation_id=context.conversation_id,
         limit=25,
     )
-
     scope = "this conversation"
-
     if not rows and context.conversation_id:
         rows = await list_tasks(
             context.session,
@@ -261,55 +270,38 @@ async def _latest_result(
             limit=25,
         )
         scope = "recent Jace history"
-
     if not rows:
-        specialist = (
-            f" for the {_agent_label(payload.agent_id)}"
-            if payload.agent_id
-            else ""
-        )
+        specialist = f" for the {_agent_label(payload.agent_id)}" if payload.agent_id else ""
         return ToolExecutionResult(
             content=f"No background agent task{specialist} was found.",
             display="No matching background agent task found.",
             metadata={"task": None, "scope": scope},
         )
-
     row = rows[0]
     content = _user_ready_task_result(row, scope=scope)
-
     return ToolExecutionResult(
         content=content,
         display=content[:1500],
-        metadata={
-            "task": _task_summary(row, include_result=True),
-            "scope": scope,
-        },
+        metadata={"task": _task_summary(row, include_result=True), "scope": scope},
     )
 
 
-async def _cancel(
-    payload: AgentTaskIdInput,
-    context: ToolContext,
-) -> ToolExecutionResult:
+async def _cancel(payload: AgentTaskIdInput, context: ToolContext) -> ToolExecutionResult:
     row = await get_task(context.session, payload.task_id)
     if row is None:
         raise ToolError("Background agent task not found.")
-
     if row.status in {"completed", "failed", "cancelled"}:
         return ToolExecutionResult(
             content=f"{row.title} is already {row.status}.",
             display=f"{row.title}: already {row.status}",
         )
-
     await agent_manager.cancel(row.id)
-
     refreshed = await get_task(context.session, row.id)
     status = refreshed.status if refreshed else "cancellation_requested"
-
     return ToolExecutionResult(
         content=(
-            f"Cancellation requested for {_agent_label(row.agent_id)} task "
-            f"“{row.title}”. Current status: {status}."
+            f"Cancellation requested for {_agent_label(row.agent_id)} task “{row.title}”. "
+            f"Current status: {status}."
         ),
         display=f"Cancellation requested: {row.title}",
         metadata={"task_id": row.id, "status": status},
@@ -322,7 +314,7 @@ def register_agent_orchestration_tools() -> None:
             name="delegate_agent_task",
             label="Delegate background task",
             description=(
-                "Delegate independent work to a persistent Jace specialist while the "
+                "Delegate independent work to one persistent Jace specialist while the "
                 "primary conversation remains available."
             ),
             category="Agents",
@@ -332,7 +324,26 @@ def register_agent_orchestration_tools() -> None:
             handler=_delegate,
         )
     )
-
+    registry.register(
+        ToolDefinition(
+            name="delegate_agent_director",
+            label="Agent Director",
+            description=(
+                "Give an open-ended multi-step objective to Jace's Agent Director. Use when "
+                "the user wants Jace to investigate/diagnose/research/review something and "
+                "then act on the findings, asks Jace to choose the right specialists, or "
+                "asks multiple agents to coordinate without naming a worker. The Director "
+                "chooses the smallest useful workflow, creates dependent background tasks, "
+                "monitors them and returns one combined handoff. It grants child agents only "
+                "their safe default capabilities."
+            ),
+            category="Agents",
+            risk="execute",
+            default_permission="ask",
+            input_model=DelegateAgentDirectorInput,
+            handler=_delegate_director,
+        )
+    )
     registry.register(
         ToolDefinition(
             name="check_agent_task",
@@ -345,7 +356,6 @@ def register_agent_orchestration_tools() -> None:
             handler=_check,
         )
     )
-
     registry.register(
         ToolDefinition(
             name="list_agent_tasks",
@@ -358,7 +368,6 @@ def register_agent_orchestration_tools() -> None:
             handler=_list,
         )
     )
-
     registry.register(
         ToolDefinition(
             name="get_latest_agent_result",
@@ -374,7 +383,6 @@ def register_agent_orchestration_tools() -> None:
             handler=_latest_result,
         )
     )
-
     registry.register(
         ToolDefinition(
             name="cancel_agent_task",
