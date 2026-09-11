@@ -14,7 +14,9 @@ from jace.agents.definitions import get_agent_definition
 from jace.agents.models import AgentTask
 from jace.agents.service import (
     create_task,
+    event_data,
     get_task,
+    list_events,
     list_tasks,
     prepare_retry,
     task_metadata,
@@ -76,6 +78,7 @@ class StepOutcome:
     used_tools: list[str] | None = None
     verified: bool = False
     evidence: str = ""
+    evidence_context: str = ""
 
 
 _workflow_tasks: set[asyncio.Task[Any]] = set()
@@ -271,10 +274,15 @@ def _plan_from_agents(objective: str, agents: list[AgentKind], rationale: str = 
             instruction=(
                 "Inspect the approved Jace workspace before reaching a conclusion. Search for the "
                 "relevant implementation, read the surrounding files, and identify the actual data "
-                "flow. Cite concrete file paths/functions from tool output. Explicitly say UNVERIFIED "
-                "if the Jace workspace is unavailable or you cannot inspect the relevant source. "
-                "Prepare the smallest coherent fix, but do not claim files were modified because "
-                "Director-created Code tasks are read-only by default."
+                "flow. You MUST use read_workspace_file on the source that supports the diagnosis, "
+                "not merely list/search for it. In your final handoff, name only files and code "
+                "identifiers that appeared in successful workspace tool output. Cite at least one "
+                "exact source function/class/symbol in backticks for every implementation diagnosis. "
+                "Include a short "
+                "'Source files read' section using the exact workspace-relative paths you actually "
+                "read. Explicitly say UNVERIFIED if the Jace workspace is unavailable or you cannot "
+                "inspect the relevant source. Prepare the smallest coherent fix, but do not claim "
+                "files were modified because Director-created Code tasks are read-only by default."
             ),
             reasoning_mode="deep",
         ))
@@ -469,10 +477,16 @@ def _dependency_context(step: DirectorStep, outcomes: dict[str, StepOutcome]) ->
     for dependency in step.depends_on:
         outcome = outcomes[dependency]
         body = outcome.result or outcome.error or "No textual result was returned."
+        source_evidence = (
+            f"\nSource evidence captured by Jace:\n{_trim_context(outcome.evidence_context, 5000)}"
+            if outcome.evidence_context
+            else ""
+        )
         chunks.append(
             f"DEPENDENCY {dependency} ({outcome.agent_id}, {outcome.status})\n"
             f"Verification: {'VERIFIED' if outcome.verified else 'UNVERIFIED'} — {outcome.evidence}\n"
-            f"{_trim_context(body, DIRECTOR_RESULT_CONTEXT_CHARS)}\n"
+            f"{_trim_context(body, DIRECTOR_RESULT_CONTEXT_CHARS)}"
+            f"{source_evidence}\n"
             f"END DEPENDENCY {dependency}"
         )
     return "\n\n".join(chunks)
@@ -481,38 +495,365 @@ def _dependency_context(step: DirectorStep, outcomes: dict[str, StepOutcome]) ->
 LOCAL_EVIDENCE_TOOLS = {
     "read_workspace_file",
     "search_workspace_files",
+    "list_workspace_files",
     "workspace_file_info",
     "inspect_workspace_media",
 }
 WEB_EVIDENCE_TOOLS = {"web_search", "read_web_page", "browser_read_page"}
+_SOURCE_FILE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])([A-Za-z0-9_./\\-]+\.(?:py|pyi|ts|tsx|js|jsx|php|json|toml|yaml|yml|md|sql|rs|go|java|cs|cpp|c|h))",
+    re.IGNORECASE,
+)
+_BACKTICK_RE = re.compile(r"`([^`\n]{2,160})`")
+_SIMPLE_CODE_REF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:]*$")
+_ALLOWED_GENERIC_CODE_REFS = {
+    "running", "completed", "failed", "cancelled", "queued", "thinking",
+    "using_tool", "waiting_permission", "json", "http", "https", "system",
+    "read_workspace_file", "search_workspace_files", "workspace_file_info",
+    "list_workspace_files", "list_computer_workspaces",
+}
+
+
+
+
+def _required_distinct_source_files(objective: str) -> int:
+    lowered = (objective or "").casefold()
+    broad_markers = (
+        "handoff",
+        "workflow",
+        "background result",
+        "background task",
+        "race condition",
+        "event flow",
+        "end-to-end",
+        "integration",
+        "system",
+    )
+    return 2 if any(marker in lowered for marker in broad_markers) else 1
+
+
+def _requires_frontend_backend_coverage(objective: str) -> bool:
+    lowered = (objective or "").casefold()
+    return any(marker in lowered for marker in ("handoff", "background result", "background task", "event flow"))
+
+
+def _source_sides(paths: list[str]) -> set[str]:
+    sides: set[str] = set()
+    for path in paths:
+        normalized = path.replace("\\", "/").casefold().lstrip("./")
+        if normalized.startswith("apps/desktop/") or "/apps/desktop/" in normalized:
+            sides.add("desktop")
+        if normalized.startswith("backend/") or "/backend/" in normalized:
+            sides.add("backend")
+    return sides
+
+async def _task_tool_evidence(task_id: str) -> list[dict[str, Any]]:
+    async with SessionLocal() as session:
+        events = await list_events(session, task_id, limit=500)
+    records: list[dict[str, Any]] = []
+    for event in events:
+        if event.event_type != "tool_completed":
+            continue
+        data = event_data(event)
+        if not isinstance(data, dict):
+            continue
+        records.append(data)
+    return records
+
+
+def _source_evidence_context(records: list[dict[str, Any]]) -> str:
+    chunks: list[str] = []
+    for record in records:
+        if record.get("success") is not True:
+            continue
+        tool_name = str(record.get("tool_name") or "")
+        evidence = record.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        if tool_name == "read_workspace_file":
+            path = str(evidence.get("path") or "").strip()
+            text = str(evidence.get("text") or "").strip()
+            if path and text:
+                chunks.append(
+                    f"READ {path}\n{_trim_context(text, 3500)}\nEND READ {path}"
+                )
+        elif tool_name == "search_workspace_files":
+            query = str(evidence.get("query") or "").strip()
+            results = evidence.get("results")
+            if isinstance(results, list) and results:
+                paths = [
+                    str(item.get("path") or "")
+                    for item in results[:12]
+                    if isinstance(item, dict) and item.get("path")
+                ]
+                if paths:
+                    chunks.append(
+                        f"SEARCH {query!r}: " + ", ".join(paths)
+                    )
+    return "\n\n".join(chunks)[:12_000]
+
+
+def _successful_records(records: list[dict[str, Any]], tool_name: str) -> list[dict[str, Any]]:
+    return [
+        record for record in records
+        if record.get("success") is True and record.get("tool_name") == tool_name
+    ]
+
+
+def _read_paths_and_corpus(records: list[dict[str, Any]]) -> tuple[list[str], str]:
+    paths: list[str] = []
+    corpus_parts: list[str] = []
+    for record in _successful_records(records, "read_workspace_file"):
+        evidence = record.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        path = str(evidence.get("path") or "").strip()
+        text = str(evidence.get("text") or "")
+        returned_lines = evidence.get("returned_lines")
+        try:
+            line_count = int(returned_lines or 0)
+        except (TypeError, ValueError):
+            line_count = 0
+        if not path or line_count <= 0 or not text.strip():
+            continue
+        paths.append(path)
+        corpus_parts.extend([path, text])
+    return list(dict.fromkeys(paths)), "\n".join(corpus_parts)
+
+
+def _unsupported_specific_refs(result: str, read_paths: list[str], source_corpus: str) -> list[str]:
+    if not result.strip():
+        return []
+    path_lookup = {path.replace("\\", "/").casefold() for path in read_paths}
+    basenames = {path.replace("\\", "/").split("/")[-1].casefold() for path in read_paths}
+    corpus_folded = source_corpus.casefold()
+    unsupported: list[str] = []
+
+    for match in _SOURCE_FILE_RE.finditer(result):
+        raw = match.group(1).strip(".,;:()[]{}")
+        normal = raw.replace("\\", "/").casefold()
+        base = normal.split("/")[-1]
+        if normal not in path_lookup and base not in basenames:
+            unsupported.append(raw)
+
+    for match in _BACKTICK_RE.finditer(result):
+        token = match.group(1).strip()
+        if not _SIMPLE_CODE_REF_RE.fullmatch(token):
+            continue
+        folded = token.casefold()
+        if folded in _ALLOWED_GENERIC_CODE_REFS:
+            continue
+        if _SOURCE_FILE_RE.fullmatch(token):
+            continue
+        if folded not in corpus_folded:
+            unsupported.append(token)
+
+    # Preserve order while keeping the diagnostic compact.
+    return list(dict.fromkeys(unsupported))[:8]
+
+
+def _supported_source_symbols(result: str, source_corpus: str) -> list[str]:
+    corpus_folded = source_corpus.casefold()
+    supported: list[str] = []
+    for match in _BACKTICK_RE.finditer(result):
+        token = match.group(1).strip()
+        if not _SIMPLE_CODE_REF_RE.fullmatch(token):
+            continue
+        folded = token.casefold()
+        if folded in _ALLOWED_GENERIC_CODE_REFS or _SOURCE_FILE_RE.fullmatch(token):
+            continue
+        if folded in corpus_folded:
+            supported.append(token)
+    return list(dict.fromkeys(supported))[:8]
+
+
+def _read_paths_from_evidence_context(context: str) -> list[str]:
+    paths: list[str] = []
+    for line in (context or "").splitlines():
+        if not line.startswith("READ "):
+            continue
+        path = line[5:].strip()
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _dependency_source_context(
+    step: DirectorStep,
+    outcomes: dict[str, StepOutcome],
+) -> tuple[list[str], str]:
+    contexts: list[str] = []
+    for dependency in step.depends_on:
+        outcome = outcomes.get(dependency)
+        if outcome is None or not outcome.evidence_context:
+            continue
+        if "READ " not in outcome.evidence_context:
+            continue
+        contexts.append(outcome.evidence_context)
+    combined = "\n\n".join(contexts)
+    return _read_paths_from_evidence_context(combined), combined
 
 
 def _verification_for_step(
     step: DirectorStep,
     *,
+    objective: str,
     used_tools: list[str],
     outcomes: dict[str, StepOutcome],
     result: str,
-) -> tuple[bool, str]:
-    tools = set(used_tools)
+    tool_evidence: list[dict[str, Any]],
+) -> tuple[bool, str, str]:
     lowered = (result or "").casefold()
-    if "unverified" in lowered or "could not access" in lowered or "no approved workspace" in lowered:
-        return False, "Worker explicitly reported that verification was unavailable."
-    if step.agent_id in {"code", "files"}:
-        hits = sorted(tools & LOCAL_EVIDENCE_TOOLS)
-        if hits:
-            return True, "Local workspace evidence via: " + ", ".join(hits)
-        return False, "No source-reading workspace tool was used."
+    evidence_context = _source_evidence_context(tool_evidence)
+    explicitly_unverified = (
+        "unverified" in lowered
+        or "could not access" in lowered
+        or "no approved workspace" in lowered
+    )
+
+    if step.agent_id == "code":
+        if explicitly_unverified:
+            return False, "Worker explicitly reported that verification was unavailable.", evidence_context
+        read_paths, corpus = _read_paths_and_corpus(tool_evidence)
+        if not read_paths:
+            return False, "No successful source-file read was recorded. Tool attempts alone are not evidence.", evidence_context
+
+        required_distinct = _required_distinct_source_files(objective)
+        if len(read_paths) < required_distinct:
+            return (
+                False,
+                f"Only {len(read_paths)}/{required_distinct} required DISTINCT source files were read: "
+                + ", ".join(read_paths),
+                evidence_context,
+            )
+        if _requires_frontend_backend_coverage(objective):
+            sides = _source_sides(read_paths)
+            if not {"desktop", "backend"}.issubset(sides):
+                missing = sorted({"desktop", "backend"} - sides)
+                return (
+                    False,
+                    "Handoff/event-flow verification requires source coverage on both desktop consumer and backend producer sides; "
+                    "missing: " + ", ".join(missing) + ". Read paths: " + ", ".join(read_paths),
+                    evidence_context,
+                )
+
+        result_folded = (result or "").replace("\\", "/").casefold()
+        if not any(
+            path.replace("\\", "/").casefold() in result_folded
+            or path.replace("\\", "/").split("/")[-1].casefold() in result_folded
+            for path in read_paths
+        ):
+            return False, "The handoff did not cite any source file that the Code Agent actually read.", evidence_context
+
+        unsupported = _unsupported_specific_refs(result, read_paths, corpus)
+        if unsupported:
+            return (
+                False,
+                "The handoff named implementation references not present in successful source reads: "
+                + ", ".join(unsupported),
+                evidence_context,
+            )
+        supported_symbols = _supported_source_symbols(result, corpus)
+        if not supported_symbols:
+            return (
+                False,
+                "The Code handoff did not cite an exact source function/class/symbol from the successful file reads.",
+                evidence_context,
+            )
+        return (
+            True,
+            "Source-backed Code evidence from " + ", ".join(read_paths[:8])
+            + "; cited symbols: " + ", ".join(supported_symbols),
+            evidence_context,
+        )
+
+    if step.agent_id == "files":
+        if explicitly_unverified:
+            return False, "Worker explicitly reported that verification was unavailable.", evidence_context
+        successful_local = [
+            record for record in tool_evidence
+            if record.get("success") is True and record.get("tool_name") in LOCAL_EVIDENCE_TOOLS
+        ]
+        if successful_local:
+            names = sorted({str(record.get("tool_name")) for record in successful_local})
+            return True, "Successful local evidence via: " + ", ".join(names), evidence_context
+        return False, "No successful local evidence tool completed.", evidence_context
+
     if step.agent_id == "research":
-        hits = sorted(tools & WEB_EVIDENCE_TOOLS)
-        if hits:
-            return True, "External evidence via: " + ", ".join(hits)
-        return False, "No web evidence tool was used."
+        if explicitly_unverified:
+            return False, "Worker explicitly reported that verification was unavailable.", evidence_context
+        successful_web = [
+            record for record in tool_evidence
+            if record.get("success") is True and record.get("tool_name") in WEB_EVIDENCE_TOOLS
+        ]
+        if successful_web:
+            names = sorted({str(record.get("tool_name")) for record in successful_web})
+            return True, "Successful external evidence via: " + ", ".join(names), evidence_context
+        return False, "No successful web evidence tool completed.", evidence_context
+
     if step.agent_id == "analyst":
+        # Analyst is a reviewer, not a workspace reader.  If a Code/File worker
+        # captured successful raw source evidence but failed to produce a usable
+        # textual handoff, Analyst may still verify its own conclusions directly
+        # against those captured excerpts.  Do not merely inherit the dependency's
+        # textual verification flag.
+        read_paths, dependency_corpus = _dependency_source_context(step, outcomes)
+        if read_paths and dependency_corpus.strip():
+            required_distinct = _required_distinct_source_files(objective)
+            if len(read_paths) < required_distinct:
+                return (
+                    False,
+                    f"Analyst received only {len(read_paths)}/{required_distinct} required DISTINCT source files.",
+                    dependency_corpus,
+                )
+            if _requires_frontend_backend_coverage(objective):
+                sides = _source_sides(read_paths)
+                if not {"desktop", "backend"}.issubset(sides):
+                    return (
+                        False,
+                        "Analyst cannot verify the handoff flow until captured evidence covers both desktop and backend sides.",
+                        dependency_corpus,
+                    )
+            result_folded = (result or "").replace("\\", "/").casefold()
+            if not any(
+                path.replace("\\", "/").casefold() in result_folded
+                or path.replace("\\", "/").split("/")[-1].casefold() in result_folded
+                for path in read_paths
+            ):
+                return (
+                    False,
+                    "Analyst did not cite any source file from the captured dependency evidence.",
+                    dependency_corpus,
+                )
+            unsupported = _unsupported_specific_refs(result, read_paths, dependency_corpus)
+            if unsupported:
+                return (
+                    False,
+                    "Analyst named implementation references absent from captured source evidence: "
+                    + ", ".join(unsupported),
+                    dependency_corpus,
+                )
+            supported_symbols = _supported_source_symbols(result, dependency_corpus)
+            if not supported_symbols:
+                return (
+                    False,
+                    "Analyst did not cite an exact source symbol from the captured dependency evidence.",
+                    dependency_corpus,
+                )
+            return (
+                True,
+                "Analysis independently checked against captured source evidence from "
+                + ", ".join(read_paths[:8])
+                + "; cited symbols: "
+                + ", ".join(supported_symbols),
+                dependency_corpus,
+            )
+
         if step.depends_on and all(outcomes.get(dep) and outcomes[dep].verified for dep in step.depends_on):
-            return True, "Analysis derived only from verified dependency handoffs."
-        return False, "Analysis included one or more unverified dependencies."
-    return False, "This specialist did not independently verify external or workspace evidence."
+            return True, "Analysis derived only from verified dependency handoffs.", evidence_context
+        return False, "Analysis included one or more unverified dependencies and had no raw source evidence to review.", evidence_context
+
+    return False, "This specialist did not independently verify external or workspace evidence.", evidence_context
 
 
 async def _run_step(
@@ -605,11 +946,14 @@ async def _run_step(
             row = await _wait_for_terminal(row.id)
 
     used_tools = task_used_tools(row)
-    verified, evidence = _verification_for_step(
+    tool_evidence = await _task_tool_evidence(row.id)
+    verified, evidence, evidence_context = _verification_for_step(
         step,
+        objective=objective,
         used_tools=used_tools,
         outcomes=outcomes,
         result=row.result or "",
+        tool_evidence=tool_evidence,
     )
     outcome = StepOutcome(
         step_id=step.id,
@@ -623,6 +967,7 @@ async def _run_step(
         used_tools=used_tools,
         verified=verified,
         evidence=evidence,
+        evidence_context=evidence_context,
     )
     await runtime_events.publish(
         "agent.director.step.completed",
@@ -650,11 +995,25 @@ async def _background_synthesis_turn(
     local_outcomes = [
         outcome for outcome in outcomes.values() if outcome.agent_id in {"code", "files"}
     ]
-    local_verified = any(outcome.verified for outcome in local_outcomes)
+    local_source_evidence_available = any(
+        bool(outcome.evidence_context and "READ " in outcome.evidence_context)
+        for outcome in local_outcomes
+    )
+    source_review_verified = any(
+        outcome.agent_id == "analyst"
+        and outcome.verified
+        and "captured source evidence" in outcome.evidence.casefold()
+        for outcome in outcomes.values()
+    )
+    local_verified = (
+        any(outcome.verified for outcome in local_outcomes)
+        or (local_source_evidence_available and source_review_verified)
+    )
 
     # Do not let synthesis turn an unsupported specialist theory into a
-    # "confirmed root cause". If local source inspection was required but never
-    # actually happened, return a deterministic failure-to-verify handoff.
+    # "confirmed root cause".  Distinguish between a complete lack of source
+    # reads and the subtler case where raw source was captured but no specialist
+    # managed to establish a supported conclusion.
     if requires_local_source and not local_verified:
         hypotheses: list[str] = []
         for outcome in outcomes.values():
@@ -665,15 +1024,30 @@ async def _background_synthesis_turn(
                 f"{_trim_context(outcome.result, 1800)}"
             )
         body = "\n\n".join(hypotheses) or "No usable specialist hypothesis was returned."
+        if not local_source_evidence_available:
+            reason = (
+                "The Code/File specialist did not successfully use a source-reading workspace tool, "
+                "so this workflow must not present its theory as a confirmed implementation fact."
+            )
+            next_action = (
+                "Confirm that the Jace repository is available as an approved computer workspace, "
+                "then rerun the Director so the Code Agent can inspect the relevant files and cite concrete paths/functions."
+            )
+        else:
+            reason = (
+                "Jace successfully captured local source excerpts, but neither the Code/File handoff nor the "
+                "Analyst review established a source-supported conclusion from them."
+            )
+            next_action = (
+                "Rerun or broaden the investigation so the Code Agent reads the other relevant side of the flow; "
+                "do not make a code change from the incomplete evidence gathered here."
+            )
         return (
             "I could not verify the requested Jace root cause in the actual source code. "
-            "The Code/File specialist did not successfully use a source-reading workspace tool, "
-            "so this workflow must not present its theory as a confirmed implementation fact.\n\n"
+            f"{reason}\n\n"
             "Unverified specialist hypotheses follow for reference only:\n\n"
             f"{body}\n\n"
-            "No code change should be made from this run. Confirm that the Jace repository is "
-            "available as an approved computer workspace, then rerun the Director so the Code "
-            "Agent can inspect the relevant files and cite concrete paths/functions."
+            f"No code change should be made from this run. {next_action}"
         )
 
     report_parts: list[str] = []
@@ -690,6 +1064,7 @@ async def _background_synthesis_turn(
             f"Retried: {'yes' if outcome.retried else 'no'}\n"
             f"Used tools: {', '.join(outcome.used_tools or []) or 'none'}\n"
             f"Verification: {'VERIFIED' if outcome.verified else 'UNVERIFIED'} — {outcome.evidence}\n"
+            f"Captured source evidence:\n{_trim_context(outcome.evidence_context, 7000) if outcome.evidence_context else 'none'}\n"
             f"Handoff:\n{_trim_context(text, 9_000)}\n"
             f"END STEP {step.id}"
         )
@@ -700,6 +1075,7 @@ Write one coherent result, not a transcript of worker messages.
 - Lead with the answer/outcome.
 - Combine corroborating findings and resolve conflicts conservatively.
 - Treat a claim as verified only when its STEP block says Verification: VERIFIED.
+- For code claims, use the captured source evidence as the authority. Do not introduce a file, class, function, symbol, state transition, or architecture term that is absent from that evidence.
 - Never call an implementation detail a confirmed root cause merely because Research/Analyst repeated it.
 - For Jace/local-project implementation claims, local Code/File verification outranks external research.
 - Mention failed/skipped specialist work only when it affects confidence or completeness.
