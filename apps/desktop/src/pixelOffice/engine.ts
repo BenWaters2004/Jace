@@ -2322,50 +2322,227 @@ export class JacePixelOfficeEngine {
     room:
       OfficeRoomZone,
   ) {
-    for (
-      let row =
-        room.row;
-      row <
-        room.row +
-          room.height;
-      row += 1
+    if (
+      room.id ===
+      "office"
     ) {
+      this.drawOfficeWoodFloor(
+        ctx,
+        room,
+      );
+    } else if (
+      room.id ===
+      "lounge"
+    ) {
+      this.drawLoungeFloor(
+        ctx,
+        room,
+      );
+    } else if (
+      room.id ===
+      "break"
+    ) {
+      this.drawBreakCheckerFloor(
+        ctx,
+        room,
+      );
+    } else {
       for (
-        let col =
-          room.col;
-        col <
-          room.col +
-            room.width;
-        col += 1
+        let row =
+          room.row;
+        row <
+          room.row +
+            room.height;
+        row += 1
       ) {
-        const drawn =
-          this.sprites
-            .drawFloorTile(
-              ctx,
-              room.floorPattern,
-              room.floorTint,
+        for (
+          let col =
+            room.col;
+          col <
+            room.col +
+              room.width;
+          col += 1
+        ) {
+          const drawn =
+            this.sprites
+              .drawFloorTile(
+                ctx,
+                room.floorPattern,
+                room.floorTint,
+                col *
+                  TILE_SIZE,
+                row *
+                  TILE_SIZE,
+              );
+
+          if (!drawn) {
+            ctx.fillStyle =
+              room.floorTint;
+
+            ctx.fillRect(
               col *
                 TILE_SIZE,
               row *
                 TILE_SIZE,
+              TILE_SIZE,
+              TILE_SIZE,
             );
-
-        if (!drawn) {
-          ctx.fillStyle =
-            room.floorTint;
-
-          ctx.fillRect(
-            col *
-              TILE_SIZE,
-            row *
-              TILE_SIZE,
-            TILE_SIZE,
-            TILE_SIZE,
-          );
+          }
         }
       }
     }
+  }
 
+  private drawOfficeWoodFloor(
+    ctx:
+      CanvasRenderingContext2D,
+    room:
+      OfficeRoomZone,
+  ) {
+    ctx.fillStyle =
+      "#73472A";
+
+    ctx.fillRect(
+      room.col *
+        TILE_SIZE,
+      room.row *
+        TILE_SIZE,
+      room.width *
+        TILE_SIZE,
+      room.height *
+        TILE_SIZE,
+    );
+
+    for (
+      let row = 0;
+      row < room.height;
+      row += 1
+    ) {
+      const y =
+        (
+          room.row + row
+        ) * TILE_SIZE;
+
+      ctx.strokeStyle =
+        "rgba(96,60,34,0.42)";
+
+      ctx.beginPath();
+      ctx.moveTo(
+        room.col *
+          TILE_SIZE,
+        y + 0.5,
+      );
+      ctx.lineTo(
+        (
+          room.col +
+          room.width
+        ) * TILE_SIZE,
+        y + 0.5,
+      );
+      ctx.stroke();
+    }
+
+    for (
+      let col = 1;
+      col < room.width;
+      col += 4
+    ) {
+      const x =
+        (
+          room.col + col
+        ) * TILE_SIZE;
+
+      ctx.strokeStyle =
+        "rgba(122,78,45,0.18)";
+
+      ctx.beginPath();
+      ctx.moveTo(
+        x + 0.5,
+        room.row *
+          TILE_SIZE,
+      );
+      ctx.lineTo(
+        x + 0.5,
+        (
+          room.row +
+          room.height
+        ) * TILE_SIZE,
+      );
+      ctx.stroke();
+    }
+  }
+
+  private drawLoungeFloor(
+    ctx:
+      CanvasRenderingContext2D,
+    room:
+      OfficeRoomZone,
+  ) {
+    ctx.fillStyle =
+      "#56799E";
+
+    ctx.fillRect(
+      room.col *
+        TILE_SIZE,
+      room.row *
+        TILE_SIZE,
+      room.width *
+        TILE_SIZE,
+      room.height *
+        TILE_SIZE,
+    );
+  }
+
+  private drawBreakCheckerFloor(
+    ctx:
+      CanvasRenderingContext2D,
+    room:
+      OfficeRoomZone,
+  ) {
+    const colors = [
+      "#ECEFF2",
+      "#4A4F57",
+    ];
+
+    for (
+      let rowOffset = 0;
+      rowOffset < room.height;
+      rowOffset += 1
+    ) {
+      for (
+        let colOffset = 0;
+        colOffset < room.width;
+        colOffset += 1
+      ) {
+        const x =
+          (
+            room.col +
+            colOffset
+          ) * TILE_SIZE;
+
+        const y =
+          (
+            room.row +
+            rowOffset
+          ) * TILE_SIZE;
+
+        ctx.fillStyle =
+          colors[
+            (
+              rowOffset +
+              colOffset +
+              1
+            ) % 2
+          ];
+
+        ctx.fillRect(
+          x,
+          y,
+          TILE_SIZE,
+          TILE_SIZE,
+        );
+      }
+    }
   }
 
   private renderCarpets(
@@ -2715,7 +2892,7 @@ export class JacePixelOfficeEngine {
 
     if (!drawn) {
       ctx.fillStyle =
-        "#1d2c2f";
+        "#223447";
 
       ctx.fillRect(
         col *

@@ -21,6 +21,12 @@ import type {
   UpstreamFurnitureOrientation,
 } from "./types";
 
+const BW_LOGO_PLAQUE_URL =
+  new URL(
+    "./bw-logo-plaque.png",
+    import.meta.url,
+  ).href;
+
 interface LoadedFurnitureAsset
   extends ResolvedFurnitureAsset {
   image: HTMLImageElement;
@@ -601,6 +607,8 @@ export class PixelSpriteLibrary {
         },
       );
 
+      await this.loadCustomFurniture();
+
       const characterCount =
         this.characters.filter(
           Boolean,
@@ -635,6 +643,62 @@ export class PixelSpriteLibrary {
         error instanceof Error
           ? error.message
           : "Pixel Agents assets failed to load.";
+    }
+  }
+
+  private async loadCustomFurniture() {
+    try {
+      const image =
+        await loadImage(
+          BW_LOGO_PLAQUE_URL,
+        );
+
+      const customAsset:
+        LoadedFurnitureAsset = {
+          rootId:
+            "BW_LOGO_PLAQUE",
+          name:
+            "BW Logo Plaque",
+          category:
+            "decor",
+          folder:
+            "custom",
+          assetId:
+            "bw-logo-plaque",
+          file:
+            "bw-logo-plaque.png",
+          width: 32,
+          height: 32,
+          footprintW: 2,
+          footprintH: 2,
+          backgroundTiles: 0,
+          state:
+            undefined,
+          frame:
+            undefined,
+          orientation:
+            undefined,
+          mirrorSide:
+            false,
+          canPlaceOnWalls:
+            true,
+          canPlaceOnSurfaces:
+            false,
+          image,
+        };
+
+      this.furniture.set(
+        "BW_LOGO_PLAQUE",
+        [customAsset],
+      );
+    } catch (error) {
+      this.warnings.push(
+        `Custom furniture BW_LOGO_PLAQUE: ${
+          error instanceof Error
+            ? error.message
+            : "image load failed"
+        }`,
+      );
     }
   }
 

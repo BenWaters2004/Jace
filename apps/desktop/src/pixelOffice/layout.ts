@@ -10,64 +10,54 @@ import type {
 
 export const TILE_SIZE = 16;
 
-/**
- * Pixel Agents' published default office is a 21 x 22 layout. This key is
- * intentionally new so older Jace office layouts cannot override the default
- * after the upgrade.
- */
 export const OFFICE_LAYOUT_STORAGE_KEY =
-  "jace.pixelOffice.layout.pixelAgents.default.v1";
+  "jace.pixelOffice.layout.pixelAgents.default.v4";
 
 export const OFFICE_CAMERA_STORAGE_KEY =
   "jace.pixelOffice.camera.pixelAgents.v3";
 
 /**
- * Keep Jace's darker wall treatment while retaining Pixel Agents' wall shapes.
+ * Darker blue-grey wall tint to better match the Pixel Agents reference office.
  */
 export const WALL_TINT =
-  "#28374B";
+  "#24384C";
 
-const LAYOUT_VERSION = 6;
+const LAYOUT_VERSION = 9;
 
-/**
- * Pixel Agents derives seats from chair furniture. Jace currently keeps seats
- * explicitly because workers are mapped to named specialists, so these seats
- * mirror the chairs/benches/sofas in the upstream default office.
- */
 const SPECIALIST_SEATS: OfficeSeat[] = [
   {
     id: "research",
     specialist: "research",
     col: 3,
-    row: 14,
+    row: 13,
     facing: "up",
   },
   {
     id: "code",
     specialist: "code",
     col: 7,
-    row: 14,
+    row: 13,
     facing: "up",
   },
   {
     id: "files",
     specialist: "files",
     col: 3,
-    row: 16,
+    row: 15,
     facing: "right",
   },
   {
     id: "analyst",
     specialist: "analyst",
     col: 7,
-    row: 16,
+    row: 15,
     facing: "left",
   },
   {
     id: "general",
     specialist: "general",
     col: 3,
-    row: 18,
+    row: 17,
     facing: "right",
   },
 ];
@@ -76,70 +66,64 @@ const OVERFLOW_SEATS: OfficeSeat[] = [
   {
     id: "overflow-1",
     col: 7,
-    row: 18,
+    row: 17,
     facing: "left",
   },
   {
     id: "overflow-2",
     col: 13,
-    row: 15,
+    row: 14,
     facing: "right",
   },
   {
     id: "overflow-3",
     col: 16,
-    row: 15,
+    row: 14,
     facing: "left",
   },
 ];
 
 /**
- * The upstream default uses one connected office divided visually into a warm
- * work area, a blue lounge and a small neutral lower-right area. Jace models
- * floor regions as room zones so pathfinding can keep using its existing API.
- * No room-name labels are rendered by the engine for this layout.
+ * Model the visible floor areas inside the walls. The lounge and break area
+ * begin on the divider column so that the doorway opening renders as a proper
+ * floor passage instead of a black void.
  */
 const ROOMS: OfficeRoomZone[] = [
   {
     id: "office",
-    label: "Office",
+    label: "",
     theme: "office",
-    col: 1,
-    row: 10,
-    width: 11,
-    height: 11,
-    floorPattern: 7,
-    floorTint: "#6B5141",
+    col: 2,
+    row: 11,
+    width: 9,
+    height: 10,
+    floorPattern: 0,
+    floorTint: "#754A2B",
   },
   {
     id: "lounge",
-    label: "Lounge",
+    label: "",
     theme: "lounge",
-    col: 12,
-    row: 10,
+    col: 11,
+    row: 11,
     width: 9,
-    height: 9,
-    floorPattern: 1,
-    floorTint: "#40586B",
+    height: 8,
+    floorPattern: 0,
+    floorTint: "#597BA0",
   },
   {
     id: "break",
-    label: "Break",
+    label: "",
     theme: "break",
-    col: 12,
+    col: 11,
     row: 19,
     width: 9,
     height: 2,
-    floorPattern: 9,
-    floorTint: "#4B535C",
+    floorPattern: 0,
+    floorTint: "#D8DDE2",
   },
 ];
 
-/**
- * These walls reproduce the structure visible in Pixel Agents' published
- * 21x22 default layout: a north wall, left/right sides and a centre divider
- * with a broad opening between the work area and lounge.
- */
 const WALLS: OfficeWallSegment[] = [
   {
     id: "north",
@@ -170,7 +154,7 @@ const WALLS: OfficeWallSegment[] = [
     length: 11,
     doorways: [
       {
-        offset: 4,
+        offset: 5,
         size: 4,
       },
     ],
@@ -205,14 +189,12 @@ function wallItem(
 export function createDefaultOfficeLayout():
   OfficeLayoutConfig {
   const furniture: FurniturePlacement[] = [
-    // -------------------------------------------------------------------
-    // Pixel Agents default layout - furniture positions are retained.
-    // -------------------------------------------------------------------
+    // Pixel Agents default layout with the BW logo plaque replacing the clock.
     {
       id: "default-table-front",
       assetGroup: "TABLE_FRONT",
       col: 4,
-      row: 16,
+      row: 15,
       footprintW: 3,
       footprintH: 4,
       blocks: true,
@@ -221,7 +203,7 @@ export function createDefaultOfficeLayout():
       id: "default-coffee-table",
       assetGroup: "COFFEE_TABLE",
       col: 14,
-      row: 14,
+      row: 13,
       footprintW: 2,
       footprintH: 2,
       blocks: true,
@@ -231,7 +213,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "SOFA",
       orientation: "side",
       col: 13,
-      row: 14,
+      row: 13,
       footprintW: 1,
       footprintH: 2,
       blocks: true,
@@ -241,7 +223,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "SOFA",
       orientation: "back",
       col: 14,
-      row: 16,
+      row: 15,
       footprintW: 2,
       footprintH: 1,
       blocks: true,
@@ -251,7 +233,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "SOFA",
       orientation: "front",
       col: 14,
-      row: 13,
+      row: 12,
       footprintW: 2,
       footprintH: 1,
       blocks: true,
@@ -262,14 +244,12 @@ export function createDefaultOfficeLayout():
       orientation: "side",
       mirrorX: true,
       col: 16,
-      row: 14,
+      row: 13,
       footprintW: 1,
       footprintH: 2,
       blocks: true,
     },
 
-    // Wall-mounted decor. Pixel Agents stores these at row 9 because their
-    // bottom footprint row aligns with the north wall at row 10.
     wallItem(
       "default-hanging-plant-right",
       "HANGING_PLANT",
@@ -311,11 +291,11 @@ export function createDefaultOfficeLayout():
       2,
     ),
     wallItem(
-      "default-clock",
-      "CLOCK",
+      "default-bw-plaque",
+      "BW_LOGO_PLAQUE",
       5,
       10,
-      1,
+      2,
       2,
     ),
 
@@ -332,20 +312,19 @@ export function createDefaultOfficeLayout():
       id: "default-coffee-lounge",
       assetGroup: "COFFEE",
       col: 14,
-      row: 15,
+      row: 14,
       footprintW: 1,
       footprintH: 1,
       blocks: false,
       surface: true,
     },
 
-    // Four chairs around the large work table.
     {
       id: "default-chair-left-bottom",
       assetGroup: "WOODEN_CHAIR",
       orientation: "side",
       col: 3,
-      row: 18,
+      row: 17,
       footprintW: 1,
       footprintH: 2,
       blocks: false,
@@ -355,7 +334,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "WOODEN_CHAIR",
       orientation: "side",
       col: 3,
-      row: 16,
+      row: 15,
       footprintW: 1,
       footprintH: 2,
       blocks: false,
@@ -366,7 +345,7 @@ export function createDefaultOfficeLayout():
       orientation: "side",
       mirrorX: true,
       col: 7,
-      row: 16,
+      row: 15,
       footprintW: 1,
       footprintH: 2,
       blocks: false,
@@ -377,19 +356,18 @@ export function createDefaultOfficeLayout():
       orientation: "side",
       mirrorX: true,
       col: 7,
-      row: 18,
+      row: 17,
       footprintW: 1,
       footprintH: 2,
       blocks: false,
     },
 
-    // Two upper desks.
     {
       id: "default-desk-left",
       assetGroup: "DESK",
       orientation: "front",
       col: 2,
-      row: 12,
+      row: 11,
       footprintW: 3,
       footprintH: 2,
       blocks: true,
@@ -399,7 +377,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "DESK",
       orientation: "front",
       col: 6,
-      row: 12,
+      row: 11,
       footprintW: 3,
       footprintH: 2,
       blocks: true,
@@ -408,7 +386,7 @@ export function createDefaultOfficeLayout():
       id: "default-bench-left",
       assetGroup: "CUSHIONED_BENCH",
       col: 3,
-      row: 14,
+      row: 13,
       footprintW: 1,
       footprintH: 1,
       blocks: false,
@@ -417,7 +395,7 @@ export function createDefaultOfficeLayout():
       id: "default-bench-right",
       assetGroup: "CUSHIONED_BENCH",
       col: 7,
-      row: 14,
+      row: 13,
       footprintW: 1,
       footprintH: 1,
       blocks: false,
@@ -429,7 +407,7 @@ export function createDefaultOfficeLayout():
       state: "off",
       linkedSeatId: "code",
       col: 7,
-      row: 12,
+      row: 11,
       footprintW: 1,
       footprintH: 2,
       blocks: false,
@@ -442,21 +420,20 @@ export function createDefaultOfficeLayout():
       state: "off",
       linkedSeatId: "research",
       col: 3,
-      row: 12,
+      row: 11,
       footprintW: 1,
       footprintH: 2,
       blocks: false,
       surface: true,
     },
 
-    // Side-facing PCs on the large table.
     {
       id: "default-pc-table-left-top",
       assetGroup: "PC",
       orientation: "side",
       linkedSeatId: "files",
       col: 4,
-      row: 16,
+      row: 15,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
@@ -468,7 +445,7 @@ export function createDefaultOfficeLayout():
       orientation: "side",
       linkedSeatId: "general",
       col: 4,
-      row: 18,
+      row: 17,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
@@ -481,7 +458,7 @@ export function createDefaultOfficeLayout():
       mirrorX: true,
       linkedSeatId: "analyst",
       col: 6,
-      row: 16,
+      row: 15,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
@@ -494,16 +471,13 @@ export function createDefaultOfficeLayout():
       mirrorX: true,
       linkedSeatId: "overflow-1",
       col: 6,
-      row: 18,
+      row: 17,
       footprintW: 2,
       footprintH: 1,
       blocks: false,
       surface: true,
     },
 
-    // The default layout contains a second plant variant here. Jace's asset
-    // loader resolves by group, so the normal PLANT group keeps the same
-    // placement without depending on a variant-specific root id.
     {
       id: "default-divider-plant",
       assetGroup: "PLANT",
@@ -525,7 +499,7 @@ export function createDefaultOfficeLayout():
       id: "default-bin",
       assetGroup: "BIN",
       col: 2,
-      row: 20,
+      row: 19,
       footprintW: 1,
       footprintH: 1,
       blocks: true,
@@ -535,7 +509,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "SMALL_TABLE",
       orientation: "front",
       col: 17,
-      row: 19,
+      row: 18,
       footprintW: 2,
       footprintH: 2,
       blocks: true,
@@ -545,7 +519,7 @@ export function createDefaultOfficeLayout():
       assetGroup: "SMALL_TABLE",
       orientation: "side",
       col: 1,
-      row: 18,
+      row: 17,
       footprintW: 2,
       footprintH: 2,
       blocks: true,
@@ -554,7 +528,7 @@ export function createDefaultOfficeLayout():
       id: "default-coffee-left",
       assetGroup: "COFFEE",
       col: 1,
-      row: 19,
+      row: 18,
       footprintW: 1,
       footprintH: 1,
       blocks: false,
@@ -564,7 +538,7 @@ export function createDefaultOfficeLayout():
       id: "default-lower-left-plant",
       assetGroup: "PLANT",
       col: 1,
-      row: 17,
+      row: 16,
       footprintW: 1,
       footprintH: 2,
       blocks: true,
