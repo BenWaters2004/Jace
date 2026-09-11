@@ -1090,6 +1090,24 @@ async def _run_step(
     return outcome
 
 
+
+def _sanitize_greenfield_design_language(text: str) -> str:
+    """Prevent completed greenfield proposals from being described as existing verified state."""
+    value = text or ""
+    replacements = (
+        (r"\bkey verified components\b", "Key proposed components"),
+        (r"\bverified components\b", "proposed components"),
+        (r"\bverified architecture\b", "proposed architecture"),
+        (r"\bverified design\b", "completed design"),
+        (r"\bdesign verified\b", "design complete"),
+        (r"\bverified project structure\b", "proposed project structure"),
+        (r"\bverified data model\b", "proposed data model"),
+    )
+    for pattern, replacement in replacements:
+        value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
+    return value
+
+
 async def _background_synthesis_turn(
     *,
     model: str,
@@ -1101,6 +1119,7 @@ async def _background_synthesis_turn(
     _web_needed, code_needed, files_needed, _analysis_needed = _objective_traits(objective)
     code_steps = [step for step in plan.steps if step.agent_id == "code"]
     creation_requested = any(step.work_mode == "create" for step in code_steps)
+    greenfield_design = creation_requested and not _creation_execution_requested(objective)
     requires_local_source = (code_needed or files_needed) and not creation_requested
     local_outcomes = [
         outcome for outcome in outcomes.values() if outcome.agent_id in {"code", "files"}
@@ -1166,6 +1185,11 @@ async def _background_synthesis_turn(
         if outcome is None:
             continue
         text = outcome.result or outcome.error or "No textual result was returned."
+        evidence_label = (
+            f"Deliverable: {'COMPLETE' if outcome.verified else 'INCOMPLETE'} — {outcome.evidence}"
+            if greenfield_design and step.work_mode == "create"
+            else f"Verification: {'VERIFIED' if outcome.verified else 'UNVERIFIED'} — {outcome.evidence}"
+        )
         report_parts.append(
             f"STEP {step.id}\n"
             f"Specialist: {step.agent_id}\n"
@@ -1173,7 +1197,7 @@ async def _background_synthesis_turn(
             f"Status: {outcome.status}\n"
             f"Retried: {'yes' if outcome.retried else 'no'}\n"
             f"Used tools: {', '.join(outcome.used_tools or []) or 'none'}\n"
-            f"Verification: {'VERIFIED' if outcome.verified else 'UNVERIFIED'} — {outcome.evidence}\n"
+            f"{evidence_label}\n"
             f"Captured source evidence:\n{_trim_context(outcome.evidence_context, 7000) if outcome.evidence_context else 'none'}\n"
             f"Handoff:\n{_trim_context(text, 9_000)}\n"
             f"END STEP {step.id}"
@@ -1192,7 +1216,7 @@ Write one coherent result, not a transcript of worker messages.
 - State clearly what was actually done versus merely recommended.
 - Director-created Code/File workers may have read-only capabilities unless write tools were explicitly authorised. Never claim files were edited/created unless successful write evidence proves it.
 - If the objective requested creation/modification but no successful write occurred, present the prepared implementation honestly and state that execution still needs authorised write capability.
-- For greenfield DESIGN/PLANNING tasks, "Verification: VERIFIED" means the requested design deliverable completed; it does NOT mean proposed architecture, dependencies, schemas, files, or endpoints already exist. Use words such as "proposed", "recommended", and "design" rather than "verified existing architecture".
+- For greenfield DESIGN/PLANNING tasks, completion only means the requested design deliverable was produced. Proposed architecture, dependencies, schemas, files, endpoints, security settings, and implementation choices are recommendations, NOT verified existing state. Do not use the word "verified" to describe those proposed components; use "proposed", "recommended", "planned", or "design complete".
 - A greenfield design must stay independent of unrelated local workspaces. Never claim it reuses, extends, or modified an existing project/file unless the original objective explicitly requested that relationship and successful evidence supports it.
 - Never say dependencies were added/captured in a requirements/package file, or that source files were created, unless successful write-tool evidence proves it.
 - Keep useful file names, evidence and next actions.
@@ -1238,7 +1262,7 @@ Write one coherent result, not a transcript of worker messages.
         if not yielded:
             text = "".join(parts).strip()
             if text:
-                return text
+                return _sanitize_greenfield_design_language(text) if greenfield_design else text
             break
         logger.info("Agent Director yielded final synthesis to foreground Jace.")
 
@@ -1251,7 +1275,8 @@ Write one coherent result, not a transcript of worker messages.
         lines.append(
             f"\n{step.title} — {outcome.status}\n{_trim_context(detail, 2_500)}"
         )
-    return "\n".join(lines).strip()
+    fallback = "\n".join(lines).strip()
+    return _sanitize_greenfield_design_language(fallback) if greenfield_design else fallback
 
 
 async def _persist_director_handoff(

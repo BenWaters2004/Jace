@@ -418,6 +418,422 @@ def _source_coverage_nudge(task: AgentTask, source_paths: set[str]) -> str:
     )
 
 
+
+_BOOTSTRAP_STOPWORDS = {
+    "about", "after", "again", "agent", "agents", "available", "best", "code",
+    "could", "current", "find", "free", "from", "have", "investigate", "jace", "keep", "need", "project",
+    "system", "task", "that", "their", "them", "this", "through", "using", "whatever", "when",
+    "where", "which", "while", "with", "work", "worked", "working", "would", "your",
+}
+_BOOTSTRAP_SOURCE_EXTENSIONS = {
+    ".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".php", ".rs", ".go", ".java",
+    ".kt", ".kts", ".swift", ".dart", ".rb", ".cs", ".fs", ".fsx", ".cpp", ".c", ".h", ".hpp",
+    ".vue", ".svelte", ".sql", ".proto", ".graphql", ".gql", ".sh", ".bash", ".ps1", ".html", ".htm",
+    ".css", ".scss", ".sass", ".less", ".toml", ".yaml", ".yml", ".json", ".xml", ".ini", ".cfg",
+    ".conf", ".properties", ".gradle", ".tf", ".hcl", ".md",
+}
+_BOOTSTRAP_PATH_PENALTIES = (
+    "/node_modules/", "/vendor/", "/dist/", "/build/", "/target/", "/coverage/", "/.venv/", "/venv/",
+    "/__pycache__/", "/.git/", "/out/", "/generated/",
+)
+
+
+def _source_bootstrap_terms(task: AgentTask, *, limit: int = 6) -> list[str]:
+    """Extract project-agnostic search terms from the current objective.
+
+    This deliberately avoids framework/repository assumptions. Exact quoted/backtick
+    identifiers are preferred, followed by meaningful words from the user's current
+    objective and task title.
+    """
+    text = f"{_director_original_request(task)}\n{task.title}".strip()
+    candidates: list[str] = []
+    for match in re.finditer(r"[`\"']([^`\"']{2,80})[`\"']", text):
+        value = match.group(1).strip()
+        if " " not in value and value.casefold() not in _BOOTSTRAP_STOPWORDS:
+            candidates.append(value)
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.:-]{2,}", text):
+        folded = token.casefold().strip("._:-")
+        if len(folded) < 4 or folded in _BOOTSTRAP_STOPWORDS:
+            continue
+        if folded.isdigit():
+            continue
+        candidates.append(token.strip(".,:;()[]{}"))
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        key = item.casefold()
+        if not item or key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+        if len(output) >= limit:
+            break
+    return output
+
+
+def _select_bootstrap_workspaces(task: AgentTask, catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Select only workspaces that are unambiguous for deterministic bootstrap.
+
+    A sole approved workspace is unambiguous. With multiple workspaces, require the
+    objective to identify one by id, root path, or a distinctive label phrase. This
+    prevents Jace from silently searching unrelated projects.
+    """
+    if not catalog:
+        return []
+    if len(catalog) == 1:
+        return [catalog[0]]
+
+    text = _director_original_request(task).casefold().replace("\\", "/")
+    generic_labels = {"project", "workspace", "repo", "repository", "code", "app", "application"}
+    matched: list[dict[str, Any]] = []
+    for item in catalog:
+        workspace_id = str(item.get("id") or "").strip()
+        root = str(item.get("root_path") or "").strip().replace("\\", "/")
+        label = str(item.get("label") or "").strip()
+        label_folded = label.casefold()
+        if workspace_id and workspace_id.casefold() in text:
+            matched.append(item)
+            continue
+        if root and root.casefold() in text:
+            matched.append(item)
+            continue
+        if label and label_folded not in generic_labels and len(label_folded) >= 3:
+            patterns = (
+                f"{label_folded} project", f"project {label_folded}",
+                f"{label_folded} repo", f"repo {label_folded}",
+                f"{label_folded} repository", f"repository {label_folded}",
+                f"{label_folded} workspace", f"workspace {label_folded}",
+                f'"{label_folded}"', f"'{label_folded}'",
+            )
+            if any(pattern in text for pattern in patterns):
+                matched.append(item)
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in matched:
+        key = str(item.get("id") or item.get("root_path") or "")
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    return deduped if len(deduped) == 1 else []
+
+
+def _bootstrap_candidate_score(path: str, query: str, result: dict[str, Any]) -> float:
+    normalized = "/" + str(path or "").replace("\\", "/").casefold().lstrip("/")
+    if any(part in normalized for part in _BOOTSTRAP_PATH_PENALTIES):
+        return -1000.0
+    name = normalized.rsplit("/", 1)[-1]
+    suffix = Path(name).suffix.casefold()
+    score = 0.0
+    if suffix in _BOOTSTRAP_SOURCE_EXTENSIONS or name in {"dockerfile", "makefile", "procfile", "gemfile", "rakefile"}:
+        score += 3.0
+    if bool(result.get("path_match")):
+        score += 2.0
+    if str(result.get("snippet") or "").strip():
+        score += 2.0
+    folded_query = str(query or "").casefold()
+    if folded_query and folded_query in name:
+        score += 3.0
+    elif folded_query and folded_query in normalized:
+        score += 1.0
+    if name.endswith((".lock", ".map")) or name in {"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}:
+        score -= 4.0
+    return score
+
+
+def _rank_bootstrap_candidates(search_records: list[dict[str, Any]]) -> list[str]:
+    scores: dict[str, float] = {}
+    displays: dict[str, str] = {}
+    for record in search_records:
+        evidence = record.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        query = str(evidence.get("query") or "")
+        results = evidence.get("results")
+        if not isinstance(results, list):
+            continue
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            path = str(result.get("path") or "").strip()
+            if not path:
+                continue
+            key = path.replace("\\", "/").casefold()
+            score = _bootstrap_candidate_score(path, query, result)
+            if score <= -900:
+                continue
+            scores[key] = scores.get(key, 0.0) + score
+            displays.setdefault(key, path)
+    ranked = sorted(scores, key=lambda key: (-scores[key], displays[key].casefold()))
+    return [displays[key] for key in ranked]
+
+
+async def _record_bootstrap_tool_execution(
+    *,
+    task_id: str,
+    task: AgentTask,
+    agent_name: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    used_tools: list[str],
+    progress: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run an audited tool call initiated by Jace's Director evidence bootstrap."""
+    used_tools.append(tool_name)
+    await _set_state(
+        task_id,
+        status="using_tool",
+        progress=progress,
+        message=f"Using {tool_name}",
+        event_type="tool_started",
+        event_message=f"{agent_name} is using {tool_name} for Director evidence bootstrap.",
+        event_data={"tool_name": tool_name, "arguments": arguments, "director_bootstrap": True},
+    )
+    async with SessionLocal() as session:
+        current_task = await get_task(session, task_id)
+        if current_task is None:
+            raise RuntimeError("Agent task disappeared during evidence bootstrap.")
+
+    tool_message, execution = await _execute_tool(
+        task=current_task,
+        tool_name=tool_name,
+        arguments=arguments,
+    )
+
+    async with SessionLocal() as session:
+        current_task = await get_task(session, task_id)
+        if current_task is not None:
+            succeeded = bool(execution.get("success"))
+            current_task = await update_task_state(
+                session,
+                current_task,
+                status="thinking",
+                progress=min(progress + 0.01, 0.18),
+                progress_message="Reviewing bootstrap evidence" if succeeded else "Reviewing bootstrap failure",
+                used_tools=used_tools,
+                event_type="tool_completed",
+                event_message=(
+                    f"{tool_name} returned Director bootstrap evidence."
+                    if succeeded else f"{tool_name} failed during Director bootstrap."
+                ),
+                event_data_value={**execution, "director_bootstrap": True},
+            )
+    if current_task is not None:
+        await _publish_task(current_task)
+    return tool_message, execution
+
+
+async def _bootstrap_source_evidence(
+    *,
+    task_id: str,
+    task: AgentTask,
+    agent_name: str,
+    workspace_catalog: list[dict[str, Any]],
+    available_tools: set[str],
+    used_tools: list[str],
+    required_reads: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str]]:
+    """Deterministically seed an existing-project investigation with real evidence.
+
+    Small local models sometimes repeatedly answer without choosing a workspace tool.
+    Jace can safely remove that failure mode by searching an unambiguous approved
+    workspace itself, using terms derived from the user's objective, then reading the
+    strongest matching files through the same audited tools the worker would use.
+    """
+    if required_reads <= 0 or "search_workspace_files" not in available_tools or "read_workspace_file" not in available_tools:
+        return [], [], set()
+
+    targets = _select_bootstrap_workspaces(task, workspace_catalog)
+    if not targets:
+        return [], [], set()
+
+    terms = _source_bootstrap_terms(task)
+    if not terms:
+        return [], [], set()
+
+    search_records: list[dict[str, Any]] = []
+    transcript: list[dict[str, Any]] = []
+    for workspace in targets:
+        workspace_id = str(workspace.get("id") or "")
+        if not workspace_id:
+            continue
+        for index, term in enumerate(terms[:4]):
+            arguments = {
+                "workspace_id": workspace_id,
+                "query": term,
+                "path": ".",
+                "include_content": True,
+                "max_results": 12,
+            }
+            tool_message, execution = await _record_bootstrap_tool_execution(
+                task_id=task_id,
+                task=task,
+                agent_name=agent_name,
+                tool_name="search_workspace_files",
+                arguments=arguments,
+                used_tools=used_tools,
+                progress=min(0.105 + (index * 0.006), 0.14),
+            )
+            transcript.append(tool_message)
+            if execution.get("success") is True:
+                search_records.append(execution)
+
+    candidates = _rank_bootstrap_candidates(search_records)
+    if not candidates:
+        return transcript, [], set()
+
+    read_records: list[dict[str, Any]] = []
+    paths: set[str] = set()
+    # Read the minimum needed plus one extra candidate when available. The extra
+    # evidence gives the worker choice without turning bootstrap into a broad crawl.
+    read_budget = min(max(required_reads + 1, 2), 4)
+    workspace_id = str(targets[0].get("id") or "")
+    for index, path in enumerate(candidates[:read_budget]):
+        arguments = {
+            "workspace_id": workspace_id,
+            "path": path,
+            "start_line": 1,
+            "max_lines": 400,
+        }
+        tool_message, execution = await _record_bootstrap_tool_execution(
+            task_id=task_id,
+            task=task,
+            agent_name=agent_name,
+            tool_name="read_workspace_file",
+            arguments=arguments,
+            used_tools=used_tools,
+            progress=min(0.145 + (index * 0.008), 0.18),
+        )
+        transcript.append(tool_message)
+        if execution.get("success") is not True:
+            continue
+        evidence = execution.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        try:
+            returned_lines = int(evidence.get("returned_lines") or 0)
+        except (TypeError, ValueError):
+            returned_lines = 0
+        source_path = str(evidence.get("path") or "").strip()
+        if returned_lines <= 0 or not source_path or not str(evidence.get("text") or "").strip():
+            continue
+        normalized = source_path.replace("\\", "/").casefold()
+        if normalized in paths:
+            continue
+        paths.add(normalized)
+        read_records.append(execution)
+
+    return transcript, read_records, paths
+
+
+async def _bootstrap_named_followup_evidence(
+    *,
+    task_id: str,
+    task: AgentTask,
+    agent_name: str,
+    workspace_catalog: list[dict[str, Any]],
+    available_tools: set[str],
+    used_tools: list[str],
+    artifacts: list[str],
+    already_read: set[str],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Resolve concrete missing-artifact references from a source-backed draft.
+
+    The worker may correctly conclude that another file is needed but then fail to
+    issue the next tool call. When the draft names a candidate artifact, Jace can
+    safely attempt that read through the same approved/audited workspace boundary.
+    """
+    if not artifacts or "read_workspace_file" not in available_tools:
+        return [], set()
+    targets = _select_bootstrap_workspaces(task, workspace_catalog)
+    if not targets:
+        return [], set()
+    workspace_id = str(targets[0].get("id") or "")
+    if not workspace_id:
+        return [], set()
+
+    records: list[dict[str, Any]] = []
+    new_paths: set[str] = set()
+    for index, raw in enumerate(artifacts[:4]):
+        candidate = str(raw or "").strip().strip("`'\"").replace("\\", "/")
+        if not candidate:
+            continue
+        normalized = candidate.casefold().lstrip("./")
+        if normalized in already_read or any(path.endswith("/" + normalized) for path in already_read):
+            continue
+
+        direct_args = {
+            "workspace_id": workspace_id,
+            "path": candidate,
+            "start_line": 1,
+            "max_lines": 500,
+        }
+        _, execution = await _record_bootstrap_tool_execution(
+            task_id=task_id,
+            task=task,
+            agent_name=agent_name,
+            tool_name="read_workspace_file",
+            arguments=direct_args,
+            used_tools=used_tools,
+            progress=min(0.80 + index * 0.01, 0.86),
+        )
+        successful = execution.get("success") is True
+        if not successful and "search_workspace_files" in available_tools:
+            basename = Path(candidate).name
+            if basename:
+                _, search_execution = await _record_bootstrap_tool_execution(
+                    task_id=task_id,
+                    task=task,
+                    agent_name=agent_name,
+                    tool_name="search_workspace_files",
+                    arguments={
+                        "workspace_id": workspace_id,
+                        "query": basename,
+                        "path": ".",
+                        "include_content": False,
+                        "max_results": 10,
+                    },
+                    used_tools=used_tools,
+                    progress=min(0.805 + index * 0.01, 0.87),
+                )
+                ranked = _rank_bootstrap_candidates([search_execution]) if search_execution.get("success") is True else []
+                if ranked:
+                    _, execution = await _record_bootstrap_tool_execution(
+                        task_id=task_id,
+                        task=task,
+                        agent_name=agent_name,
+                        tool_name="read_workspace_file",
+                        arguments={
+                            "workspace_id": workspace_id,
+                            "path": ranked[0],
+                            "start_line": 1,
+                            "max_lines": 500,
+                        },
+                        used_tools=used_tools,
+                        progress=min(0.81 + index * 0.01, 0.88),
+                    )
+                    successful = execution.get("success") is True
+        if not successful:
+            continue
+        evidence = execution.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        path = str(evidence.get("path") or "").strip()
+        try:
+            returned_lines = int(evidence.get("returned_lines") or 0)
+        except (TypeError, ValueError):
+            returned_lines = 0
+        if not path or returned_lines <= 0 or not str(evidence.get("text") or "").strip():
+            continue
+        key = path.replace("\\", "/").casefold()
+        if key in already_read or key in new_paths:
+            continue
+        new_paths.add(key)
+        records.append(execution)
+    return records, new_paths
+
+
 def _workspace_by_id(catalog: list[dict[str, Any]], workspace_id: str) -> dict[str, Any] | None:
     for item in catalog:
         if str(item.get("id") or "") == str(workspace_id or ""):
@@ -1279,6 +1695,45 @@ async def execute_agent_task(
             required_source_reads,
         )
 
+        _bootstrap_transcript, bootstrap_records, bootstrap_paths = await _bootstrap_source_evidence(
+            task_id=task_id,
+            task=task,
+            agent_name=definition.name,
+            workspace_catalog=workspace_catalog,
+            available_tools=set(tool_names),
+            used_tools=used_tools,
+            required_reads=required_source_reads,
+        )
+        del _bootstrap_transcript
+        if bootstrap_records:
+            source_evidence_records.extend(bootstrap_records)
+            successful_source_paths.update(bootstrap_paths)
+            successful_source_reads = len(successful_source_paths)
+            dossier = _source_evidence_dossier(bootstrap_records)
+            messages.append({
+                "role": "user",
+                "content": (
+                    "DIRECTOR EVIDENCE BOOTSTRAP\n"
+                    "Jace has already performed an audited search of the unambiguous approved project workspace and read the following candidate evidence before your first reasoning turn. "
+                    "Use it as a starting point, verify relevance, and continue with tools if the requested conclusion still needs other artifacts.\n\n"
+                    f"{dossier}\n"
+                    "END DIRECTOR EVIDENCE BOOTSTRAP"
+                ),
+            })
+            logger.info(
+                "Director-managed %s task %s deterministically bootstrapped %d distinct source read(s): %s",
+                definition.name,
+                task_id,
+                successful_source_reads,
+                ", ".join(sorted(successful_source_paths)),
+            )
+        elif readable_workspace_count > 0:
+            logger.info(
+                "Director-managed %s task %s deterministic source bootstrap found no readable candidate source; worker will continue with normal discovery tools.",
+                definition.name,
+                task_id,
+            )
+
     # Director work is intentionally allowed a larger investigation budget than a
     # simple one-off agent task. The cap remains bounded by the global maximum.
     extra_steps = 8 if requires_local_source else 4 if requires_workspace_context else 0
@@ -1393,6 +1848,39 @@ async def execute_agent_task(
                     messages.append({"role": "assistant", "content": candidate_text})
                 evidence_nudges += 1
                 unread = _unread_artifacts_named_in_draft(candidate_text, successful_source_paths)
+                follow_records, follow_paths = await _bootstrap_named_followup_evidence(
+                    task_id=task_id,
+                    task=task,
+                    agent_name=definition.name,
+                    workspace_catalog=workspace_catalog,
+                    available_tools=set(tool_names),
+                    used_tools=used_tools,
+                    artifacts=unread,
+                    already_read=successful_source_paths,
+                )
+                if follow_records:
+                    source_evidence_records.extend(follow_records)
+                    successful_source_paths.update(follow_paths)
+                    successful_source_reads = len(successful_source_paths)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "DIRECTOR FOLLOW-UP EVIDENCE\n"
+                            "Your previous source-backed draft correctly identified missing evidence. Jace resolved the named approved-workspace artifact(s) through audited workspace tools. "
+                            "Reassess the objective using this additional evidence before deciding whether anything else is needed.\n\n"
+                            f"{_source_evidence_dossier(follow_records)}\n"
+                            "END DIRECTOR FOLLOW-UP EVIDENCE"
+                        ),
+                    })
+                    logger.info(
+                        "Director-managed %s task %s deterministically followed missing evidence into %d additional source file(s): %s",
+                        definition.name,
+                        task_id,
+                        len(follow_paths),
+                        ", ".join(sorted(follow_paths)),
+                    )
+                    continue
+
                 targeted = (
                     " The source-backed draft named these unread candidate artifacts: " + ", ".join(unread) + "."
                     if unread
