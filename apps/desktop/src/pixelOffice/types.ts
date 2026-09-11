@@ -37,28 +37,31 @@ export interface OfficeSeat {
   specialist?: string;
 }
 
-export type FurnitureSpriteId =
-  | "desk"
-  | "chair"
-  | "server"
-  | "shelf"
-  | "plant"
-  | "cabinet"
-  | "coffee"
-  | "meeting_table"
-  | "printer"
-  | "lamp"
-  | "rug";
-
 export interface FurniturePlacement {
   id: string;
-  sprite: FurnitureSpriteId;
+  assetGroup: string;
   col: number;
   row: number;
-  widthTiles?: number;
-  heightTiles?: number;
+  orientation?: "front" | "back" | "side" | "left" | "right";
+  state?: string;
+  mirrorX?: boolean;
+  linkedSeatId?: string;
+  footprintW: number;
+  footprintH: number;
   blocks?: boolean;
   wallMounted?: boolean;
+  surface?: boolean;
+  offsetX?: number;
+  offsetY?: number;
+}
+
+export interface CarpetZone {
+  id: string;
+  carpetIndex: number;
+  col: number;
+  row: number;
+  width: number;
+  height: number;
 }
 
 export interface OfficeRoomZone {
@@ -69,6 +72,8 @@ export interface OfficeRoomZone {
   row: number;
   width: number;
   height: number;
+  floorPattern: number;
+  floorTint: string;
 }
 
 export interface WallDoorway {
@@ -83,6 +88,7 @@ export interface OfficeWallSegment {
   row: number;
   length: number;
   doorways?: WallDoorway[];
+  wallSet?: number;
 }
 
 export interface OfficeLayoutConfig {
@@ -93,31 +99,14 @@ export interface OfficeLayoutConfig {
   furniture: FurniturePlacement[];
   rooms: OfficeRoomZone[];
   walls: OfficeWallSegment[];
-}
-
-export interface CharacterSpriteDefinition {
-  frameWidth: number;
-  frameHeight: number;
-  columns: number;
-  rows: Record<
-    "down" | "left" | "right" | "up" | "idle" |
-    "type" | "read" | "think",
-    number
-  >;
-}
-
-export interface PetSpriteDefinition {
-  frameWidth: number;
-  frameHeight: number;
-  columns: number;
-  walkRow: number;
-  idleRow: number;
+  carpets: CarpetZone[];
 }
 
 export interface OfficeCharacter {
   id: string;
   workerId: string;
   specialistId: string;
+  spriteIndex: number;
   label: string;
   accent: string;
 
@@ -154,16 +143,22 @@ export type PetMode =
 
 export interface OfficePet {
   id: string;
+  assetId: string;
   name: string;
+  direction: OfficeDirection;
+
   x: number;
   y: number;
   tileCol: number;
   tileRow: number;
+
   path: OfficePoint[];
   moveProgress: number;
+
   frame: number;
   frameTimer: number;
   idleTimer: number;
+
   mode: PetMode;
   allowedRoomIds: string[];
 }
@@ -177,4 +172,104 @@ export interface CameraState {
 export interface OfficeHit {
   characterId?: string;
   petId?: string;
+}
+
+export interface PixelAgentsAssetIndex {
+  version: number;
+  source: {
+    repository: string;
+    ref: string;
+    syncedAt: string;
+  };
+  characters: string[];
+  floors: string[];
+  walls: string[];
+  carpets: string[];
+  pets: Array<{
+    id: string;
+    name: string;
+    folder: string;
+    manifest: string;
+    image: string;
+  }>;
+  furniture: Array<{
+    folder: string;
+    manifest: string;
+  }>;
+}
+
+export type UpstreamFurnitureOrientation =
+  | "front"
+  | "back"
+  | "side"
+  | "left"
+  | "right";
+
+export interface UpstreamFurnitureAssetNode {
+  type: "asset";
+  id: string;
+  file?: string;
+  width: number;
+  height: number;
+  footprintW: number;
+  footprintH: number;
+  orientation?: UpstreamFurnitureOrientation;
+  state?: string;
+  frame?: number;
+  mirrorSide?: boolean;
+}
+
+export interface UpstreamFurnitureGroupNode {
+  type: "group";
+  id?: string;
+  name?: string;
+  category?: string;
+  groupType?: "rotation" | "state" | "animation" | string;
+  rotationScheme?: string;
+  orientation?: UpstreamFurnitureOrientation;
+  state?: string;
+  mirrorSide?: boolean;
+  members: UpstreamFurnitureManifestNode[];
+}
+
+export type UpstreamFurnitureManifestNode =
+  | UpstreamFurnitureAssetNode
+  | UpstreamFurnitureGroupNode;
+
+export type UpstreamFurnitureManifest =
+  | (UpstreamFurnitureAssetNode & {
+      id: string;
+      name: string;
+      category: string;
+      canPlaceOnWalls: boolean;
+      canPlaceOnSurfaces: boolean;
+      backgroundTiles: number;
+    })
+  | (UpstreamFurnitureGroupNode & {
+      id: string;
+      name: string;
+      category: string;
+      canPlaceOnWalls: boolean;
+      canPlaceOnSurfaces: boolean;
+      backgroundTiles: number;
+    });
+
+export interface ResolvedFurnitureAsset {
+  rootId: string;
+  name: string;
+  category: string;
+  folder: string;
+  assetId: string;
+  file: string;
+  width: number;
+  height: number;
+  footprintW: number;
+  footprintH: number;
+  backgroundTiles: number;
+  orientation?: UpstreamFurnitureOrientation;
+  state?: string;
+  frame?: number;
+  mirrorSide: boolean;
+  canPlaceOnWalls: boolean;
+  canPlaceOnSurfaces: boolean;
 }

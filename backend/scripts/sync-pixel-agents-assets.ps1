@@ -5,8 +5,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = Split-Path -Parent $PSScriptRoot
-$DesktopRoot = Join-Path $RepoRoot "../apps\desktop"
+# This script lives in:
+#   <repo>\backend\scripts\
+#
+# Resolve paths explicitly instead of relying on ../ segments.
+$BackendRoot = Split-Path -Parent $PSScriptRoot
+$RepoRoot = Split-Path -Parent $BackendRoot
+$DesktopRoot = Join-Path $RepoRoot "apps\desktop"
 $Destination = Join-Path $DesktopRoot "public\pixel-agents-assets"
 
 $Repository = "pixel-agents-hq/pixel-agents"
@@ -20,7 +25,7 @@ function Write-Step {
 function Resolve-ArchiveUrl {
     param([string]$RequestedRef)
 
-    if ($RequestedRef -in @("main", "master")) {
+    if (($RequestedRef -eq "main") -or ($RequestedRef -eq "master")) {
         return "$RepositoryUrl/archive/refs/heads/$RequestedRef.zip"
     }
 
@@ -53,7 +58,7 @@ function Remove-OldAssetPayload {
     }
 }
 
-function Natural-SortName {
+function Get-NaturalNumber {
     param([System.IO.FileInfo]$File)
 
     if ($File.BaseName -match '(\d+)$') {
@@ -63,9 +68,18 @@ function Natural-SortName {
     return 999999
 }
 
+Write-Step "Repository root: $RepoRoot"
+Write-Step "Desktop root: $DesktopRoot"
+Write-Step "Destination: $Destination"
+
+if (-not (Test-Path $DesktopRoot)) {
+    throw "Desktop application folder was not found: $DesktopRoot"
+}
+
 $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
     "jace-pixel-agents-" + [guid]::NewGuid().ToString("N")
 )
+
 $ArchivePath = Join-Path $TempRoot "pixel-agents.zip"
 $ExtractPath = Join-Path $TempRoot "source"
 
@@ -76,18 +90,18 @@ try {
 
     $ExistingSync = Join-Path $Destination "_jace-sync.json"
 
-    if ((Test-Path $ExistingSync) -and -not $Force) {
+    if ((Test-Path $ExistingSync) -and (-not $Force)) {
         try {
             $Existing = Get-Content $ExistingSync -Raw | ConvertFrom-Json
 
             if ($Existing.ref -eq $Ref) {
                 Write-Step "Assets for $Ref are already installed."
                 Write-Step "Use -Force to download them again."
-                exit 0
+                return
             }
         }
         catch {
-            # Invalid metadata means we perform a clean sync.
+            Write-Step "Existing sync metadata is invalid; performing a clean sync."
         }
     }
 
@@ -118,12 +132,13 @@ try {
         throw "Could not locate webview-ui/public/assets in the downloaded Pixel Agents archive."
     }
 
+    # assets -> public -> webview-ui -> repository root
     $CheckoutRoot = $AssetRoot.Parent.Parent.Parent
     $LicenseSource = Join-Path $CheckoutRoot.FullName "LICENSE"
 
     Remove-OldAssetPayload $Destination
 
-    Write-Step "Copying Pixel Agents asset tree into Jace..."
+    Write-Step "Copying upstream asset tree into Jace..."
     Copy-Item `
         -Path (Join-Path $AssetRoot.FullName "*") `
         -Destination $Destination `
@@ -148,7 +163,7 @@ try {
     if (Test-Path $CharacterDir) {
         $Characters = @(
             Get-ChildItem $CharacterDir -File -Filter "char_*.png" |
-            Sort-Object { Natural-SortName $_ } |
+            Sort-Object { Get-NaturalNumber $_ } |
             ForEach-Object { $_.Name }
         )
     }
@@ -157,7 +172,7 @@ try {
     if (Test-Path $FloorDir) {
         $Floors = @(
             Get-ChildItem $FloorDir -File -Filter "floor_*.png" |
-            Sort-Object { Natural-SortName $_ } |
+            Sort-Object { Get-NaturalNumber $_ } |
             ForEach-Object { $_.Name }
         )
     }
@@ -166,7 +181,7 @@ try {
     if (Test-Path $WallDir) {
         $Walls = @(
             Get-ChildItem $WallDir -File -Filter "wall_*.png" |
-            Sort-Object { Natural-SortName $_ } |
+            Sort-Object { Get-NaturalNumber $_ } |
             ForEach-Object { $_.Name }
         )
     }
@@ -182,48 +197,40 @@ try {
 
     $Pets = @()
     if (Test-Path $PetDir) {
-        $Pets = @(
-            Get-ChildItem $PetDir -Directory |
-            Sort-Object Name |
-            ForEach-Object {
-                $ManifestPath = Join-Path $_.FullName "manifest.json"
-                $ImagePath = Join-Path $_.FullName "pet.png"
+        foreach ($PetFolder in (Get-ChildItem $PetDir -Directory | Sort-Object Name)) {
+            $ManifestPath = Join-Path $PetFolder.FullName "manifest.json"
+            $ImagePath = Join-Path $PetFolder.FullName "pet.png"
 
-                if ((Test-Path $ManifestPath) -and (Test-Path $ImagePath)) {
-                    $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+            if ((Test-Path $ManifestPath) -and (Test-Path $ImagePath)) {
+                $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
 
-                    [ordered]@{
-                        id = [string]$Manifest.id
-                        name = [string]$Manifest.name
-                        folder = $_.Name
-                        manifest = "pets/$($_.Name)/manifest.json"
-                        image = "pets/$($_.Name)/pet.png"
-                    }
+                $Pets += [ordered]@{
+                    id = [string]$Manifest.id
+                    name = [string]$Manifest.name
+                    folder = $PetFolder.Name
+                    manifest = "pets/$($PetFolder.Name)/manifest.json"
+                    image = "pets/$($PetFolder.Name)/pet.png"
                 }
             }
-        )
+        }
     }
 
     $Furniture = @()
     if (Test-Path $FurnitureDir) {
-        $Furniture = @(
-            Get-ChildItem $FurnitureDir -Directory |
-            Sort-Object Name |
-            ForEach-Object {
-                $ManifestPath = Join-Path $_.FullName "manifest.json"
+        foreach ($FurnitureFolder in (Get-ChildItem $FurnitureDir -Directory | Sort-Object Name)) {
+            $ManifestPath = Join-Path $FurnitureFolder.FullName "manifest.json"
 
-                if (Test-Path $ManifestPath) {
-                    [ordered]@{
-                        folder = $_.Name
-                        manifest = "furniture/$($_.Name)/manifest.json"
-                    }
+            if (Test-Path $ManifestPath) {
+                $Furniture += [ordered]@{
+                    folder = $FurnitureFolder.Name
+                    manifest = "furniture/$($FurnitureFolder.Name)/manifest.json"
                 }
             }
-        )
+        }
     }
 
     if ($Characters.Count -lt 6) {
-        throw "Expected at least 6 Pixel Agents character sheets; found $($Characters.Count)."
+        throw "Expected at least 6 character sheets; found $($Characters.Count)."
     }
 
     if ($Floors.Count -lt 1) {
@@ -264,6 +271,7 @@ try {
         ref = $Ref
         syncedAt = (Get-Date).ToUniversalTime().ToString("o")
         assetRoot = "webview-ui/public/assets"
+        destination = $Destination
         characterCount = $Characters.Count
         floorCount = $Floors.Count
         wallCount = $Walls.Count
@@ -278,8 +286,8 @@ try {
             -Path (Join-Path $Destination "_jace-sync.json") `
             -Encoding UTF8
 
-    Write-Step "Installed Pixel Agents assets successfully."
     Write-Host ""
+    Write-Step "Installed Pixel Agents assets successfully."
     Write-Host "  Ref:        $Ref"
     Write-Host "  Characters: $($Characters.Count)"
     Write-Host "  Floors:     $($Floors.Count)"
@@ -288,7 +296,6 @@ try {
     Write-Host "  Pets:       $($Pets.Count)"
     Write-Host "  Furniture:  $($Furniture.Count)"
     Write-Host ""
-    Write-Step "Destination: $Destination"
 }
 finally {
     if (Test-Path $TempRoot) {

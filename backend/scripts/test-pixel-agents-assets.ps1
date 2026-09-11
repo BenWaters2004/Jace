@@ -1,62 +1,63 @@
 param(
-    [string]$DesktopRoot =
-        (Join-Path (Split-Path -Parent $PSScriptRoot) "../apps\desktop"),
-    [string]$DevUrl =
-        "http://localhost:1420"
+    [string]$DevUrl = "http://localhost:1420"
 )
 
 $ErrorActionPreference = "Stop"
 
-$AssetRoot =
-    Join-Path $DesktopRoot "public\pixel-agents-assets"
+# This script lives in <repo>\backend\scripts\
+$BackendRoot = Split-Path -Parent $PSScriptRoot
+$RepoRoot = Split-Path -Parent $BackendRoot
+$DesktopRoot = Join-Path $RepoRoot "apps\desktop"
 
-$IndexPath =
-    Join-Path $AssetRoot "_jace-asset-index.json"
+$AssetRoot = Join-Path $DesktopRoot "public\pixel-agents-assets"
+$IndexPath = Join-Path $AssetRoot "_jace-asset-index.json"
 
-function Result {
+$AssetsSource = Join-Path $DesktopRoot "src\pixelOffice\assets.ts"
+$SpriteSource = Join-Path $DesktopRoot "src\pixelOffice\spriteLibrary.ts"
+$EngineSource = Join-Path $DesktopRoot "src\pixelOffice\engine.ts"
+
+$Failures = 0
+
+function Write-Result {
     param(
         [string]$Label,
         [bool]$Ok,
-        [string]$Detail = ""
+        [string]$Detail
     )
 
-    $Mark =
-        if ($Ok) { "[PASS]" } else { "[FAIL]" }
-
-    $Color =
-        if ($Ok) { "Green" } else { "Red" }
-
-    Write-Host (
-        "{0} {1} {2}" -f $Mark, $Label, $Detail
-    ) -ForegroundColor $Color
+    if ($Ok) {
+        Write-Host "[PASS] $Label $Detail" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[FAIL] $Label $Detail" -ForegroundColor Red
+        $script:Failures++
+    }
 }
 
 Write-Host ""
-Write-Host "Jace Pixel Agents Asset Test" -ForegroundColor Cyan
-Write-Host "============================" -ForegroundColor Cyan
+Write-Host "Jace Pixel Agents Integration Test" -ForegroundColor Cyan
+Write-Host "==================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Repo root:    $RepoRoot"
+Write-Host "Desktop root: $DesktopRoot"
+Write-Host "Asset root:   $AssetRoot"
 Write-Host ""
 
-Result "Asset folder exists" (Test-Path $AssetRoot) $AssetRoot
-
-if (-not (Test-Path $AssetRoot)) {
-    exit 1
-}
-
-Result "Asset index exists" (Test-Path $IndexPath) $IndexPath
+Write-Result "Desktop folder" (Test-Path $DesktopRoot) $DesktopRoot
+Write-Result "Asset folder" (Test-Path $AssetRoot) $AssetRoot
+Write-Result "Asset index" (Test-Path $IndexPath) $IndexPath
 
 if (-not (Test-Path $IndexPath)) {
     Write-Host ""
-    Write-Host "Run:" -ForegroundColor Yellow
-    Write-Host ".\scripts\sync-pixel-agents-assets.ps1 -Force"
+    Write-Host "The asset index is missing. Run:" -ForegroundColor Yellow
+    Write-Host "powershell -ExecutionPolicy Bypass -File .\backend\scripts\sync-pixel-agents-assets.ps1 -Force"
     exit 1
 }
 
-$Index =
-    Get-Content $IndexPath -Raw |
-    ConvertFrom-Json
+$Index = Get-Content $IndexPath -Raw | ConvertFrom-Json
 
 Write-Host ""
-Write-Host "Index:" -ForegroundColor Cyan
+Write-Host "Asset index:" -ForegroundColor Cyan
 Write-Host "  Ref:        $($Index.source.ref)"
 Write-Host "  Characters: $($Index.characters.Count)"
 Write-Host "  Floors:     $($Index.floors.Count)"
@@ -66,116 +67,162 @@ Write-Host "  Pets:       $($Index.pets.Count)"
 Write-Host "  Furniture:  $($Index.furniture.Count)"
 Write-Host ""
 
-$CoreChecks = @(
-    @{
-        Label = "char_0.png"
-        Path = Join-Path $AssetRoot "characters\char_0.png"
-    },
-    @{
-        Label = "floor_0.png"
-        Path = Join-Path $AssetRoot "floors\floor_0.png"
-    },
-    @{
-        Label = "wall_0.png"
-        Path = Join-Path $AssetRoot "walls\wall_0.png"
-    },
-    @{
-        Label = "Gitcat pet"
-        Path = Join-Path $AssetRoot "pets\gitcat\pet.png"
-    },
-    @{
-        Label = "DESK manifest"
-        Path = Join-Path $AssetRoot "furniture\DESK\manifest.json"
-    },
-    @{
-        Label = "PC manifest"
-        Path = Join-Path $AssetRoot "furniture\PC\manifest.json"
+# -------------------------------------------------------------------------
+# Most important check: make sure Jace is actually using the upstream loader.
+# -------------------------------------------------------------------------
+$SourceWired = $false
+$OldLoaderFound = $false
+
+if (Test-Path $AssetsSource) {
+    $AssetsText = Get-Content $AssetsSource -Raw
+
+    if ($AssetsText -match "_jace-asset-index\.json") {
+        $SourceWired = $true
     }
+
+    if ($AssetsText -match "assets/pixel-office|characters/research\.png|furniture/furniture\.png|pets/cat\.png") {
+        $OldLoaderFound = $true
+    }
+}
+
+if (Test-Path $SpriteSource) {
+    $SpriteText = Get-Content $SpriteSource -Raw
+
+    if ($SpriteText -match "CHARACTER_ASSET_URLS|FURNITURE_ASSET_URL|PET_ASSET_URLS") {
+        $OldLoaderFound = $true
+    }
+}
+
+Write-Result `
+    "Frontend uses upstream asset index" `
+    $SourceWired `
+    $AssetsSource
+
+Write-Result `
+    "Old generated Jace loader removed" `
+    (-not $OldLoaderFound) `
+    ""
+
+if (-not $SourceWired -or $OldLoaderFound) {
+    Write-Host ""
+    Write-Host "IMPORTANT:" -ForegroundColor Yellow
+    Write-Host "Your Pixel Agents files may exist, but the frontend source is still using the old Jace sprite atlas." -ForegroundColor Yellow
+    Write-Host "Extract the 11B.3B.2.2 ZIP over C:\Users\Ben\jace so the src\pixelOffice files are replaced." -ForegroundColor Yellow
+}
+
+# -------------------------------------------------------------------------
+# Local files.
+# -------------------------------------------------------------------------
+$CoreChecks = @(
+    @("char_0.png", (Join-Path $AssetRoot "characters\char_0.png")),
+    @("floor_0.png", (Join-Path $AssetRoot "floors\floor_0.png")),
+    @("wall_0.png", (Join-Path $AssetRoot "walls\wall_0.png")),
+    @("Gitcat", (Join-Path $AssetRoot "pets\gitcat\pet.png")),
+    @("DESK manifest", (Join-Path $AssetRoot "furniture\DESK\manifest.json")),
+    @("PC manifest", (Join-Path $AssetRoot "furniture\PC\manifest.json"))
 )
 
 foreach ($Check in $CoreChecks) {
-    Result $Check.Label (Test-Path $Check.Path) $Check.Path
+    $Label = [string]$Check[0]
+    $Path = [string]$Check[1]
+
+    Write-Result $Label (Test-Path $Path) $Path
 }
 
+# -------------------------------------------------------------------------
+# Validate every image file referenced by every furniture manifest.
+# -------------------------------------------------------------------------
 Write-Host ""
-Write-Host "Validating furniture manifest image references..." -ForegroundColor Cyan
+Write-Host "Checking furniture manifest image references..." -ForegroundColor Cyan
 
 $Broken = @()
 
-Get-ChildItem `
-    (Join-Path $AssetRoot "furniture") `
-    -Directory |
-ForEach-Object {
-    $Folder = $_
-    $ManifestPath =
-        Join-Path $Folder.FullName "manifest.json"
+function Test-FurnitureNode {
+    param(
+        $Node,
+        [string]$FolderPath,
+        [string]$ManifestId
+    )
 
-    if (-not (Test-Path $ManifestPath)) {
+    if ($null -eq $Node) {
         return
     }
 
-    $Manifest =
-        Get-Content $ManifestPath -Raw |
-        ConvertFrom-Json
+    if ($Node.type -eq "asset") {
+        $FileName = $null
 
-    function Walk-Node {
-        param(
-            $Node,
-            [string]$RootFolder
-        )
-
-        if ($Node.type -eq "asset") {
-            $File =
-                if ($Node.file) {
-                    [string]$Node.file
-                }
-                else {
-                    "$($Node.id).png"
-                }
-
-            $FilePath =
-                Join-Path $RootFolder $File
-
-            if (-not (Test-Path $FilePath)) {
-                $script:Broken +=
-                    "$($Manifest.id) -> $File"
-            }
-
-            return
-        }
-
-        if ($Node.members) {
-            foreach ($Member in $Node.members) {
-                Walk-Node $Member $RootFolder
-            }
-        }
-    }
-
-    Walk-Node $Manifest $Folder.FullName
-}
-
-Result `
-    "Furniture image references" `
-    ($Broken.Count -eq 0) `
-    (
-        if ($Broken.Count -eq 0) {
-            "all referenced PNGs exist"
+        if ($Node.file) {
+            $FileName = [string]$Node.file
         }
         else {
-            "$($Broken.Count) missing"
+            $FileName = "$($Node.id).png"
         }
-    )
 
-if ($Broken.Count -gt 0) {
-    $Broken |
-        Select-Object -First 20 |
-        ForEach-Object {
-            Write-Host "  $_" -ForegroundColor Yellow
+        $ImagePath = Join-Path $FolderPath $FileName
+
+        if (-not (Test-Path $ImagePath)) {
+            $script:Broken += "$ManifestId -> $FileName"
         }
+
+        return
+    }
+
+    if ($Node.members) {
+        foreach ($Member in $Node.members) {
+            Test-FurnitureNode $Member $FolderPath $ManifestId
+        }
+    }
 }
 
+$FurnitureRoot = Join-Path $AssetRoot "furniture"
+
+if (Test-Path $FurnitureRoot) {
+    foreach ($Folder in (Get-ChildItem $FurnitureRoot -Directory)) {
+        $ManifestPath = Join-Path $Folder.FullName "manifest.json"
+
+        if (-not (Test-Path $ManifestPath)) {
+            continue
+        }
+
+        $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+        Test-FurnitureNode $Manifest $Folder.FullName ([string]$Manifest.id)
+    }
+}
+
+$ReferenceDetail = "all referenced PNGs exist"
+
+if ($Broken.Count -gt 0) {
+    $ReferenceDetail = "$($Broken.Count) referenced PNG(s) missing"
+}
+
+Write-Result `
+    "Furniture image references" `
+    ($Broken.Count -eq 0) `
+    $ReferenceDetail
+
+if ($Broken.Count -gt 0) {
+    foreach ($Item in ($Broken | Select-Object -First 20)) {
+        Write-Host "  $Item" -ForegroundColor Yellow
+    }
+}
+
+# -------------------------------------------------------------------------
+# Check built dist if npm run build has already been run.
+# -------------------------------------------------------------------------
+$DistIndex = Join-Path $DesktopRoot "dist\pixel-agents-assets\_jace-asset-index.json"
+
+if (Test-Path (Join-Path $DesktopRoot "dist")) {
+    Write-Result `
+        "Built dist contains Pixel Agents assets" `
+        (Test-Path $DistIndex) `
+        $DistIndex
+}
+
+# -------------------------------------------------------------------------
+# Check Vite/Tauri dev server.
+# -------------------------------------------------------------------------
 Write-Host ""
-Write-Host "Testing Vite/Tauri dev server..." -ForegroundColor Cyan
+Write-Host "Checking Vite/Tauri server..." -ForegroundColor Cyan
 
 $Urls = @(
     "$DevUrl/pixel-agents-assets/_jace-asset-index.json",
@@ -184,48 +231,37 @@ $Urls = @(
     "$DevUrl/pixel-agents-assets/pets/gitcat/pet.png"
 )
 
-$ServerOk = $true
+$ServerAvailable = $true
 
 foreach ($Url in $Urls) {
     try {
-        $Response =
-            Invoke-WebRequest `
-                -Uri $Url `
-                -UseBasicParsing `
-                -TimeoutSec 5
+        $Response = Invoke-WebRequest `
+            -Uri $Url `
+            -UseBasicParsing `
+            -TimeoutSec 5
 
-        Result `
-            $Url `
-            ($Response.StatusCode -eq 200) `
-            "HTTP $($Response.StatusCode)"
+        $Ok = ($Response.StatusCode -eq 200)
+        Write-Result $Url $Ok "HTTP $($Response.StatusCode)"
     }
     catch {
-        $ServerOk = $false
-
-        Result `
-            $Url `
-            $false `
-            $_.Exception.Message
+        $ServerAvailable = $false
+        Write-Result $Url $false $_.Exception.Message
     }
 }
 
 Write-Host ""
 
-if (-not $ServerOk) {
-    Write-Host (
-        "The files exist on disk but Vite is not serving them. " +
-        "Run 'npm run tauri dev' from apps\desktop and rerun this test."
-    ) -ForegroundColor Yellow
-    exit 2
+if (-not $ServerAvailable) {
+    Write-Host "If Jace is not currently running, start it with:" -ForegroundColor Yellow
+    Write-Host "  cd C:\Users\Ben\jace\apps\desktop"
+    Write-Host "  npm run tauri dev"
+    Write-Host ""
 }
 
-if ($Broken.Count -gt 0) {
-    Write-Host (
-        "Vite can serve the assets, but the upstream copy contains broken " +
-        "furniture references. Re-run the sync with -Force."
-    ) -ForegroundColor Yellow
-    exit 3
+if ($Failures -gt 0) {
+    Write-Host "FAILED: $Failures integration check(s) failed." -ForegroundColor Red
+    exit 1
 }
 
-Write-Host "Pixel Agents assets are present AND reachable by the Jace frontend." -ForegroundColor Green
+Write-Host "SUCCESS: Pixel Agents assets are installed, wired into the frontend, and reachable." -ForegroundColor Green
 exit 0
