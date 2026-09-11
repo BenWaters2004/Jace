@@ -395,6 +395,12 @@ export class PixelSpriteLibrary {
       HTMLCanvasElement
     >();
 
+  private wallTintCache =
+    new Map<
+      string,
+      HTMLCanvasElement
+    >();
+
   private loading:
     Promise<void> | null =
       null;
@@ -1347,6 +1353,142 @@ export class PixelSpriteLibrary {
     return true;
   }
 
+
+  private tintedWallSheet(
+    image: HTMLImageElement,
+    wallSet: number,
+    tint: string,
+  ): HTMLCanvasElement | null {
+    const cacheKey =
+      `${wallSet}:${tint}`;
+
+    const cached =
+      this.wallTintCache.get(
+        cacheKey,
+      );
+
+    if (cached) {
+      return cached;
+    }
+
+    const canvas =
+      document.createElement(
+        "canvas",
+      );
+
+    canvas.width =
+      image.naturalWidth ||
+      image.width;
+
+    canvas.height =
+      image.naturalHeight ||
+      image.height;
+
+    const tintContext =
+      canvas.getContext(
+        "2d",
+      );
+
+    if (!tintContext) {
+      return null;
+    }
+
+    tintContext.imageSmoothingEnabled =
+      false;
+
+    tintContext.drawImage(
+      image,
+      0,
+      0,
+    );
+
+    const pixels =
+      tintContext.getImageData(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+
+    const [
+      baseR,
+      baseG,
+      baseB,
+    ] =
+      parseHex(
+        tint,
+      );
+
+    for (
+      let offset = 0;
+      offset <
+        pixels.data.length;
+      offset += 4
+    ) {
+      const alpha =
+        pixels.data[
+          offset + 3
+        ];
+
+      if (alpha === 0) {
+        continue;
+      }
+
+      const luminance =
+        (
+          pixels.data[offset] * 0.2126 +
+          pixels.data[offset + 1] * 0.7152 +
+          pixels.data[offset + 2] * 0.0722
+        ) /
+        255;
+
+      const amount =
+        0.46 +
+        luminance *
+          1.02;
+
+      pixels.data[offset] =
+        Math.min(
+          255,
+          Math.round(
+            baseR *
+              amount,
+          ),
+        );
+
+      pixels.data[offset + 1] =
+        Math.min(
+          255,
+          Math.round(
+            baseG *
+              amount,
+          ),
+        );
+
+      pixels.data[offset + 2] =
+        Math.min(
+          255,
+          Math.round(
+            baseB *
+              amount,
+          ),
+        );
+    }
+
+    tintContext.putImageData(
+      pixels,
+      0,
+      0,
+    );
+
+    this.wallTintCache.set(
+      cacheKey,
+      canvas,
+    );
+
+    return canvas;
+  }
+
   drawWallTile(
     ctx:
       CanvasRenderingContext2D,
@@ -1358,6 +1500,8 @@ export class PixelSpriteLibrary {
       number,
     tileBottomY:
       number,
+    tint:
+      string = "#26383b",
   ): boolean {
     if (
       this.walls.length ===
@@ -1407,11 +1551,22 @@ export class PixelSpriteLibrary {
       UPSTREAM_WALL
         .pieceHeight;
 
+    const tinted =
+      this.tintedWallSheet(
+        image,
+        wallSet,
+        tint,
+      );
+
+    const source =
+      tinted ??
+      image;
+
     ctx.imageSmoothingEnabled =
       false;
 
     ctx.drawImage(
-      image,
+      source,
       sx,
       sy,
       UPSTREAM_WALL

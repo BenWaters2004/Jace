@@ -17,6 +17,7 @@ import {
   resetOfficeLayout,
   TILE_SIZE,
   tileBottomCenter,
+  WALL_TINT,
 } from "./layout";
 import {
   PixelSpriteLibrary,
@@ -465,7 +466,38 @@ export class JacePixelOfficeEngine {
   private lastTime = 0;
   private worldTime = 0;
   private disposed = false;
-  private fittedOnce = false;
+
+  private resizeObserver:
+    ResizeObserver | null = null;
+
+  private resizeFrame:
+    number | null = null;
+
+  private lastViewportWidth = 0;
+  private lastViewportHeight = 0;
+  private resizeListenersAttached = false;
+
+  private readonly handleViewportChange = () => {
+    this.scheduleCanvasResize();
+  };
+
+  private readonly handleFullscreenChange = () => {
+    // Fullscreen transitions often update layout over more than one frame.
+    // Resize immediately, then re-check after the surrounding UI settles.
+    this.scheduleCanvasResize();
+
+    window.setTimeout(
+      () =>
+        this.scheduleCanvasResize(),
+      50,
+    );
+
+    window.setTimeout(
+      () =>
+        this.scheduleCanvasResize(),
+      200,
+    );
+  };
 
   constructor(
     canvas:
@@ -487,6 +519,29 @@ export class JacePixelOfficeEngine {
 
     this.canvas =
       canvas;
+
+    // The CSS size should always follow the available panel. The bitmap size
+    // is managed independently in resize() using the current DPR.
+    this.canvas.style.display =
+      "block";
+
+    this.canvas.style.width =
+      "100%";
+
+    this.canvas.style.height =
+      "100%";
+
+    this.canvas.style.minWidth =
+      "0";
+
+    this.canvas.style.minHeight =
+      "0";
+
+    this.canvas.style.maxWidth =
+      "none";
+
+    this.canvas.style.maxHeight =
+      "none";
 
     this.ctx =
       ctx;
@@ -526,19 +581,19 @@ export class JacePixelOfficeEngine {
         .find(
           (tile) =>
             tile.col >=
-              10 &&
+              17 &&
             tile.col <=
-              13 &&
+              19 &&
             tile.row >=
-              22 &&
+              16 &&
             tile.row <=
-              25,
+              18,
         ) ??
       this.petWalkableTiles[
         0
       ] ?? {
-        col: 10,
-        row: 23,
+        col: 18,
+        row: 17,
       };
 
     const petPoint =
@@ -597,6 +652,14 @@ export class JacePixelOfficeEngine {
       return;
     }
 
+    // Allow the same engine instance to be restarted if React temporarily
+    // hides/unmounts the office during a fullscreen transition.
+    this.disposed =
+      false;
+
+    this.attachResizeTracking();
+    this.scheduleCanvasResize();
+
     this.lastTime =
       performance.now();
 
@@ -643,6 +706,20 @@ export class JacePixelOfficeEngine {
     this.disposed =
       true;
 
+    this.detachResizeTracking();
+
+    if (
+      this.resizeFrame !==
+      null
+    ) {
+      window.cancelAnimationFrame(
+        this.resizeFrame,
+      );
+
+      this.resizeFrame =
+        null;
+    }
+
     if (
       this.animationFrame !==
       null
@@ -669,16 +746,155 @@ export class JacePixelOfficeEngine {
     this.characters.clear();
   }
 
+  private attachResizeTracking() {
+    if (
+      this.resizeListenersAttached
+    ) {
+      return;
+    }
+
+    const target =
+      this.canvas.parentElement ??
+      this.canvas;
+
+    if (
+      typeof ResizeObserver !==
+      "undefined"
+    ) {
+      this.resizeObserver =
+        new ResizeObserver(
+          () => {
+            this.scheduleCanvasResize();
+          },
+        );
+
+      this.resizeObserver.observe(
+        target,
+      );
+    }
+
+    window.addEventListener(
+      "resize",
+      this.handleViewportChange,
+    );
+
+    document.addEventListener(
+      "fullscreenchange",
+      this.handleFullscreenChange,
+    );
+
+    this.resizeListenersAttached =
+      true;
+  }
+
+  private detachResizeTracking() {
+    if (
+      !this.resizeListenersAttached
+    ) {
+      return;
+    }
+
+    this.resizeObserver?.disconnect();
+    this.resizeObserver =
+      null;
+
+    window.removeEventListener(
+      "resize",
+      this.handleViewportChange,
+    );
+
+    document.removeEventListener(
+      "fullscreenchange",
+      this.handleFullscreenChange,
+    );
+
+    this.resizeListenersAttached =
+      false;
+  }
+
+  private scheduleCanvasResize() {
+    if (
+      this.disposed
+    ) {
+      return;
+    }
+
+    if (
+      this.resizeFrame !==
+      null
+    ) {
+      window.cancelAnimationFrame(
+        this.resizeFrame,
+      );
+    }
+
+    this.resizeFrame =
+      window.requestAnimationFrame(
+        () => {
+          this.resizeFrame =
+            null;
+
+          this.resizeFromContainer();
+        },
+      );
+  }
+
+  private resizeFromContainer() {
+    const target =
+      this.canvas.parentElement ??
+      this.canvas;
+
+    const rect =
+      target.getBoundingClientRect();
+
+    // A different Jace section can temporarily hide the office while that
+    // section is fullscreen. Ignore the resulting 0x0 measurement so the
+    // canvas is not destroyed and can recover when the office is visible.
+    if (
+      rect.width <= 1 ||
+      rect.height <= 1
+    ) {
+      return;
+    }
+
+    this.resize(
+      rect.width,
+      rect.height,
+      window.devicePixelRatio ||
+        1,
+    );
+  }
+
+  refreshViewport() {
+    this.scheduleCanvasResize();
+  }
+
   resize(
     width: number,
     height: number,
     dpr: number,
   ) {
+    if (
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 1 ||
+      height <= 1
+    ) {
+      return;
+    }
+
+    const safeDpr =
+      Number.isFinite(dpr) &&
+      dpr > 0
+        ? dpr
+        : 1;
+
     const pixelWidth =
       Math.max(
         1,
         Math.floor(
-          width * dpr,
+          width *
+            safeDpr,
         ),
       );
 
@@ -686,9 +902,20 @@ export class JacePixelOfficeEngine {
       Math.max(
         1,
         Math.floor(
-          height * dpr,
+          height *
+            safeDpr,
         ),
       );
+
+    const viewportChanged =
+      Math.abs(
+        width -
+          this.lastViewportWidth,
+      ) > 0.5 ||
+      Math.abs(
+        height -
+          this.lastViewportHeight,
+      ) > 0.5;
 
     if (
       this.canvas.width !==
@@ -701,24 +928,19 @@ export class JacePixelOfficeEngine {
 
       this.canvas.height =
         pixelHeight;
-
-      this.canvas.style.width =
-        `${width}px`;
-
-      this.canvas.style.height =
-        `${height}px`;
     }
 
-    if (
-      !this.fittedOnce
-    ) {
+    if (viewportChanged) {
+      this.lastViewportWidth =
+        width;
+
+      this.lastViewportHeight =
+        height;
+
       this.fitToRoom(
         width,
         height,
       );
-
-      this.fittedOnce =
-        true;
     }
   }
 
@@ -793,28 +1015,133 @@ export class JacePixelOfficeEngine {
       height ??
       rect.height;
 
-    const worldWidth =
-      this.layout.cols *
+    if (
+      viewportWidth <= 1 ||
+      viewportHeight <= 1
+    ) {
+      return;
+    }
+
+    // Pixel Agents' default layout contains intentional VOID space above the
+    // visible office. Frame the occupied room bounds rather than the entire
+    // 21x22 storage grid so the office actually fills the available panel.
+    const minCol =
+      Math.min(
+        ...this.layout.rooms.map(
+          (room) =>
+            room.col,
+        ),
+      );
+
+    const minRow =
+      Math.min(
+        ...this.layout.rooms.map(
+          (room) =>
+            room.row,
+        ),
+      );
+
+    const maxCol =
+      Math.max(
+        ...this.layout.rooms.map(
+          (room) =>
+            room.col +
+            room.width,
+        ),
+      );
+
+    const maxRow =
+      Math.max(
+        ...this.layout.rooms.map(
+          (room) =>
+            room.row +
+            room.height,
+        ),
+      );
+
+    const paddingX =
       TILE_SIZE;
 
-    const worldHeight =
-      this.layout.rows *
+    // Extra top space keeps 32px wall sprites and wall-mounted decor visible.
+    const paddingTop =
+      TILE_SIZE *
+      2;
+
+    const paddingBottom =
       TILE_SIZE;
+
+    const worldLeft =
+      Math.max(
+        0,
+        minCol *
+          TILE_SIZE -
+          paddingX,
+      );
+
+    const worldTop =
+      Math.max(
+        0,
+        minRow *
+          TILE_SIZE -
+          paddingTop,
+      );
+
+    const worldRight =
+      Math.min(
+        this.layout.cols *
+          TILE_SIZE,
+        maxCol *
+          TILE_SIZE +
+          paddingX,
+      );
+
+    const worldBottom =
+      Math.min(
+        this.layout.rows *
+          TILE_SIZE,
+        maxRow *
+          TILE_SIZE +
+          paddingBottom,
+      );
+
+    const worldWidth =
+      Math.max(
+        TILE_SIZE,
+        worldRight -
+          worldLeft,
+      );
+
+    const worldHeight =
+      Math.max(
+        TILE_SIZE,
+        worldBottom -
+          worldTop,
+      );
 
     const zoom =
       Math.max(
         0.5,
         Math.min(
-          5,
+          6,
           Math.min(
             viewportWidth /
               worldWidth,
             viewportHeight /
               worldHeight,
           ) *
-            0.97,
+            0.96,
         ),
       );
+
+    const worldCentreX =
+      worldLeft +
+      worldWidth /
+        2;
+
+    const worldCentreY =
+      worldTop +
+      worldHeight /
+        2;
 
     this.camera.zoom =
       zoom;
@@ -825,8 +1152,7 @@ export class JacePixelOfficeEngine {
           2 *
           zoom
         ) -
-      worldWidth /
-        2;
+      worldCentreX;
 
     this.camera.y =
       viewportHeight /
@@ -834,8 +1160,7 @@ export class JacePixelOfficeEngine {
           2 *
           zoom
         ) -
-      worldHeight /
-        2;
+      worldCentreY;
 
     this.cameraFollowId =
       null;
@@ -2041,47 +2366,6 @@ export class JacePixelOfficeEngine {
       }
     }
 
-    ctx.fillStyle =
-      "rgba(4,14,15,0.82)";
-
-    const labelWidth =
-      Math.max(
-        52,
-        room.label.length *
-          5 +
-          10,
-      );
-
-    ctx.fillRect(
-      room.col *
-        TILE_SIZE +
-        3,
-      room.row *
-        TILE_SIZE +
-        3,
-      labelWidth,
-      11,
-    );
-
-    ctx.fillStyle =
-      "rgba(220,242,238,0.72)";
-
-    ctx.font =
-      "6px 'Courier New', monospace";
-
-    ctx.textAlign =
-      "left";
-
-    ctx.fillText(
-      room.label
-        .toUpperCase(),
-      room.col *
-        TILE_SIZE +
-        7,
-      room.row *
-        TILE_SIZE +
-        11,
-    );
   }
 
   private renderCarpets(
@@ -2169,6 +2453,81 @@ export class JacePixelOfficeEngine {
     }
   }
 
+  private furnitureDepth(
+    furniture:
+      FurniturePlacement,
+  ): number {
+    let depth =
+      (
+        furniture.row +
+        furniture.footprintH
+      ) *
+      TILE_SIZE;
+
+    if (
+      !furniture.surface
+    ) {
+      return depth;
+    }
+
+    const furnitureLeft =
+      furniture.col;
+
+    const furnitureRight =
+      furniture.col +
+      furniture.footprintW;
+
+    const furnitureTop =
+      furniture.row;
+
+    const furnitureBottom =
+      furniture.row +
+      furniture.footprintH;
+
+    for (
+      const support
+      of this.layout.furniture
+    ) {
+      if (
+        support.id ===
+          furniture.id ||
+        !support.blocks ||
+        support.wallMounted
+      ) {
+        continue;
+      }
+
+      const overlaps =
+        furnitureLeft <
+          support.col +
+            support.footprintW &&
+        furnitureRight >
+          support.col &&
+        furnitureTop <
+          support.row +
+            support.footprintH &&
+        furnitureBottom >
+          support.row;
+
+      if (!overlaps) {
+        continue;
+      }
+
+      depth =
+        Math.max(
+          depth,
+          (
+            support.row +
+            support.footprintH
+          ) *
+            TILE_SIZE +
+            0.5,
+        );
+    }
+
+    return depth;
+  }
+
   private renderDepthSortedEntities(
     ctx:
       CanvasRenderingContext2D,
@@ -2218,18 +2577,15 @@ export class JacePixelOfficeEngine {
       of this.layout.furniture
     ) {
       const depth =
-        (
-          furniture.row +
-          furniture.footprintH
-        ) *
-        TILE_SIZE;
+        this.furnitureDepth(
+          furniture,
+        );
 
       renderables.push({
-        depth:
-          furniture.wallMounted
-            ? depth -
-              100
-            : depth,
+        // Wall-mounted furniture is bottom-aligned to a wall tile. The wall
+        // itself renders at bottom - 2, so using the normal furniture depth
+        // draws the decoration immediately after the wall instead of behind it.
+        depth,
 
         render:
           () =>
@@ -2354,11 +2710,12 @@ export class JacePixelOfficeEngine {
             1
           ) *
             TILE_SIZE,
+          WALL_TINT,
         );
 
     if (!drawn) {
       ctx.fillStyle =
-        "#173334";
+        "#1d2c2f";
 
       ctx.fillRect(
         col *
