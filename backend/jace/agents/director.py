@@ -701,6 +701,23 @@ def _successful_records(records: list[dict[str, Any]], tool_name: str) -> list[d
     ]
 
 
+def _relevant_source_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return successful source reads that the runner marked task-relevant.
+
+    A successful read proves that a file exists and was inspected; it does not by
+    itself prove that the file bears on the requested conclusion.  Director-managed
+    Code workers attach a generic relevance assessment to every source read so a
+    stylesheet, README, manifest, or unrelated entry point cannot accidentally
+    satisfy implementation verification for a different kind of task.
+    """
+    output: list[dict[str, Any]] = []
+    for record in _successful_records(records, "read_workspace_file"):
+        relevance = record.get("source_relevance")
+        if isinstance(relevance, dict) and relevance.get("relevant") is True:
+            output.append(record)
+    return output
+
+
 def _read_paths_and_corpus(records: list[dict[str, Any]]) -> tuple[list[str], str]:
     paths: list[str] = []
     corpus_parts: list[str] = []
@@ -805,7 +822,8 @@ def _verification_for_step(
     tool_evidence: list[dict[str, Any]],
 ) -> tuple[bool, str, str]:
     lowered = (result or "").casefold()
-    evidence_context = _source_evidence_context(tool_evidence)
+    all_evidence_context = _source_evidence_context(tool_evidence)
+    evidence_context = all_evidence_context
     explicitly_unverified = (
         "unverified" in lowered
         or "could not access" in lowered
@@ -834,8 +852,17 @@ def _verification_for_step(
             # write capability. Keep the plan useful while being explicit that no files
             # were created.
             return False, "Creation plan prepared, but no authorised workspace write completed.", evidence_context
-        read_paths, corpus = _read_paths_and_corpus(tool_evidence)
+        relevant_reads = _relevant_source_records(tool_evidence)
+        evidence_context = _source_evidence_context(relevant_reads)
+        read_paths, corpus = _read_paths_and_corpus(relevant_reads)
         if not read_paths:
+            raw_paths, _raw_corpus = _read_paths_and_corpus(tool_evidence)
+            if raw_paths:
+                return (
+                    False,
+                    "Source files were read successfully, but none passed the task-relevance gate: " + ", ".join(raw_paths[:8]),
+                    evidence_context,
+                )
             return False, "No successful source-file read was recorded. Tool attempts alone are not evidence.", evidence_context
 
         required_distinct = _required_distinct_source_files(step, objective)
@@ -1155,7 +1182,7 @@ async def _background_synthesis_turn(
         body = "\n\n".join(hypotheses) or "No usable specialist hypothesis was returned."
         if not local_source_evidence_available:
             reason = (
-                "The Code/File specialist did not successfully use a source-reading workspace tool, "
+                "The Code/File specialist did not capture enough task-relevant source evidence, "
                 "so this workflow must not present its theory as a confirmed implementation fact."
             )
             next_action = (
@@ -1210,6 +1237,7 @@ Write one coherent result, not a transcript of worker messages.
 - Combine corroborating findings and resolve conflicts conservatively.
 - Treat a claim as verified only when its STEP block says Verification: VERIFIED.
 - For code claims, use the captured source evidence as the authority. Do not introduce a file, class, function, symbol, state transition, or architecture term that is absent from that evidence.
+- Absence of a failure in a small inspected subset is NOT evidence that a bug does not exist or that the system is complete. Only say no defect exists when verified evidence directly covers the relevant mechanism end-to-end; otherwise say the investigation is incomplete and name the missing evidence.
 - Never call an implementation detail a confirmed root cause merely because Research/Analyst repeated it.
 - For local-project implementation claims, local Code/File verification outranks external research.
 - Mention failed/skipped specialist work only when it affects confidence or completeness.

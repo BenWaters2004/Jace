@@ -432,19 +432,46 @@ _BOOTSTRAP_SOURCE_EXTENSIONS = {
     ".css", ".scss", ".sass", ".less", ".toml", ".yaml", ".yml", ".json", ".xml", ".ini", ".cfg",
     ".conf", ".properties", ".gradle", ".tf", ".hcl", ".md",
 }
+_BOOTSTRAP_LOGIC_EXTENSIONS = {
+    ".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".php", ".rs", ".go", ".java",
+    ".kt", ".kts", ".swift", ".dart", ".rb", ".cs", ".fs", ".fsx", ".cpp", ".c", ".h", ".hpp",
+    ".vue", ".svelte", ".sh", ".bash", ".ps1", ".proto", ".graphql", ".gql",
+}
+_BOOTSTRAP_PRESENTATION_EXTENSIONS = {".css", ".scss", ".sass", ".less", ".html", ".htm"}
+_BOOTSTRAP_CONFIG_EXTENSIONS = {
+    ".toml", ".yaml", ".yml", ".json", ".xml", ".ini", ".cfg", ".conf", ".properties", ".gradle", ".tf", ".hcl",
+}
+_BOOTSTRAP_DOC_EXTENSIONS = {".md", ".rst", ".txt", ".adoc"}
+_BOOTSTRAP_DATA_EXTENSIONS = {".sql", ".csv", ".tsv", ".graphql", ".gql"}
 _BOOTSTRAP_PATH_PENALTIES = (
     "/node_modules/", "/vendor/", "/dist/", "/build/", "/target/", "/coverage/", "/.venv/", "/venv/",
     "/__pycache__/", "/.git/", "/out/", "/generated/",
 )
+_BOOTSTRAP_LOW_SIGNAL_TERMS = {
+    "background", "complete", "completed", "completion", "error", "errors", "fail", "failed", "failure",
+    "fix", "issue", "issues", "miss", "missed", "missing", "problem", "problems", "result", "results",
+    "return", "returned", "update", "updated",
+}
+_BOOTSTRAP_STYLE_TERMS = {
+    "style", "styles", "css", "scss", "sass", "theme", "layout", "colour", "color", "font", "animation",
+    "visual", "ui", "ux", "stylesheet", "responsive", "spacing", "pixel",
+}
+_BOOTSTRAP_CONFIG_TERMS = {
+    "config", "configuration", "settings", "environment", "env", "dependency", "dependencies", "package",
+    "requirements", "docker", "deploy", "deployment", "build", "pipeline", "ci", "version",
+}
+_BOOTSTRAP_DOC_TERMS = {"documentation", "docs", "readme", "manual", "guide", "instructions", "specification"}
+_BOOTSTRAP_DATA_TERMS = {"database", "sql", "schema", "migration", "query", "table", "tables", "orm", "data"}
+_BOOTSTRAP_CODE_SIGNAL_RE = re.compile(
+    r"\b(?:async|await|class|def|function|return|if|else|elif|switch|match|try|catch|except|finally|"
+    r"publish|emit|dispatch|subscribe|listener|handler|callback|queue|persist|save|insert|update|delete|"
+    r"route|endpoint|request|response|status|message|event|result)\b|=>|::|\buseEffect\s*\(",
+    re.IGNORECASE,
+)
 
 
-def _source_bootstrap_terms(task: AgentTask, *, limit: int = 6) -> list[str]:
-    """Extract project-agnostic search terms from the current objective.
-
-    This deliberately avoids framework/repository assumptions. Exact quoted/backtick
-    identifiers are preferred, followed by meaningful words from the user's current
-    objective and task title.
-    """
+def _source_bootstrap_terms(task: AgentTask, *, limit: int = 10) -> list[str]:
+    """Extract project-agnostic search terms from the current objective."""
     text = f"{_director_original_request(task)}\n{task.title}".strip()
     candidates: list[str] = []
     for match in re.finditer(r"[`\"']([^`\"']{2,80})[`\"']", text):
@@ -453,9 +480,7 @@ def _source_bootstrap_terms(task: AgentTask, *, limit: int = 6) -> list[str]:
             candidates.append(value)
     for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.:-]{2,}", text):
         folded = token.casefold().strip("._:-")
-        if len(folded) < 4 or folded in _BOOTSTRAP_STOPWORDS:
-            continue
-        if folded.isdigit():
+        if len(folded) < 4 or folded in _BOOTSTRAP_STOPWORDS or folded.isdigit():
             continue
         candidates.append(token.strip(".,:;()[]{}"))
 
@@ -471,6 +496,251 @@ def _source_bootstrap_terms(task: AgentTask, *, limit: int = 6) -> list[str]:
             break
     return output
 
+
+def _objective_evidence_affinities(task: AgentTask) -> set[str]:
+    text = _director_original_request(task).casefold()
+    words = set(re.findall(r"[a-z][a-z0-9_-]{2,}", text))
+    affinities: set[str] = set()
+    if words & _BOOTSTRAP_STYLE_TERMS:
+        affinities.add("presentation")
+    if words & _BOOTSTRAP_CONFIG_TERMS:
+        affinities.add("config")
+    if words & _BOOTSTRAP_DOC_TERMS:
+        affinities.add("docs")
+    if words & _BOOTSTRAP_DATA_TERMS:
+        affinities.add("data")
+    return affinities
+
+
+def _bootstrap_path_kind(path: str) -> str:
+    normalized = str(path or "").replace("\\", "/").casefold()
+    name = normalized.rsplit("/", 1)[-1]
+    suffix = Path(name).suffix.casefold()
+    padded = f"/{normalized}/"
+    if "/test/" in padded or "/tests/" in padded or name.startswith("test_") or ".test." in name or ".spec." in name:
+        return "test"
+    if suffix in _BOOTSTRAP_PRESENTATION_EXTENSIONS:
+        return "presentation"
+    if suffix in _BOOTSTRAP_CONFIG_EXTENSIONS or name in {
+        "dockerfile", "makefile", "procfile", "gemfile", "rakefile", "requirements.txt", "package.json", "pyproject.toml",
+    }:
+        return "config"
+    if suffix in _BOOTSTRAP_DOC_EXTENSIONS or name.startswith("readme"):
+        return "docs"
+    if suffix in _BOOTSTRAP_DATA_EXTENSIONS:
+        return "data"
+    if suffix in _BOOTSTRAP_LOGIC_EXTENSIONS:
+        return "logic"
+    return "other"
+
+
+def _objective_term_hits(task: AgentTask, path: str, text: str) -> tuple[set[str], set[str]]:
+    haystack = f"{path}\n{text}".casefold()
+    hits: set[str] = set()
+    high_signal: set[str] = set()
+    for raw in _source_bootstrap_terms(task, limit=12):
+        term = raw.casefold().strip("._:-")
+        if len(term) < 3 or term not in haystack:
+            continue
+        hits.add(term)
+        if term not in _BOOTSTRAP_LOW_SIGNAL_TERMS:
+            high_signal.add(term)
+    return hits, high_signal
+
+
+def _discovery_signal(execution: dict[str, Any]) -> tuple[set[str], list[int], list[str], float, bool, bool]:
+    """Return objective-derived discovery evidence attached to a source read.
+
+    Search results are evidence too: a source file may contain the matching symbol
+    hundreds of lines below its first page.  Preserve the queries/line anchors that
+    caused Jace to choose the file so relevance is not judged only from line 1.
+    """
+    raw = execution.get("discovery_evidence")
+    if not isinstance(raw, dict):
+        return set(), [], [], 0.0, False, False
+    queries = {
+        str(value).casefold().strip("._:-")
+        for value in (raw.get("queries") or [])
+        if str(value or "").strip()
+    }
+    lines: list[int] = []
+    for value in raw.get("lines") or []:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            lines.append(number)
+    snippets = [str(value)[:500] for value in (raw.get("snippets") or []) if str(value or "").strip()]
+    try:
+        candidate_score = float(raw.get("candidate_score") or 0.0)
+    except (TypeError, ValueError):
+        candidate_score = 0.0
+    return queries, lines, snippets, candidate_score, bool(raw.get("named_followup")), bool(raw.get("structural_followup"))
+
+
+def _source_read_relevance(task: AgentTask, execution: dict[str, Any]) -> tuple[bool, float, str]:
+    """Return whether a real source read is relevant enough to satisfy coverage.
+
+    Relevance is structural rather than filename-specific.  A read may qualify when
+    the excerpt itself contains objective concepts *or* when an audited workspace
+    search found the file for those concepts and the anchored excerpt contains real
+    implementation structure.  This avoids both false positives from cosmetic files
+    and false negatives when the matching symbol lives deep in a large source file.
+    """
+    evidence = execution.get("evidence")
+    if execution.get("success") is not True or not isinstance(evidence, dict):
+        return False, 0.0, "read did not succeed"
+    path = str(evidence.get("path") or "").strip()
+    text = str(evidence.get("text") or "")
+    try:
+        returned_lines = int(evidence.get("returned_lines") or 0)
+    except (TypeError, ValueError):
+        returned_lines = 0
+    if not path or returned_lines <= 0 or not text.strip():
+        return False, 0.0, "read returned no usable text"
+
+    original = _director_original_request(task).replace("\\", "/").casefold()
+    normalized_path = path.replace("\\", "/").casefold()
+    basename = normalized_path.rsplit("/", 1)[-1]
+    if normalized_path in original or basename in original:
+        return True, 100.0, "the user explicitly named this artifact"
+
+    kind = _bootstrap_path_kind(path)
+    affinities = _objective_evidence_affinities(task)
+    hits, high_signal_hits = _objective_term_hits(task, path, text)
+    discovery_queries, discovery_lines, discovery_snippets, discovery_score, named_followup, structural_followup = _discovery_signal(execution)
+    objective_terms = {
+        term.casefold().strip("._:-")
+        for term in _source_bootstrap_terms(task, limit=12)
+        if term.casefold().strip("._:-")
+    }
+    distinctive_objective_terms = {term for term in objective_terms if term not in _BOOTSTRAP_LOW_SIGNAL_TERMS}
+    discovery_objective_hits = discovery_queries & objective_terms
+    discovery_distinctive_hits = discovery_queries & distinctive_objective_terms
+    discovery_low_signal_hits = discovery_queries & _BOOTSTRAP_LOW_SIGNAL_TERMS
+
+    score = 0.0
+    if kind in {"logic", "test"}:
+        score += 4.0
+    elif kind == "presentation":
+        score += 4.0 if "presentation" in affinities else -1.5
+    elif kind == "config":
+        score += 4.0 if "config" in affinities else 0.5
+    elif kind == "docs":
+        score += 4.0 if "docs" in affinities else -1.0
+    elif kind == "data":
+        score += 4.0 if "data" in affinities else 1.0
+
+    for term in hits:
+        score += 0.75 if term in _BOOTSTRAP_LOW_SIGNAL_TERMS else 1.75
+        if term in basename:
+            score += 0.5
+
+    has_code_structure = bool(_BOOTSTRAP_CODE_SIGNAL_RE.search(text))
+    if has_code_structure and kind in {"logic", "test", "other"}:
+        score += 2.0
+
+    # An audited search hit is structural evidence about why the file was selected.
+    # High-signal objective queries are strongest, but several lifecycle/error terms
+    # plus actual code structure can also justify a file that uses different naming.
+    if discovery_distinctive_hits:
+        score += 3.25 + min(2.0, 0.75 * (len(discovery_distinctive_hits) - 1))
+    if discovery_low_signal_hits:
+        score += min(2.25, 0.75 * len(discovery_low_signal_hits))
+    if discovery_snippets and any(_BOOTSTRAP_CODE_SIGNAL_RE.search(snippet) for snippet in discovery_snippets):
+        score += 1.5
+    if discovery_lines:
+        score += 0.5
+    if named_followup:
+        score += 2.0
+    if structural_followup:
+        score += 2.5
+    if discovery_score > 0:
+        score += min(1.5, discovery_score / 12.0)
+
+    if kind in {"logic", "test"}:
+        direct_semantic_match = bool(high_signal_hits)
+        anchored_semantic_match = bool(discovery_distinctive_hits) or (
+            len(discovery_low_signal_hits) >= 2 and has_code_structure
+        )
+        followup_structural_match = (named_followup or structural_followup) and has_code_structure
+        relevant = score >= 6.0 and (direct_semantic_match or anchored_semantic_match or followup_structural_match)
+        reason_bits: list[str] = []
+        if high_signal_hits:
+            reason_bits.append(f"direct={sorted(high_signal_hits)}")
+        if discovery_objective_hits:
+            reason_bits.append(f"search={sorted(discovery_objective_hits)}")
+        if discovery_lines:
+            reason_bits.append(f"anchors={discovery_lines[:4]}")
+        if named_followup:
+            reason_bits.append("named-followup")
+        if structural_followup:
+            reason_bits.append("structural-followup")
+        if not reason_bits:
+            reason_bits.append("no objective/search anchor")
+        return relevant, score, f"{kind} structural relevance score={score:.2f}; " + "; ".join(reason_bits)
+
+    if kind in affinities:
+        return score >= 4.0, score, f"objective-targeted {kind} evidence score={score:.2f}"
+    return score >= 6.5 and bool(high_signal_hits or discovery_distinctive_hits), score, (
+        f"supporting {kind} evidence score={score:.2f}; direct={sorted(high_signal_hits)}; "
+        f"search={sorted(discovery_objective_hits)}"
+    )
+
+
+def _structural_expansion_terms(records: list[dict[str, Any]], *, limit: int = 8) -> list[str]:
+    """Extract concrete code symbols/keys from verified evidence for graph-like follow-up search.
+
+    This is intentionally language-agnostic: identifiers, function/class names and
+    stable quoted keys/event names are useful across Python, TS/JS, PHP, Rust, Java,
+    C#, etc.  The Director can therefore move from one real implementation file to
+    callers/consumers without assuming a frontend/backend layout.
+    """
+    weighted: list[tuple[int, str]] = []
+    seen: set[str] = set()
+
+    def add(value: str, weight: int) -> None:
+        cleaned = str(value or "").strip().strip("`'\"")
+        if len(cleaned) < 4 or len(cleaned) > 100:
+            return
+        folded = cleaned.casefold()
+        if folded in seen or folded in _BOOTSTRAP_STOPWORDS:
+            return
+        if folded in _BOOTSTRAP_LOW_SIGNAL_TERMS:
+            return
+        if re.fullmatch(r"[0-9._:/-]+", cleaned):
+            return
+        seen.add(folded)
+        weighted.append((weight, cleaned))
+
+    for record in records:
+        evidence = record.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        text = str(evidence.get("text") or "")
+        # Stable event/topic/route/config keys in quotes are excellent cross-file anchors.
+        for match in re.finditer(r"[\"']([A-Za-z_][A-Za-z0-9_.:/-]{3,99})[\"']", text):
+            value = match.group(1)
+            weight = 8 if any(ch in value for ch in ".:/") else 5
+            add(value, weight)
+        # Common declaration shapes across several languages.
+        for pattern in (
+            r"\b(?:async\s+def|def|class|function)\s+([A-Za-z_][A-Za-z0-9_]*)",
+            r"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=",
+            r"\b(?:interface|type|enum|struct|trait|impl)\s+([A-Za-z_][A-Za-z0-9_]*)",
+            r"\b(?:public|private|protected|internal)?\s*(?:static\s+)?(?:async\s+)?[A-Za-z_<>,.?\[\]]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        ):
+            for match in re.finditer(pattern, text):
+                add(match.group(1), 6)
+        # Imports/references often expose the connecting service/type even if the
+        # objective's natural-language vocabulary differs from the implementation.
+        for match in re.finditer(r"\b(?:import|from|use)\s+([A-Za-z_][A-Za-z0-9_:.\\/-]{2,99})", text):
+            value = match.group(1).split(".")[-1].split("::")[-1].split("/")[-1].split("\\")[-1]
+            add(value, 4)
+
+    weighted.sort(key=lambda item: (-item[0], item[1].casefold()))
+    return [value for _, value in weighted[:limit]]
 
 def _select_bootstrap_workspaces(task: AgentTask, catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Select only workspaces that are unambiguous for deterministic bootstrap.
@@ -519,37 +789,58 @@ def _select_bootstrap_workspaces(task: AgentTask, catalog: list[dict[str, Any]])
     return deduped if len(deduped) == 1 else []
 
 
-def _bootstrap_candidate_score(path: str, query: str, result: dict[str, Any]) -> float:
+def _bootstrap_candidate_score(
+    path: str,
+    query: str,
+    result: dict[str, Any],
+    *,
+    task: AgentTask,
+) -> float:
     normalized = "/" + str(path or "").replace("\\", "/").casefold().lstrip("/")
     if any(part in normalized for part in _BOOTSTRAP_PATH_PENALTIES):
         return -1000.0
     name = normalized.rsplit("/", 1)[-1]
-    suffix = Path(name).suffix.casefold()
+    kind = _bootstrap_path_kind(path)
+    affinities = _objective_evidence_affinities(task)
+    snippet = str(result.get("snippet") or "").strip()
+    folded_query = str(query or "").casefold().strip()
     score = 0.0
-    if suffix in _BOOTSTRAP_SOURCE_EXTENSIONS or name in {"dockerfile", "makefile", "procfile", "gemfile", "rakefile"}:
-        score += 3.0
-    if bool(result.get("path_match")):
+    if kind in {"logic", "test"}: score += 7.0
+    elif kind == "presentation": score += 5.0 if "presentation" in affinities else -4.0
+    elif kind == "config": score += 5.0 if "config" in affinities else 0.0
+    elif kind == "docs": score += 5.0 if "docs" in affinities else -3.0
+    elif kind == "data": score += 5.0 if "data" in affinities else 1.0
+    elif Path(name).suffix.casefold() in _BOOTSTRAP_SOURCE_EXTENSIONS: score += 1.0
+    if bool(result.get("path_match")): score += 1.5
+    if snippet:
         score += 2.0
-    if str(result.get("snippet") or "").strip():
-        score += 2.0
-    folded_query = str(query or "").casefold()
-    if folded_query and folded_query in name:
-        score += 3.0
-    elif folded_query and folded_query in normalized:
-        score += 1.0
-    if name.endswith((".lock", ".map")) or name in {"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}:
-        score -= 4.0
+        if _BOOTSTRAP_CODE_SIGNAL_RE.search(snippet) and kind in {"logic", "test", "other"}: score += 2.5
+    if folded_query:
+        query_weight = 0.8 if folded_query in _BOOTSTRAP_LOW_SIGNAL_TERMS else 2.0
+        if folded_query in name: score += 2.5 * query_weight
+        elif folded_query in normalized: score += 1.0 * query_weight
+        if folded_query in snippet.casefold(): score += 1.5 * query_weight
+    if name.endswith((".lock", ".map")) or name in {"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}: score -= 6.0
     return score
 
 
-def _rank_bootstrap_candidates(search_records: list[dict[str, Any]]) -> list[str]:
+def _rank_bootstrap_candidate_records(
+    search_records: list[dict[str, Any]],
+    *,
+    task: AgentTask,
+) -> list[dict[str, Any]]:
+    """Rank source candidates while preserving the search anchors that found them."""
     scores: dict[str, float] = {}
     displays: dict[str, str] = {}
+    query_hits: dict[str, set[str]] = {}
+    lines: dict[str, list[int]] = {}
+    snippets: dict[str, list[str]] = {}
+
     for record in search_records:
         evidence = record.get("evidence")
         if not isinstance(evidence, dict):
             continue
-        query = str(evidence.get("query") or "")
+        query = str(evidence.get("query") or "").strip()
         results = evidence.get("results")
         if not isinstance(results, list):
             continue
@@ -560,14 +851,52 @@ def _rank_bootstrap_candidates(search_records: list[dict[str, Any]]) -> list[str
             if not path:
                 continue
             key = path.replace("\\", "/").casefold()
-            score = _bootstrap_candidate_score(path, query, result)
+            score = _bootstrap_candidate_score(path, query, result, task=task)
             if score <= -900:
                 continue
             scores[key] = scores.get(key, 0.0) + score
             displays.setdefault(key, path)
-    ranked = sorted(scores, key=lambda key: (-scores[key], displays[key].casefold()))
-    return [displays[key] for key in ranked]
+            if query:
+                query_hits.setdefault(key, set()).add(query.casefold().strip("._:-"))
+            try:
+                line = int(result.get("line") or result.get("line_number") or 0)
+            except (TypeError, ValueError):
+                line = 0
+            if line > 0 and line not in lines.setdefault(key, []):
+                lines[key].append(line)
+            snippet = str(result.get("snippet") or "").strip()
+            if snippet and snippet not in snippets.setdefault(key, []):
+                snippets[key].append(snippet[:500])
 
+    for key, hits in query_hits.items():
+        scores[key] = scores.get(key, 0.0) + max(0, len(hits) - 1) * 3.0
+
+    ranked_keys = sorted(scores, key=lambda key: (-scores[key], displays[key].casefold()))
+    return [
+        {
+            "path": displays[key],
+            "score": scores[key],
+            "queries": sorted(query_hits.get(key, set())),
+            "lines": sorted(lines.get(key, [])),
+            "snippets": snippets.get(key, [])[:6],
+        }
+        for key in ranked_keys
+    ]
+
+
+def _rank_bootstrap_candidates(search_records: list[dict[str, Any]], *, task: AgentTask) -> list[str]:
+    """Compatibility wrapper returning only paths for callers that do not need anchors."""
+    return [item["path"] for item in _rank_bootstrap_candidate_records(search_records, task=task)]
+
+
+def _anchored_read_window(lines: list[int], *, max_lines: int = 360) -> tuple[int, int]:
+    """Choose a bounded source window around the strongest search hit."""
+    usable = sorted({int(line) for line in lines if isinstance(line, int) and line > 0})
+    if not usable:
+        return 1, max_lines
+    anchor = usable[0]
+    before = min(100, max_lines // 3)
+    return max(1, anchor - before), max_lines
 
 async def _record_bootstrap_tool_execution(
     *,
@@ -578,6 +907,7 @@ async def _record_bootstrap_tool_execution(
     arguments: dict[str, Any],
     used_tools: list[str],
     progress: float,
+    discovery_evidence: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run an audited tool call initiated by Jace's Director evidence bootstrap."""
     used_tools.append(tool_name)
@@ -600,6 +930,15 @@ async def _record_bootstrap_tool_execution(
         tool_name=tool_name,
         arguments=arguments,
     )
+    if discovery_evidence:
+        execution["discovery_evidence"] = dict(discovery_evidence)
+    if tool_name == "read_workspace_file" and execution.get("success") is True:
+        relevant, relevance_score, relevance_reason = _source_read_relevance(task, execution)
+        execution["source_relevance"] = {
+            "relevant": bool(relevant),
+            "score": relevance_score,
+            "reason": relevance_reason,
+        }
 
     async with SessionLocal() as session:
         current_task = await get_task(session, task_id)
@@ -658,7 +997,7 @@ async def _bootstrap_source_evidence(
         workspace_id = str(workspace.get("id") or "")
         if not workspace_id:
             continue
-        for index, term in enumerate(terms[:4]):
+        for index, term in enumerate(terms[:6]):
             arguments = {
                 "workspace_id": workspace_id,
                 "query": term,
@@ -679,22 +1018,31 @@ async def _bootstrap_source_evidence(
             if execution.get("success") is True:
                 search_records.append(execution)
 
-    candidates = _rank_bootstrap_candidates(search_records)
-    if not candidates:
+    candidate_records = _rank_bootstrap_candidate_records(search_records, task=task)
+    if not candidate_records:
         return transcript, [], set()
 
     read_records: list[dict[str, Any]] = []
     paths: set[str] = set()
-    # Read the minimum needed plus one extra candidate when available. The extra
-    # evidence gives the worker choice without turning bootstrap into a broad crawl.
-    read_budget = min(max(required_reads + 1, 2), 4)
+    # Read a small ranked set, but anchor each read around the search hit rather
+    # than blindly reading line 1 of a large file.
+    read_budget = min(max(required_reads + 3, 4), 6)
     workspace_id = str(targets[0].get("id") or "")
-    for index, path in enumerate(candidates[:read_budget]):
+    for index, candidate in enumerate(candidate_records[:read_budget]):
+        path = str(candidate.get("path") or "")
+        start_line, max_lines = _anchored_read_window(candidate.get("lines") or [], max_lines=360)
         arguments = {
             "workspace_id": workspace_id,
             "path": path,
-            "start_line": 1,
-            "max_lines": 400,
+            "start_line": start_line,
+            "max_lines": max_lines,
+        }
+        discovery = {
+            "queries": candidate.get("queries") or [],
+            "lines": candidate.get("lines") or [],
+            "snippets": candidate.get("snippets") or [],
+            "candidate_score": candidate.get("score") or 0.0,
+            "anchored_start_line": start_line,
         }
         tool_message, execution = await _record_bootstrap_tool_execution(
             task_id=task_id,
@@ -703,7 +1051,8 @@ async def _bootstrap_source_evidence(
             tool_name="read_workspace_file",
             arguments=arguments,
             used_tools=used_tools,
-            progress=min(0.145 + (index * 0.008), 0.18),
+            progress=min(0.145 + (index * 0.008), 0.19),
+            discovery_evidence=discovery,
         )
         transcript.append(tool_message)
         if execution.get("success") is not True:
@@ -718,11 +1067,112 @@ async def _bootstrap_source_evidence(
         source_path = str(evidence.get("path") or "").strip()
         if returned_lines <= 0 or not source_path or not str(evidence.get("text") or "").strip():
             continue
+        relevant, relevance_score, relevance_reason = _source_read_relevance(task, execution)
+        execution["source_relevance"] = {
+            "relevant": bool(relevant), "score": relevance_score, "reason": relevance_reason,
+        }
+        if not relevant:
+            logger.info(
+                "Director-managed %s task %s bootstrap read %s but did not count it as core evidence: %s",
+                agent_name, task_id, source_path, relevance_reason,
+            )
+            continue
         normalized = source_path.replace("\\", "/").casefold()
         if normalized in paths:
             continue
         paths.add(normalized)
         read_records.append(execution)
+
+    # If the initial objective-term search did not produce enough relevant evidence,
+    # follow concrete symbols/keys discovered inside the relevant source already read.
+    # This approximates a lightweight call/reference graph without assuming any
+    # project framework or directory structure.
+    if len(paths) < required_reads and read_records and "search_workspace_files" in available_tools:
+        expansion_terms = _structural_expansion_terms(read_records, limit=8)
+        expansion_search_records: list[dict[str, Any]] = []
+        for index, term in enumerate(expansion_terms):
+            _, execution = await _record_bootstrap_tool_execution(
+                task_id=task_id,
+                task=task,
+                agent_name=agent_name,
+                tool_name="search_workspace_files",
+                arguments={
+                    "workspace_id": workspace_id,
+                    "query": term,
+                    "path": ".",
+                    "include_content": True,
+                    "max_results": 12,
+                },
+                used_tools=used_tools,
+                progress=min(0.19 + index * 0.005, 0.225),
+            )
+            if execution.get("success") is True:
+                expansion_search_records.append(execution)
+
+        if expansion_search_records:
+            expansion_candidates = _rank_bootstrap_candidate_records(expansion_search_records, task=task)
+            expansion_budget = min(max(required_reads - len(paths) + 3, 3), 6)
+            expansion_index = 0
+            for candidate in expansion_candidates:
+                if expansion_index >= expansion_budget or len(paths) >= required_reads:
+                    break
+                candidate_path = str(candidate.get("path") or "")
+                candidate_key = candidate_path.replace("\\", "/").casefold()
+                if not candidate_path or candidate_key in paths:
+                    continue
+                expansion_index += 1
+                start_line, max_lines = _anchored_read_window(candidate.get("lines") or [], max_lines=360)
+                discovery = {
+                    "queries": candidate.get("queries") or [],
+                    "lines": candidate.get("lines") or [],
+                    "snippets": candidate.get("snippets") or [],
+                    "candidate_score": candidate.get("score") or 0.0,
+                    "anchored_start_line": start_line,
+                    "structural_followup": True,
+                }
+                tool_message, execution = await _record_bootstrap_tool_execution(
+                    task_id=task_id,
+                    task=task,
+                    agent_name=agent_name,
+                    tool_name="read_workspace_file",
+                    arguments={
+                        "workspace_id": workspace_id,
+                        "path": candidate_path,
+                        "start_line": start_line,
+                        "max_lines": max_lines,
+                    },
+                    used_tools=used_tools,
+                    progress=min(0.225 + expansion_index * 0.006, 0.26),
+                    discovery_evidence=discovery,
+                )
+                transcript.append(tool_message)
+                if execution.get("success") is not True:
+                    continue
+                evidence = execution.get("evidence")
+                if not isinstance(evidence, dict):
+                    continue
+                source_path = str(evidence.get("path") or "").strip()
+                try:
+                    returned_lines = int(evidence.get("returned_lines") or 0)
+                except (TypeError, ValueError):
+                    returned_lines = 0
+                if not source_path or returned_lines <= 0 or not str(evidence.get("text") or "").strip():
+                    continue
+                relevant, relevance_score, relevance_reason = _source_read_relevance(task, execution)
+                execution["source_relevance"] = {
+                    "relevant": bool(relevant), "score": relevance_score, "reason": relevance_reason,
+                }
+                if not relevant:
+                    continue
+                normalized = source_path.replace("\\", "/").casefold()
+                if normalized in paths:
+                    continue
+                paths.add(normalized)
+                read_records.append(execution)
+                logger.info(
+                    "Director-managed %s task %s followed structural evidence into %s (%d/%d relevant reads).",
+                    agent_name, task_id, source_path, len(paths), required_reads,
+                )
 
     return transcript, read_records, paths
 
@@ -777,6 +1227,13 @@ async def _bootstrap_named_followup_evidence(
             arguments=direct_args,
             used_tools=used_tools,
             progress=min(0.80 + index * 0.01, 0.86),
+            discovery_evidence={
+                "queries": [Path(candidate).name],
+                "lines": [],
+                "snippets": [],
+                "candidate_score": 0.0,
+                "named_followup": True,
+            },
         )
         successful = execution.get("success") is True
         if not successful and "search_workspace_files" in available_tools:
@@ -797,8 +1254,10 @@ async def _bootstrap_named_followup_evidence(
                     used_tools=used_tools,
                     progress=min(0.805 + index * 0.01, 0.87),
                 )
-                ranked = _rank_bootstrap_candidates([search_execution]) if search_execution.get("success") is True else []
-                if ranked:
+                ranked_records = _rank_bootstrap_candidate_records([search_execution], task=task) if search_execution.get("success") is True else []
+                if ranked_records:
+                    chosen = ranked_records[0]
+                    start_line, max_lines = _anchored_read_window(chosen.get("lines") or [], max_lines=420)
                     _, execution = await _record_bootstrap_tool_execution(
                         task_id=task_id,
                         task=task,
@@ -806,12 +1265,20 @@ async def _bootstrap_named_followup_evidence(
                         tool_name="read_workspace_file",
                         arguments={
                             "workspace_id": workspace_id,
-                            "path": ranked[0],
-                            "start_line": 1,
-                            "max_lines": 500,
+                            "path": chosen.get("path"),
+                            "start_line": start_line,
+                            "max_lines": max_lines,
                         },
                         used_tools=used_tools,
                         progress=min(0.81 + index * 0.01, 0.88),
+                        discovery_evidence={
+                            "queries": chosen.get("queries") or [basename],
+                            "lines": chosen.get("lines") or [],
+                            "snippets": chosen.get("snippets") or [],
+                            "candidate_score": chosen.get("score") or 0.0,
+                            "anchored_start_line": start_line,
+                            "named_followup": True,
+                        },
                     )
                     successful = execution.get("success") is True
         if not successful:
@@ -826,6 +1293,16 @@ async def _bootstrap_named_followup_evidence(
             returned_lines = 0
         if not path or returned_lines <= 0 or not str(evidence.get("text") or "").strip():
             continue
+        relevant, relevance_score, relevance_reason = _source_read_relevance(task, execution)
+        if not relevant:
+            logger.info(
+                "Director-managed %s task %s followed named evidence to %s but it did not count as core evidence: %s",
+                agent_name, task_id, path, relevance_reason,
+            )
+            continue
+        execution["source_relevance"] = {
+            "relevant": True, "score": relevance_score, "reason": relevance_reason,
+        }
         key = path.replace("\\", "/").casefold()
         if key in already_read or key in new_paths:
             continue
@@ -1967,52 +2444,73 @@ async def execute_agent_task(
                     if returned_lines > 0 and str(evidence.get("text") or "").strip():
                         source_path = str(evidence.get("path") or "").strip()
                         normalized_path = source_path.replace("\\", "/").casefold()
-                        source_evidence_records.append(tool_execution)
-                        if normalized_path and normalized_path not in successful_source_paths:
-                            successful_source_paths.add(normalized_path)
-                            successful_source_reads = len(successful_source_paths)
+                        relevant, relevance_score, relevance_reason = _source_read_relevance(task, tool_execution)
+                        if not relevant:
                             logger.info(
-                                "Director-managed %s task %s verified DISTINCT source read %d/%d: %s",
+                                "Director-managed %s task %s read %s successfully but did not count it as core evidence: %s",
                                 definition.name,
                                 task_id,
-                                successful_source_reads,
-                                required_source_reads,
                                 source_path or "<unknown path>",
+                                relevance_reason,
                             )
-                            coverage_ok, coverage_reason = _source_coverage_status(
-                                task, successful_source_paths, required_source_reads
+                            post_tool_nudge = (
+                                f"SOURCE READ SUCCEEDED BUT IS SUPPORTING/LOW-RELEVANCE EVIDENCE: {source_path}. "
+                                f"Reason: {relevance_reason}. Continue by searching for an implementation/artifact that directly contains the task's distinctive concepts. "
+                                "Do not treat a cosmetic, generic entry-point, documentation, or unrelated support file as proof of the requested mechanism unless that artifact type is what the user asked about."
                             )
-                            if not coverage_ok:
-                                post_tool_nudge = (
-                                    f"SOURCE COVERAGE INCOMPLETE after reading {source_path}: {coverage_reason}. "
-                                    + _source_coverage_nudge(task, successful_source_paths)
-                                )
+                        else:
+                            tool_execution["source_relevance"] = {
+                                "relevant": True,
+                                "score": relevance_score,
+                                "reason": relevance_reason,
+                            }
+                            source_evidence_records.append(tool_execution)
+                            if normalized_path and normalized_path not in successful_source_paths:
+                                successful_source_paths.add(normalized_path)
+                                successful_source_reads = len(successful_source_paths)
                                 logger.info(
-                                    "Director-managed %s task %s source coverage still incomplete after %s: %s",
+                                    "Director-managed %s task %s verified DISTINCT RELEVANT source read %d/%d: %s (%s)",
+                                    definition.name,
+                                    task_id,
+                                    successful_source_reads,
+                                    required_source_reads,
+                                    source_path or "<unknown path>",
+                                    relevance_reason,
+                                )
+                                coverage_ok, coverage_reason = _source_coverage_status(
+                                    task, successful_source_paths, required_source_reads
+                                )
+                                if not coverage_ok:
+                                    post_tool_nudge = (
+                                        f"SOURCE COVERAGE INCOMPLETE after reading {source_path}: {coverage_reason}. "
+                                        + _source_coverage_nudge(task, successful_source_paths)
+                                    )
+                                    logger.info(
+                                        "Director-managed %s task %s source coverage still incomplete after %s: %s",
+                                        definition.name,
+                                        task_id,
+                                        source_path or "<unknown path>",
+                                        coverage_reason,
+                                    )
+                            else:
+                                logger.info(
+                                    "Director-managed %s task %s reread relevant source %s; duplicate path does not increase coverage (%d/%d).",
                                     definition.name,
                                     task_id,
                                     source_path or "<unknown path>",
-                                    coverage_reason,
+                                    successful_source_reads,
+                                    required_source_reads,
                                 )
-                        else:
-                            logger.info(
-                                "Director-managed %s task %s reread source %s; duplicate path does not increase coverage (%d/%d).",
-                                definition.name,
-                                task_id,
-                                source_path or "<unknown path>",
-                                successful_source_reads,
-                                required_source_reads,
-                            )
-                            coverage_ok, coverage_reason = _source_coverage_status(
-                                task, successful_source_paths, required_source_reads
-                            )
-                            if not coverage_ok:
-                                post_tool_nudge = (
-                                    "DUPLICATE SOURCE READ DOES NOT COUNT. "
-                                    f"You already inspected {source_path or 'that path'}. "
-                                    f"Coverage is still incomplete: {coverage_reason}. "
-                                    + _source_coverage_nudge(task, successful_source_paths)
+                                coverage_ok, coverage_reason = _source_coverage_status(
+                                    task, successful_source_paths, required_source_reads
                                 )
+                                if not coverage_ok:
+                                    post_tool_nudge = (
+                                        "DUPLICATE SOURCE READ DOES NOT COUNT. "
+                                        f"You already inspected {source_path or 'that path'}. "
+                                        f"Coverage is still incomplete: {coverage_reason}. "
+                                        + _source_coverage_nudge(task, successful_source_paths)
+                                    )
             elif tool_execution.get("success") is not True:
                 tool_error = str(tool_execution.get("error") or "unknown tool failure")
                 logger.warning(
