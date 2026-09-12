@@ -2104,91 +2104,47 @@ button { color: inherit; }
   color: var(--text, #f3f5f7);
 }
 
-/* JACE_DESKTOP_WINDOWS_PHASE_2B_UI_HOTFIX */
 .detached-window-header {
   flex: 0 0 auto;
-  min-height: 36px;
-  height: 36px;
-  padding: 4px 7px;
+  min-height: 58px;
+  padding: 10px 14px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  border-bottom: 1px solid rgba(96, 170, 193, .12);
-  background:
-    linear-gradient(180deg, rgba(8, 20, 29, .98), rgba(5, 14, 21, .98));
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 11, 16, 0.97);
   z-index: 100;
 }
 
-.detached-window-badge {
-  margin-right: auto;
-  padding: 3px 7px;
-  border: 1px solid rgba(31, 208, 166, .16);
-  border-radius: 5px;
-  background: rgba(8, 31, 27, .58);
-  color: #6fae9e;
-  font: 700 8px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  user-select: none;
+.detached-window-header > div:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detached-window-header small {
+  color: var(--muted, #8f98a8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detached-window-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 7px;
   flex: 0 0 auto;
 }
 
 .detached-window-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: 27px;
-  min-height: 27px;
-  padding: 0 8px;
-  border: 1px solid rgba(96, 170, 193, .18);
-  border-radius: 5px;
-  background: #0a1620;
-  color: #78a8b6;
-  font: 700 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
-  cursor: pointer;
-  transition:
-    border-color .12s ease,
-    background .12s ease,
-    color .12s ease;
-}
-
-.detached-window-actions button:hover,
-.detached-window-actions button.active {
-  border-color: var(--cc-border-strong, rgba(31, 208, 166, .42));
-  background: rgba(13, 38, 42, .94);
-  color: #d6f6ec;
-}
-
-.detached-window-actions button:focus-visible {
-  outline: 2px solid rgba(80, 211, 244, .55);
-  outline-offset: 1px;
-}
-
-.detached-window-actions button:first-of-type {
-  width: 28px;
-  padding: 0;
-  font-size: 13px;
+  min-height: 31px;
+  border-radius: 7px;
 }
 
 .detached-attach-button {
-  padding-inline: 8px !important;
-  color: #75bba9 !important;
-  border-color: rgba(31, 208, 166, .22) !important;
-  background: rgba(8, 31, 27, .78) !important;
-}
-
-.detached-attach-button:hover {
-  color: #d8fff3 !important;
-  border-color: rgba(31, 208, 166, .48) !important;
-  background: rgba(10, 43, 37, .96) !important;
+  padding-inline: 11px;
 }
 
 .detached-window-content {

@@ -23,14 +23,12 @@ export function DetachedWindowFrame(props: {
     };
 
     void refresh();
-    void current
-      .onResized(() => {
-        void refresh();
-      })
-      .then((remove) => {
-        if (disposed) remove();
-        else unlisten = remove;
-      });
+    void current.onResized(() => {
+      void refresh();
+    }).then((remove) => {
+      if (disposed) remove();
+      else unlisten = remove;
+    });
 
     return () => {
       disposed = true;
@@ -69,33 +67,28 @@ export function DetachedWindowFrame(props: {
   return (
     <main className="detached-window-shell">
       <header className="detached-window-header">
-        <span
-          className="detached-window-badge"
-          title={`${props.title}${props.subtitle ? ` · ${props.subtitle}` : ""}`}
-        >
-          ↗ Detached
-        </span>
+        <div>
+          <span className="cc-kicker">Jace detached panel</span>
+          <strong>{props.title}</strong>
+          {props.subtitle && <small>{props.subtitle}</small>}
+        </div>
 
         <div className="detached-window-actions">
+          <span className="status-chip private">↗ DETACHED</span>
           <button
             type="button"
-            className={fullscreen ? "active" : ""}
             onClick={() => void toggleFullscreen()}
             title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-            aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
           >
             ⛶
           </button>
-
           <button
             type="button"
             className="detached-attach-button"
             onClick={() => void attach()}
             title="Attach this panel back to the Command Center"
-            aria-label="Attach this panel back to the Command Center"
           >
-            <span aria-hidden="true">↙</span>
-            <span>Attach</span>
+            ↙ Attach
           </button>
         </div>
       </header>
