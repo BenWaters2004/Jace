@@ -311,27 +311,9 @@ class AgentManager:
             await self.enqueue(task.id, priority=task.priority)
 
     async def _supervise_workers(self) -> None:
-        """Restart dead executors and continuously reconcile durable queued work."""
-        # JACE_AGENT_OFFICE_PHASE_1G
-        reconcile_loop = asyncio.get_running_loop()
-        next_orphan_reconcile = reconcile_loop.time()
-
+        """Restart executor coroutines that exit outside normal manager shutdown."""
         while self._running:
             await asyncio.sleep(0.35)
-
-            # Runtime events are deliberately a fast path, not the only way a
-            # durable task reaches an executor. Every few seconds, compare
-            # persistent queued tasks with the in-process dispatcher and
-            # re-dispatch anything that lost only its volatile queue entry.
-            now = reconcile_loop.time()
-            if now >= next_orphan_reconcile:
-                next_orphan_reconcile = now + 5.0
-                try:
-                    await self._reconcile_orphaned_queued_tasks()
-                except Exception:
-                    logger.exception(
-                        "Background-agent orphan queue reconciliation failed."
-                    )
             for worker_index, worker in enumerate(tuple(self._workers)):
                 if not self._running:
                     return

@@ -37,11 +37,6 @@ import {
 } from "../shell/runtime";
 
 const RECENT_TERMINAL_RETENTION_MS = 2 * 60 * 1000;
-// JACE_AGENT_OFFICE_PHASE_1G
-const ACTIVE_RECONCILE_MS = 3_000;
-const IDLE_RECONCILE_MS = 20_000;
-const DISCONNECTED_RECONCILE_MS = 5_000;
-const SELECTED_ACTIVITY_REFRESH_MS = 2_500;
 
 export const AGENT_TERMINAL_BROWSER_EVENT =
   "jace:agent-task-terminal";
@@ -344,9 +339,6 @@ export function useAgentOffice() {
     const unsubscribe = subscribeRuntimeEvents((event) => {
       if (event.type === "runtime.transport.connected") {
         setRealtimeConnected(true);
-        // A connected transport does not prove that no event was missed while
-        // reconnecting. REST is authoritative, so reconcile immediately.
-        void hydrate();
         return;
       }
 
@@ -416,29 +408,18 @@ export function useAgentOffice() {
     };
   }, [hydrate, refreshTask]);
 
-  const hasLiveRuntimeWork =
-    tasks.some((task) => ACTIVE_AGENT_TASK_STATUSES.has(task.status)) ||
-    executors.some(
-      (executor) =>
-        executor.state === "running" || executor.state === "recovering",
-    );
-
   useEffect(() => {
-    // Runtime events make the Office responsive; this watchdog makes it
-    // correct. Even a connected websocket can lose the final transition and
-    // otherwise leave a ghost worker on-screen forever.
-    const intervalMs = !realtimeConnected
-      ? DISCONNECTED_RECONCILE_MS
-      : hasLiveRuntimeWork
-        ? ACTIVE_RECONCILE_MS
-        : IDLE_RECONCILE_MS;
+    if (realtimeConnected) return;
 
+    // The event stream is a fast path, not the source of truth. While it is
+    // disconnected, periodically reconcile so queued/running/completed tasks
+    // and their real executor slots cannot become visually stale.
     const timer = window.setInterval(() => {
       void hydrate();
-    }, intervalMs);
+    }, 5_000);
 
     return () => window.clearInterval(timer);
-  }, [hasLiveRuntimeWork, hydrate, realtimeConnected]);
+  }, [hydrate, realtimeConnected]);
 
   useEffect(() => {
     const timer = window.setInterval(
@@ -652,55 +633,32 @@ export function useAgentOffice() {
     }
 
     let cancelled = false;
-    let firstLoad = true;
+    setSelectedTaskEventsLoading(true);
+    setSelectedTaskEventsError(null);
 
-    const loadEvents = async () => {
-      if (firstLoad) {
-        setSelectedTaskEventsLoading(true);
-        setSelectedTaskEventsError(null);
-      }
-
-      try {
-        const response = await getAgentTaskEvents(selectedTaskId, 200);
+    void getAgentTaskEvents(selectedTaskId, 200)
+      .then((response) => {
         if (cancelled || !mountedRef.current) return;
         setSelectedTaskEvents(response.events);
-        setSelectedTaskEventsError(null);
-      } catch (nextError) {
+      })
+      .catch((nextError) => {
         if (cancelled || !mountedRef.current) return;
-        if (firstLoad) {
-          setSelectedTaskEvents([]);
-        }
+        setSelectedTaskEvents([]);
         setSelectedTaskEventsError(
           nextError instanceof Error
             ? nextError.message
             : "Could not load the task activity history.",
         );
-      } finally {
-        if (!cancelled && mountedRef.current && firstLoad) {
-          setSelectedTaskEventsLoading(false);
-        }
-        firstLoad = false;
-      }
-    };
-
-    void loadEvents();
-
-    const shouldFollow =
-      selectedTask !== null && isAgentTaskActive(selectedTask);
-    const timer = shouldFollow
-      ? window.setInterval(
-          () => void loadEvents(),
-          SELECTED_ACTIVITY_REFRESH_MS,
-        )
-      : null;
+      })
+      .finally(() => {
+        if (cancelled || !mountedRef.current) return;
+        setSelectedTaskEventsLoading(false);
+      });
 
     return () => {
       cancelled = true;
-      if (timer !== null) {
-        window.clearInterval(timer);
-      }
     };
-  }, [selectedTask?.status, selectedTaskId]);
+  }, [selectedTask?.updated_at, selectedTaskId]);
 
   const derivedStatus = useMemo<AgentStatus | null>(() => {
     if (!status) return null;
