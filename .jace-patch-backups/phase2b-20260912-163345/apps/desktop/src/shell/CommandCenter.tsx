@@ -63,7 +63,6 @@ export function CommandCenter(props: {
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   // JACE_DESKTOP_WINDOWS_PHASE_2A
-  // JACE_DESKTOP_WINDOWS_PHASE_2B
   const panels = usePanelManager();
   const restoreLabels: Record<JacePanelId, string> = {
     core: "Core",
@@ -129,21 +128,6 @@ export function CommandCenter(props: {
               ))}
             </div>
           )}
-          {panels.detached.length > 0 && (
-            <div className="panel-restore-strip detached" aria-label="Detached panels">
-              {panels.detached.map((panel) => (
-                <button
-                  type="button"
-                  key={`detached-${panel}`}
-                  className="panel-restore-button detached"
-                  onClick={() => void panels.focusDetached(panel)}
-                  title={`Bring detached ${restoreLabels[panel]} to front`}
-                >
-                  ↗ {restoreLabels[panel]}
-                </button>
-              ))}
-            </div>
-          )}
           <button onClick={() => setDrawerOpen((open) => !open)}>Chats</button>
           <button onClick={() => props.onScreenChange("settings")}>⚙</button>
         </div>
@@ -162,7 +146,7 @@ export function CommandCenter(props: {
         />
 
         <div className="command-center-column">
-          {!panels.isHidden("core") && (
+          {!panels.isMinimized("core") && (
             <JaceCore
                         name={props.assistantName}
                         state={props.state}
@@ -175,7 +159,7 @@ export function CommandCenter(props: {
             />
           )}
 
-          {!panels.isHidden("office") && (
+          {!panels.isMinimized("office") && (
             <AgentOffice
                         activities={props.toolActivity}
                         onExpand={() => panels.toggleMaximized("office")}
@@ -184,7 +168,7 @@ export function CommandCenter(props: {
           )}
         </div>
 
-        {!panels.isHidden("workspace") && (
+        {!panels.isMinimized("workspace") && (
         <section className="workspace-column cc-panel">
           <div className="workspace-tabs-row">
             <div className="workspace-tabs-scroll">
@@ -199,14 +183,7 @@ export function CommandCenter(props: {
               ))}
             </div>
 
-            <PanelControls
-              panel="workspace"
-              manager={panels}
-              detachContext={{
-                screen: props.screen,
-                conversationId: props.activeConversationId,
-              }}
-            />
+            <PanelControls panel="workspace" manager={panels} />
           </div>
 
           <div className="workspace-host">{props.workspace}</div>

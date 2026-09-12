@@ -71,12 +71,6 @@ import { OutputView } from "./components/OutputView";
 import { WebWorkspaceView } from "./components/WebWorkspaceView";
 import { SettingsView } from "./components/SettingsView";
 import { CommandCenter } from "./shell/CommandCenter";
-import { DetachedWorkspaceShell } from "./shell/DetachedWorkspaceShell";
-import {
-  DETACHED_WORKSPACE_SCREEN_KEY,
-  isScreenValue,
-  readWindowEntry,
-} from "./shell/windowEntry";
 import { useRuntimeEvents, type JaceRuntimeState } from "./shell/runtime";
 import { useVoiceController } from "./voice/useVoiceController";
 import { classifySpokenApproval } from "./voice/approval";
@@ -171,19 +165,8 @@ function mapMessages(conversation: ConversationDetail): ChatMessage[] {
   }));
 }
 
-export default function App(
-  props: { detachedWorkspace?: boolean } = {},
-) {
-  // JACE_DESKTOP_WINDOWS_PHASE_2B
-  const detachedEntry = useMemo(() => readWindowEntry(), []);
-  const isPrimaryWindow = !props.detachedWorkspace;
-  const requestedConversationId =
-    props.detachedWorkspace ? detachedEntry.conversationId : null;
-  const [screen, setScreen] = useState<Screen>(() =>
-    props.detachedWorkspace && detachedEntry.screen
-      ? detachedEntry.screen
-      : "chat",
-  );
+export default function App() {
+  const [screen, setScreen] = useState<Screen>("chat");
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus | null>(null);
@@ -234,9 +217,6 @@ export default function App(
         : "offline";
   const runtime = useRuntimeEvents(fallbackRuntimeState);
   const voiceController = useVoiceController({
-    disabled: !isPrimaryWindow,
-    enableHomePushToTalk: isPrimaryWindow,
-    speakWelcome: isPrimaryWindow,
     settings: voiceSettings,
     status: voiceStatus,
     onTranscript: handleVoiceTranscript,
@@ -470,73 +450,22 @@ export default function App(
       setModels(modelResponse.models);
       setConnectionState("online");
 
-      let initialConversation: ConversationDetail | null = null;
-      if (requestedConversationId) {
-        try {
-          initialConversation = await getConversation(
-            requestedConversationId,
-          );
-        } catch {
-          initialConversation = null;
-        }
-      }
-      if (
-        !initialConversation &&
-        conversationResponse.conversations.length > 0
-      ) {
-        initialConversation = await getConversation(
-          conversationResponse.conversations[0].id,
-        );
-      }
-      if (initialConversation) {
-        setActiveConversationId(initialConversation.id);
-        setMessages(mapMessages(initialConversation));
-        setSelectedModel(initialConversation.model);
-        setConversationPrompt(initialConversation.system_prompt);
+      if (conversationResponse.conversations.length > 0) {
+        const latest = await getConversation(conversationResponse.conversations[0].id);
+        setActiveConversationId(latest.id);
+        setMessages(mapMessages(latest));
+        setSelectedModel(latest.model);
+        setConversationPrompt(latest.system_prompt);
       }
     } catch (initialiseError) {
       setConnectionState("backend-offline");
       setError(initialiseError instanceof Error ? initialiseError.message : "Could not initialise Jace.");
     }
-  }, [refreshControl, requestedConversationId]);
+  }, [refreshControl]);
 
   useEffect(() => { void initialise(); }, [initialise]);
 
-
   useEffect(() => {
-    if (!isPrimaryWindow) return;
-
-    const handleReattached = (event: Event) => {
-      const detail = (event as CustomEvent<{ panel?: string }>).detail;
-      if (detail?.panel !== "workspace") return;
-
-      try {
-        const storedScreen = window.localStorage.getItem(
-          DETACHED_WORKSPACE_SCREEN_KEY,
-        );
-        if (isScreenValue(storedScreen)) {
-          setScreen(storedScreen);
-        }
-      } catch {
-        // Cross-window screen sync is convenience only.
-      }
-
-      void initialise();
-    };
-
-    window.addEventListener(
-      "jace:panel-reattached",
-      handleReattached as EventListener,
-    );
-    return () => {
-      window.removeEventListener(
-        "jace:panel-reattached",
-        handleReattached as EventListener,
-      );
-    };
-  }, [initialise, isPrimaryWindow]);
-  useEffect(() => {
-    if (!isPrimaryWindow) return;
     if (connectionState === "backend-offline") return;
 
     let cancelled = false;
@@ -588,7 +517,6 @@ export default function App(
   // Poll the shared queue so background Agent Office workers can surface the
   // same approval modal even when no foreground chat request is generating.
   useEffect(() => {
-    if (!isPrimaryWindow) return;
     if (connectionState === "backend-offline") return;
 
     let cancelled = false;
@@ -1487,23 +1415,6 @@ export default function App(
       )}
     </>
   );
-
-  if (props.detachedWorkspace) {
-    return (
-      <>
-        <DetachedWorkspaceShell
-          screen={screen}
-          onScreenChange={setScreen}
-        >
-          {workspace}
-        </DetachedWorkspaceShell>
-        <ToolApprovalModal
-          approval={pendingApproval}
-          onDecision={decideToolApproval}
-        />
-      </>
-    );
-  }
 
   return (
     <>

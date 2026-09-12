@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "detached-panels",
+  "description": "Restricted capability for Jace detached panel windows",
+  "windows": [
+    "jace-core",
+    "jace-office",
+    "jace-workspace"
+  ],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "core:window:allow-close",
+    "core:window:allow-set-fullscreen"
+  ]
+}

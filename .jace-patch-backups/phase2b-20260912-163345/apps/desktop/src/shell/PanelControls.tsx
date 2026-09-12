@@ -1,8 +1,4 @@
-import type {
-  DetachedPanelContext,
-  JacePanelId,
-  JacePanelManager,
-} from "./usePanelManager";
+import type { JacePanelId, JacePanelManager } from "./usePanelManager";
 
 const PANEL_NAMES: Record<JacePanelId, string> = {
   core: "Jace Core",
@@ -13,11 +9,9 @@ const PANEL_NAMES: Record<JacePanelId, string> = {
 export function PanelControls(props: {
   panel: JacePanelId;
   manager: JacePanelManager;
-  detachContext?: DetachedPanelContext;
 }) {
   const maximized = props.manager.focused === props.panel;
   const fullscreen = props.manager.fullscreenPanel === props.panel;
-  const detached = props.manager.isDetached(props.panel);
   const name = PANEL_NAMES[props.panel];
 
   return (
@@ -30,34 +24,15 @@ export function PanelControls(props: {
       >
         —
       </button>
-
       <button
         type="button"
         onClick={() => props.manager.toggleMaximized(props.panel)}
         title={maximized ? `Restore ${name}` : `Maximize ${name}`}
         aria-label={maximized ? `Restore ${name}` : `Maximize ${name}`}
         className={maximized ? "active" : ""}
-        disabled={detached}
       >
         {maximized ? "▣" : "□"}
       </button>
-
-      <button
-        type="button"
-        onClick={() =>
-          void props.manager.detach(props.panel, props.detachContext)
-        }
-        title={
-          detached
-            ? `${name} is detached`
-            : `Detach ${name} into its own window`
-        }
-        aria-label={detached ? `${name} is detached` : `Detach ${name}`}
-        className={detached ? "active" : ""}
-      >
-        ↗
-      </button>
-
       <button
         type="button"
         onClick={() => void props.manager.toggleFullscreen(props.panel)}

@@ -9,9 +9,6 @@
     "core:default",
     "opener:default",
     "notification:default",
-    "core:window:allow-set-fullscreen",
-    "core:webview:allow-create-webview-window",
-    "core:window:allow-unminimize",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-fullscreen"
   ]
 }
