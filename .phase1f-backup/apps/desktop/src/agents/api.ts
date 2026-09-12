@@ -1,9 +1,6 @@
 import { API_BASE_URL } from "../constants";
 import type {
   AgentDefinitionListResponse,
-  AgentDiagnosticRunAllResponse,
-  AgentDiagnosticRunResponse,
-  AgentDiagnosticsSnapshot,
   AgentReadinessSnapshot,
   AgentStatus,
   AgentTask,
@@ -53,19 +50,6 @@ export const getAgentStatus = () =>
 
 export const getAgentReadiness = () =>
   agentRequest<AgentReadinessSnapshot>("/agents/readiness");
-export const getAgentDiagnostics = () =>
-  agentRequest<AgentDiagnosticsSnapshot>("/agents/diagnostics");
-
-export const runAgentDiagnostic = (agentId: string) =>
-  agentRequest<AgentDiagnosticRunResponse>(
-    `/agents/diagnostics/${encodeURIComponent(agentId)}`,
-    { method: "POST" },
-  );
-
-export const runAllAgentDiagnostics = () =>
-  agentRequest<AgentDiagnosticRunAllResponse>("/agents/diagnostics/run-all", {
-    method: "POST",
-  });
 
 export const getAgentWorkers = () =>
   agentRequest<AgentWorkerListResponse>("/agents/workers");

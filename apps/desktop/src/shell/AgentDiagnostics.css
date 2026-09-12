@@ -1,0 +1,81 @@
+/* JACE_AGENT_DIAGNOSTICS_PHASE_1F */
+.agent-diagnostic-card {
+  border: 1px solid rgba(121, 200, 255, 0.22);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(10, 18, 28, 0.72);
+  display: grid;
+  gap: 9px;
+}
+.agent-diagnostic-head,
+.agent-diagnostic-actions,
+.agent-diagnostic-facts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agent-diagnostic-head > div { min-width: 0; display: grid; gap: 2px; }
+.agent-diagnostic-head span:first-child,
+.agent-diagnostic-facts,
+.agent-diagnostic-card small {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+.agent-diagnostic-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-diagnostic-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.18);
+  padding: 4px 7px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agent-diagnostic-badge.passed { border-color: rgba(101, 230, 165, .55); color: #8ff0bd; }
+.agent-diagnostic-badge.failed { border-color: rgba(255, 111, 122, .6); color: #ff9da5; }
+.agent-diagnostic-badge.running { border-color: rgba(85, 223, 245, .55); color: #7fe9fa; }
+.agent-diagnostic-badge.blocked { border-color: rgba(240, 184, 90, .55); color: #f0c778; }
+.agent-diagnostic-badge.untested { color: rgba(255,255,255,.62); }
+.agent-diagnostic-card p { margin: 0; font-size: 12px; line-height: 1.45; opacity: 0.88; }
+.agent-diagnostic-facts { justify-content: flex-start; flex-wrap: wrap; text-transform: none; letter-spacing: 0; }
+.agent-diagnostic-facts span { border: 1px solid rgba(255,255,255,.1); border-radius: 7px; padding: 4px 6px; }
+.agent-diagnostic-tools { display: flex; flex-wrap: wrap; gap: 5px; }
+.agent-diagnostic-tools span {
+  border-radius: 6px;
+  background: rgba(255,255,255,.06);
+  padding: 4px 6px;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.agent-diagnostic-tools span.used { outline: 1px solid rgba(101, 230, 165, .38); }
+.agent-diagnostic-actions { justify-content: flex-start; }
+.agent-diagnostic-actions button {
+  border: 1px solid rgba(121, 200, 255, .28);
+  border-radius: 8px;
+  background: rgba(121, 200, 255, .08);
+  color: inherit;
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+.agent-diagnostic-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.agent-diagnostic-error { color: #ff9da5; font-size: 11px; }
+.agent-diagnostic-run-all {
+  border: 1px solid rgba(121, 200, 255, .28);
+  border-radius: 8px;
+  background: rgba(121, 200, 255, .08);
+  color: inherit;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.agent-diagnostic-run-all:hover:not(:disabled) { background: rgba(121, 200, 255, .14); }
+.agent-diagnostic-run-all:disabled { opacity: .45; cursor: not-allowed; }

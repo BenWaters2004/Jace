@@ -7,10 +7,6 @@ from jace.agents.definitions import (
     list_agent_definitions,
 )
 from jace.agents.manager import agent_manager
-from jace.agents.diagnostics import (
-    build_agent_diagnostics_snapshot,
-    create_agent_diagnostic_task,
-)
 from jace.agents.readiness import (
     build_agent_readiness_snapshot,
     get_agent_readiness,
@@ -110,72 +106,6 @@ async def agent_readiness():
     return await build_agent_readiness_snapshot(
         manager_running=agent_manager.running,
     )
-
-# JACE_AGENT_DIAGNOSTICS_PHASE_1F
-@router.get("/diagnostics")
-async def agent_diagnostics():
-    readiness = await build_agent_readiness_snapshot(
-        manager_running=agent_manager.running,
-    )
-    return await build_agent_diagnostics_snapshot(readiness_snapshot=readiness)
-
-
-@router.post("/diagnostics/run-all")
-async def run_all_agent_diagnostics():
-    if not agent_settings.enabled or not agent_manager.running:
-        raise HTTPException(status_code=503, detail="Agent manager is not currently accepting tasks.")
-    readiness = await build_agent_readiness_snapshot(
-        manager_running=agent_manager.running,
-    )
-    readiness_by_id = {item["agent_id"]: item for item in readiness["agents"]}
-    queued: list[str] = []
-    reused: list[str] = []
-    skipped: dict[str, str] = {}
-    for definition in list_agent_definitions():
-        item = readiness_by_id.get(definition.id)
-        if not item:
-            skipped[definition.id] = "Readiness information is unavailable."
-            continue
-        task, blocked_reason, existing = await create_agent_diagnostic_task(
-            agent_id=definition.id,
-            readiness=item,
-        )
-        if task is None:
-            skipped[definition.id] = blocked_reason or "Self-test is currently blocked."
-            continue
-        if existing:
-            reused.append(task.id)
-            continue
-        if await agent_manager.enqueue(task.id, priority=task.priority):
-            queued.append(task.id)
-        else:
-            skipped[definition.id] = "Agent manager stopped accepting tasks before the diagnostic could be queued."
-    return {"queued_task_ids": queued, "existing_task_ids": reused, "skipped": skipped}
-
-
-@router.post("/diagnostics/{agent_id}")
-async def run_agent_diagnostic(agent_id: str):
-    if not agent_settings.enabled or not agent_manager.running:
-        raise HTTPException(status_code=503, detail="Agent manager is not currently accepting tasks.")
-    try:
-        readiness = await get_agent_readiness(
-            agent_id,
-            manager_running=agent_manager.running,
-        )
-        task, blocked_reason, existing = await create_agent_diagnostic_task(
-            agent_id=agent_id,
-            readiness=readiness,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if task is None:
-        raise HTTPException(status_code=409, detail=blocked_reason or "Self-test is currently blocked.")
-    if not existing:
-        queued = await agent_manager.enqueue(task.id, priority=task.priority)
-        if not queued:
-            raise HTTPException(status_code=503, detail="Agent manager is not currently accepting tasks.")
-    return {"task_id": task.id, "existing": existing}
-
 
 @router.get("", response_model=AgentDefinitionListResponse)
 async def agent_definitions():

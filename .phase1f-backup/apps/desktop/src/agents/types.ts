@@ -98,47 +98,6 @@ export interface AgentReadinessSnapshot {
   agents: AgentReadiness[];
 }
 
-// JACE_AGENT_DIAGNOSTICS_PHASE_1F
-export type AgentDiagnosticStatus = "untested" | "blocked" | "running" | "passed" | "failed";
-
-export interface AgentDiagnostic {
-  agent_id: string;
-  agent_name: string;
-  testable: boolean;
-  blocked_reason: string | null;
-  test_label: string | null;
-  status: AgentDiagnosticStatus;
-  summary: string;
-  task_id: string | null;
-  task_status: AgentTaskStatus | null;
-  created_at: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  duration_ms: number | null;
-  expected_tools: string[];
-  used_tools: string[];
-  result_preview: string | null;
-  error: string | null;
-  diagnostic_version: number;
-}
-
-export interface AgentDiagnosticsSnapshot {
-  generated_at: string;
-  counts: Record<AgentDiagnosticStatus, number>;
-  agents: AgentDiagnostic[];
-}
-
-export interface AgentDiagnosticRunResponse {
-  task_id: string;
-  existing: boolean;
-}
-
-export interface AgentDiagnosticRunAllResponse {
-  queued_task_ids: string[];
-  existing_task_ids: string[];
-  skipped: Record<string, string>;
-}
-
 export interface AgentTaskCreateRequest {
   agent_id: string;
   title: string;

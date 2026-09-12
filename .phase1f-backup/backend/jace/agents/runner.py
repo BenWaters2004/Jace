@@ -4120,12 +4120,9 @@ async def execute_agent_task(
     # mark them unverified. Never let an intermediate Director branch write to
     # long-term memory. Direct/single-agent tasks keep the normal 11B.3D curation.
     completed_metadata = task_metadata(current)
-    if (
-        completed_metadata.get("director_managed") is True
-        or completed_metadata.get("suppress_memory_extraction") is True
-    ):
+    if completed_metadata.get("director_managed") is True:
         logger.info(
-            "Skipping automatic long-term memory extraction for internal/Director task %s (%s).",
+            "Skipping automatic long-term memory extraction for Director child task %s (%s).",
             task_id,
             definition.name,
         )

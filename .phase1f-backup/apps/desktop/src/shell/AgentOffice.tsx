@@ -16,7 +16,6 @@ import {
   useAgentOffice,
 } from "../agents/useAgentOffice";
 import { useAgentReadiness } from "../agents/useAgentReadiness";
-import { useAgentDiagnostics } from "../agents/useAgentDiagnostics";
 import {
   PixelAgentOffice,
 } from "./PixelAgentOffice";
@@ -24,7 +23,6 @@ import "./AgentOffice.css";
 import "./AgentOfficeVisuals.css";
 import "./AgentInteractions.css";
 import "./AgentReadiness.css";
-import "./AgentDiagnostics.css";
 
 function formatElapsed(
   start: string | null,
@@ -98,7 +96,6 @@ function taskActivityText(task: AgentTask): string {
 
 type AgentOfficeState = ReturnType<typeof useAgentOffice>;
 type AgentReadinessState = ReturnType<typeof useAgentReadiness>;
-type AgentDiagnosticsState = ReturnType<typeof useAgentDiagnostics>;
 // Phase 1E: specialist runtime readiness
 
 function TaskTools(props: {
@@ -239,92 +236,6 @@ function AgentReadinessPanel(props: {
           ))}
         </div>
       )}
-    </section>
-  );
-}
-
-// JACE_AGENT_DIAGNOSTICS_PHASE_1F
-function formatDiagnosticDuration(value: number | null): string {
-  if (value === null) return "—";
-  const seconds = Math.max(0, Math.round(value / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
-
-function AgentDiagnosticPanel(props: {
-  office: AgentOfficeState;
-  diagnostics: AgentDiagnosticsState;
-}) {
-  const agent = props.office.selectedAgentDefinition;
-  if (!agent) return null;
-  const state = props.diagnostics.byAgentId.get(agent.id) ?? null;
-  const submitting = props.diagnostics.submitting.has(agent.id);
-
-  if (!state) {
-    return (
-      <section className="agent-diagnostic-card">
-        <div className="agent-diagnostic-head">
-          <div>
-            <span>Functional self-test</span>
-            <strong>{props.diagnostics.error ? "Diagnostics unavailable" : "Loading test state…"}</strong>
-          </div>
-          <span className="agent-diagnostic-badge untested">CHECKING</span>
-        </div>
-        {props.diagnostics.error && <p className="agent-diagnostic-error">{props.diagnostics.error}</p>}
-      </section>
-    );
-  }
-
-  const used = new Set(state.used_tools);
-  const running = state.status === "running";
-  const disabled = submitting || running || !state.testable;
-
-  return (
-    <section className="agent-diagnostic-card">
-      <div className="agent-diagnostic-head">
-        <div>
-          <span>Functional self-test</span>
-          <strong>{state.test_label ?? "End-to-end specialist test"}</strong>
-        </div>
-        <span className={`agent-diagnostic-badge ${state.status}`}>{state.status}</span>
-      </div>
-      <p>{state.summary}</p>
-      <div className="agent-diagnostic-facts">
-        <span>Last run: {formatTimestamp(state.created_at)}</span>
-        <span>Duration: {formatDiagnosticDuration(state.duration_ms)}</span>
-        {state.task_status && <span>Task: {state.task_status.replace(/_/g, " ")}</span>}
-      </div>
-      {state.expected_tools.length > 0 && (
-        <div className="agent-diagnostic-tools" title="Required tool evidence for this test">
-          {state.expected_tools.map((tool) => (
-            <span key={tool} className={used.has(tool) ? "used" : ""}>
-              {used.has(tool) ? "●" : "○"} {tool}
-            </span>
-          ))}
-        </div>
-      )}
-      {state.blocked_reason && !state.testable && (
-        <small>Current self-test blocked: {state.blocked_reason}</small>
-      )}
-      {state.error && <div className="agent-diagnostic-error">{state.error}</div>}
-      <div className="agent-diagnostic-actions">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => void props.diagnostics.run(agent.id)}
-          title={!state.testable ? state.blocked_reason ?? "Self-test is blocked" : "Run a real end-to-end specialist test"}
-        >
-          {submitting ? "Queueing…" : running ? "Test running…" : state.status === "passed" ? "Run again" : "Run self-test"}
-        </button>
-        {state.task_id && (
-          <button
-            type="button"
-            onClick={() => props.office.setSelectedTaskId(state.task_id!)}
-          >
-            Inspect test task
-          </button>
-        )}
-      </div>
     </section>
   );
 }
@@ -741,9 +652,6 @@ function AgentTaskHistory(props: {
               {task.metadata?.director_managed === true && (
                 <span className="director">DIRECTOR</span>
               )}
-              {task.metadata?.agent_self_test === true && (
-                <span className="current">SELF TEST</span>
-              )}
               {current && <span className="current">CURRENT</span>}
               <span className={`agent-task-status ${task.status}`}>
                 {statusLabel(task)}
@@ -901,7 +809,6 @@ function SelectedTaskDetails(props: {
 function AgentInteractionPanel(props: {
   office: AgentOfficeState;
   readiness: AgentReadinessState;
-  diagnostics: AgentDiagnosticsState;
 }) {
   const agent = props.office.selectedAgentDefinition;
   const worker = props.office.selectedWorker;
@@ -943,7 +850,6 @@ function AgentInteractionPanel(props: {
 
       <div className="agent-interaction-scroll">
         <AgentReadinessPanel office={props.office} readiness={props.readiness} />
-        <AgentDiagnosticPanel office={props.office} diagnostics={props.diagnostics} />
         {workerIsIdle && (
           <AgentAssignmentForm office={props.office} readiness={props.readiness} />
         )}
@@ -1048,7 +954,6 @@ export function AgentOffice(props: {
 
   const office = useAgentOffice();
   const readiness = useAgentReadiness();
-  const diagnostics = useAgentDiagnostics();
   const workerCount = office.status?.workers ?? 0;
   const busyExecutors = office.executors.filter(
     (executor) => executor.state === "running",
@@ -1072,15 +977,6 @@ export function AgentOffice(props: {
         </div>
 
         <div className="agent-office-actions">
-          <button
-            type="button"
-            className="agent-diagnostic-run-all"
-            disabled={diagnostics.runningAll || (diagnostics.snapshot?.counts.running ?? 0) > 0}
-            onClick={() => void diagnostics.runAll()}
-            title="Run safe end-to-end tests for every testable specialist"
-          >
-            {diagnostics.runningAll ? "QUEUEING…" : "TEST AGENTS"}
-          </button>
           {readiness.snapshot && (
             <div className="agent-readiness-overview" title="Specialist runtime readiness">
               {readiness.counts.unavailable > 0 && (
@@ -1154,7 +1050,7 @@ export function AgentOffice(props: {
             onSelectWorker={office.selectWorker}
           />
 
-          <AgentInteractionPanel office={office} readiness={readiness} diagnostics={diagnostics} />
+          <AgentInteractionPanel office={office} readiness={readiness} />
 
           {office.notice && (
             <button
