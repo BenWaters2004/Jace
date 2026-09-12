@@ -17,8 +17,6 @@ import type { JaceRuntimeState } from "./runtime";
 import { JaceCore } from "./JaceCore";
 import { AgentOffice } from "./AgentOffice";
 import { AttentionPanel } from "./AttentionPanel";
-import { PanelControls } from "./PanelControls";
-import { usePanelManager, type JacePanelId } from "./usePanelManager";
 
 const TABS: Array<{ screen: Screen; label: string }> = [
   { screen: "chat", label: "Chat" },
@@ -62,13 +60,9 @@ export function CommandCenter(props: {
   onEmergencyStop: () => void;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // JACE_DESKTOP_WINDOWS_PHASE_2A
-  const panels = usePanelManager();
-  const restoreLabels: Record<JacePanelId, string> = {
-    core: "Core",
-    office: "Office",
-    workspace: "Workspace",
-  };
+  const [focus, setFocus] = useState<
+    "none" | "core" | "office" | "workspace"
+  >("none");
 
   /*
    * Jace should always open ready for a new conversation rather than
@@ -90,16 +84,8 @@ export function CommandCenter(props: {
     props.onNewChat();
   }, [props.onNewChat]);
 
-  const shellClassName = [
-    "command-center-shell",
-    panels.focused ? `focus-${panels.focused}` : "focus-none",
-    ...panels.minimized.map((panel) => `min-${panel}`),
-    panels.fullscreenPanel ? "panel-fullscreen-active" : "",
-    panels.fullscreenPanel ? `panel-fullscreen-${panels.fullscreenPanel}` : "",
-  ].filter(Boolean).join(" ");
-
   return (
-    <main className={shellClassName}>
+    <main className={`command-center-shell focus-${focus}`}>
       <header className="command-topbar">
         <div className="command-brand">
           <span className="command-mark">J</span>
@@ -118,16 +104,6 @@ export function CommandCenter(props: {
         </div>
 
         <div className="command-actions">
-          {panels.minimized.length > 0 && (
-            <div className="panel-restore-strip" aria-label="Restore minimized panels">
-              {panels.minimized.map((panel) => (
-                <button type="button" key={panel} className="panel-restore-button"
-                  onClick={() => panels.restore(panel)} title={`Restore ${restoreLabels[panel]}`}>
-                  + {restoreLabels[panel]}
-                </button>
-              ))}
-            </div>
-          )}
           <button onClick={() => setDrawerOpen((open) => !open)}>Chats</button>
           <button onClick={() => props.onScreenChange("settings")}>⚙</button>
         </div>
@@ -146,29 +122,26 @@ export function CommandCenter(props: {
         />
 
         <div className="command-center-column">
-          {!panels.isMinimized("core") && (
-            <JaceCore
-                        name={props.assistantName}
-                        state={props.state}
-                        model={props.model}
-                        runtimeConnected={props.runtimeConnected}
-                        amplitude={props.voiceAmplitude}
-                        activities={props.toolActivity}
-                        onExpand={() => panels.toggleMaximized("core")}
-                        controls={<PanelControls panel="core" manager={panels} />}
-            />
-          )}
+          <JaceCore
+            name={props.assistantName}
+            state={props.state}
+            model={props.model}
+            runtimeConnected={props.runtimeConnected}
+            amplitude={props.voiceAmplitude}
+            activities={props.toolActivity}
+            onExpand={() =>
+              setFocus(focus === "core" ? "none" : "core")
+            }
+          />
 
-          {!panels.isMinimized("office") && (
-            <AgentOffice
-                        activities={props.toolActivity}
-                        onExpand={() => panels.toggleMaximized("office")}
-                        controls={<PanelControls panel="office" manager={panels} />}
-            />
-          )}
+          <AgentOffice
+            activities={props.toolActivity}
+            onExpand={() =>
+              setFocus(focus === "office" ? "none" : "office")
+            }
+          />
         </div>
 
-        {!panels.isMinimized("workspace") && (
         <section className="workspace-column cc-panel">
           <div className="workspace-tabs-row">
             <div className="workspace-tabs-scroll">
@@ -183,12 +156,18 @@ export function CommandCenter(props: {
               ))}
             </div>
 
-            <PanelControls panel="workspace" manager={panels} />
+            <button
+              className="cc-icon-button"
+              onClick={() =>
+                setFocus(focus === "workspace" ? "none" : "workspace")
+              }
+            >
+              □
+            </button>
           </div>
 
           <div className="workspace-host">{props.workspace}</div>
         </section>
-        )}
       </div>
 
       <footer className="command-footer">

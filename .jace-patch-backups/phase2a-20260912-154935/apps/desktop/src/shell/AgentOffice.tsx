@@ -2,7 +2,6 @@ import {
   useEffect,
   useState,
   type FormEvent,
-  type ReactNode,
 } from "react";
 import type { ToolActivity } from "../types";
 import {
@@ -1044,7 +1043,6 @@ function ExecutorStrip(props: {
 export function AgentOffice(props: {
   activities: ToolActivity[];
   onExpand: () => void;
-  controls?: ReactNode;
 }) {
   void props.activities;
 
@@ -1126,16 +1124,13 @@ export function AgentOffice(props: {
             </span>
           )}
 
-          {/* JACE_DESKTOP_WINDOWS_PHASE_2A */}
-          {props.controls ?? (
-            <button
-              className="cc-icon-button"
-              onClick={props.onExpand}
-              title="Focus agent office"
-            >
-              □
-            </button>
-          )}
+          <button
+            className="cc-icon-button"
+            onClick={props.onExpand}
+            title="Focus agent office"
+          >
+            □
+          </button>
         </div>
       </div>
 

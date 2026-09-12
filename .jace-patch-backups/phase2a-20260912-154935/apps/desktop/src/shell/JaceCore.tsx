@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { JaceRuntimeState } from "./runtime";
@@ -92,7 +91,6 @@ export function JaceCore(props: {
   runtimeConnected: boolean;
   amplitude?: number;
   onExpand: () => void;
-  controls?: ReactNode;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<JaceBoardEngine | null>(null);
@@ -516,19 +514,14 @@ export function JaceCore(props: {
         </div>
       </div>
 
-      {/* JACE_DESKTOP_WINDOWS_PHASE_2A */}
-      {props.controls ? (
-        <div className="jace-core-panel-controls">{props.controls}</div>
-      ) : (
-        <button
-          className="jace-av-focus-button"
-          onClick={props.onExpand}
-          title="Focus Jace visualizer"
-          aria-label="Focus Jace visualizer"
-        >
-          □
-        </button>
-      )}
+      <button
+        className="jace-av-focus-button"
+        onClick={props.onExpand}
+        title="Focus Jace visualizer"
+        aria-label="Focus Jace visualizer"
+      >
+        □
+      </button>
     </section>
   );
 }
