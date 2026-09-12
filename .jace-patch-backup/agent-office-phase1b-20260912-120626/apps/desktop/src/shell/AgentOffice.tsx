@@ -389,9 +389,6 @@ function AgentTaskHistory(props: {
               <span>{formatTimestamp(task.created_at)}</span>
             </div>
             <div className="agent-task-history-statuses">
-              {task.metadata?.director_managed === true && (
-                <span className="director">DIRECTOR</span>
-              )}
               {current && <span className="current">CURRENT</span>}
               <span className={`agent-task-status ${task.status}`}>
                 {statusLabel(task)}
@@ -414,14 +411,6 @@ function SelectedTaskDetails(props: {
   const executor =
     props.office.workers.find((worker) => worker.task?.id === task.id)?.executor ??
     null;
-  const directorWorkflow =
-    typeof task.metadata?.director_workflow_id === "string"
-      ? task.metadata.director_workflow_id
-      : null;
-  const directorStep =
-    typeof task.metadata?.director_step_id === "string"
-      ? task.metadata.director_step_id
-      : null;
 
   return (
     <div className="agent-selected-task-card">
@@ -455,16 +444,6 @@ function SelectedTaskDetails(props: {
               : task.status === "queued"
                 ? "WAITING SLOT"
                 : "EXECUTOR SYNC"}
-          </span>
-        )}
-        {task.queue_position !== null && (
-          <span title="Live position in the background-agent dispatcher">
-            QUEUE #{task.queue_position}
-          </span>
-        )}
-        {directorWorkflow && (
-          <span title={`Agent Director workflow ${directorWorkflow}`}>
-            DIRECTOR{directorStep ? ` · ${directorStep}` : ""}
           </span>
         )}
       </div>
@@ -635,38 +614,6 @@ function AgentInteractionPanel(props: {
   );
 }
 
-function ExecutorStrip(props: {
-  office: AgentOfficeState;
-}) {
-  if (props.office.executors.length === 0) return null;
-
-  return (
-    <div className="agent-executor-strip" aria-label="Real background executors">
-      {props.office.executors.map((executor) => {
-        const task = executor.task_id
-          ? props.office.tasks.find((candidate) => candidate.id === executor.task_id) ?? null
-          : null;
-        const running = executor.state === "running";
-        return (
-          <div
-            key={executor.id}
-            className={`agent-executor-slot ${running ? "running" : "idle"}`}
-            title={
-              running
-                ? `${executor.id}: ${task?.agent_name ?? executor.agent_id ?? "agent"} — ${task?.title ?? executor.task_title ?? "working"}`
-                : `${executor.id}: idle`
-            }
-          >
-            <span className="agent-executor-dot" />
-            <strong>W{executor.index}</strong>
-            <span>{running ? task?.agent_name ?? executor.agent_id ?? "BUSY" : "IDLE"}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export function AgentOffice(props: {
   activities: ToolActivity[];
   onExpand: () => void;
@@ -674,11 +621,11 @@ export function AgentOffice(props: {
   void props.activities;
 
   const office = useAgentOffice();
+  const busyCount = office.activeTasks.length;
   const workerCount = office.status?.workers ?? 0;
   const busyExecutors = office.executors.filter(
     (executor) => executor.state === "running",
   ).length;
-  const queuedCount = office.status?.queued_tasks ?? 0;
 
   return (
     <section className="cc-panel agent-office-panel phase11-agent-office">
@@ -688,11 +635,9 @@ export function AgentOffice(props: {
           <strong>
             {office.error
               ? "Agent office unavailable"
-              : busyExecutors > 0
-                ? `${busyExecutors} job${busyExecutors === 1 ? "" : "s"} running${queuedCount > 0 ? ` · ${queuedCount} queued` : ""}`
-                : queuedCount > 0
-                  ? `${queuedCount} job${queuedCount === 1 ? "" : "s"} queued`
-                  : "Agents standing by"}
+              : busyCount > 0
+                ? `${busyCount} background job${busyCount === 1 ? "" : "s"} active`
+                : "Agents standing by"}
           </strong>
         </div>
 
@@ -744,7 +689,6 @@ export function AgentOffice(props: {
         </div>
       ) : (
         <div className="agent-office-stage">
-          <ExecutorStrip office={office} />
           <PixelAgentOffice
             workers={office.workers}
             selectedWorkerId={office.selectedWorkerId}

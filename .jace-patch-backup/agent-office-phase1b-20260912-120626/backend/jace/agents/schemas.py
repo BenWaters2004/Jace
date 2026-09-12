@@ -44,7 +44,6 @@ class AgentWorkerResponse(BaseModel):
     task_id: str | None
     agent_id: str | None
     task_title: str | None
-    dispatch_generation: int | None
     assigned_at: datetime | None
     updated_at: datetime
 
@@ -92,8 +91,6 @@ class AgentTaskResponse(BaseModel):
     instruction: str
     status: AgentTaskStatus
     priority: int
-    executor_id: str | None
-    queue_position: int | None
     progress: float
     progress_message: str | None
 

@@ -350,14 +350,6 @@ export function useAgentOffice() {
         latestSequenceRef.current = event.sequence;
       }
 
-      if (event.type === "agent.queue.changed") {
-        // Queue positions are derived from the live dispatcher. Any enqueue,
-        // dispatch or cancellation can move every queued job, so reconcile the
-        // whole office rather than refreshing only the task in the event.
-        void hydrate();
-        return;
-      }
-
       if (event.type === "agent.worker.changed") {
         // Worker events are intentionally lossy presentation hints. Reconcile
         // both worker-slot ownership and persistent task state from REST.
@@ -447,16 +439,6 @@ export function useAgentOffice() {
       const matchingActive = activeTasks
         .filter((task) => task.agent_id === definition.id)
         .sort((a, b) => {
-          const aExecuting =
-            executorByTaskId.has(a.id) || Boolean(a.executor_id);
-          const bExecuting =
-            executorByTaskId.has(b.id) || Boolean(b.executor_id);
-          if (aExecuting !== bExecuting) return aExecuting ? -1 : 1;
-
-          const aQueued = a.status === "queued";
-          const bQueued = b.status === "queued";
-          if (aQueued !== bQueued) return aQueued ? 1 : -1;
-
           if (a.priority !== b.priority) {
             return b.priority - a.priority;
           }
@@ -485,29 +467,23 @@ export function useAgentOffice() {
           ] ?? null,
       });
 
-      // Extra office characters represent real concurrent execution only.
-      // A backlog of queued work belongs in the task queue/history and must not
-      // manufacture fake copies of a specialist around the room.
-      const runningOverflow = matchingActive
-        .slice(1)
-        .filter(
-          (task) =>
-            executorByTaskId.has(task.id) || Boolean(task.executor_id),
-        );
-
-      for (let index = 0; index < runningOverflow.length; index += 1) {
-        const overflowTask = runningOverflow[index];
-        const overflowIndex = index + 1;
+      for (
+        let index = 1;
+        index < matchingActive.length;
+        index += 1
+      ) {
         output.push({
-          id: `${definition.id}-overflow-${overflowTask.id}`,
+          id: `${definition.id}-overflow-${matchingActive[index].id}`,
           definition: {
             ...definition,
-            name: `${definition.name} ${overflowIndex + 1}`,
+            name: `${definition.name} ${index + 1}`,
           },
-          task: overflowTask,
-          executor: executorByTaskId.get(overflowTask.id) ?? null,
-          overflowIndex,
-          latestEvent: latestTaskEventsById[overflowTask.id] ?? null,
+          task: matchingActive[index],
+          executor:
+            executorByTaskId.get(matchingActive[index].id) ?? null,
+          overflowIndex: index,
+          latestEvent:
+            latestTaskEventsById[matchingActive[index].id] ?? null,
         });
       }
     }
@@ -643,14 +619,14 @@ export function useAgentOffice() {
 
     return {
       ...status,
-      active_tasks: executors.filter(
-        (executor) => executor.state === "running",
+      active_tasks: activeTasks.filter(
+        (task) => task.status !== "queued",
       ).length,
       queued_tasks: activeTasks.filter(
         (task) => task.status === "queued",
       ).length,
     };
-  }, [activeTasks, executors, status]);
+  }, [activeTasks, status]);
 
   const assign = useCallback(
     async (

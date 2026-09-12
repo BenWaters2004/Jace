@@ -51,8 +51,6 @@ def _task_response(row) -> AgentTaskResponse:
         instruction=row.instruction,
         status=row.status,
         priority=row.priority,
-        executor_id=agent_manager.executor_for_task(row.id),
-        queue_position=agent_manager.queue_position(row.id),
         progress=row.progress,
         progress_message=row.progress_message,
         model=row.model,
@@ -137,11 +135,6 @@ async def get_agent_tasks(
 async def post_agent_task(request: AgentTaskCreate):
     if not agent_settings.enabled:
         raise HTTPException(status_code=503, detail="Background agents are disabled.")
-    if not agent_manager.running:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent manager is not currently accepting tasks.",
-        )
     async with SessionLocal() as session:
         try:
             row = await create_task(
@@ -227,12 +220,6 @@ async def cancel_agent_task(task_id: str):
 async def retry_agent_task(task_id: str):
     if not agent_settings.enabled:
         raise HTTPException(status_code=503, detail="Background agents are disabled.")
-    if not agent_manager.running:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent manager is not currently accepting tasks.",
-        )
-
     async with SessionLocal() as session:
         row = await get_task(session, task_id)
         if row is None:
@@ -242,20 +229,11 @@ async def retry_agent_task(task_id: str):
             row = await prepare_retry(session, row)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    queued = await agent_manager.enqueue_when_released(
-        row.id,
-        priority=row.priority,
-        timeout_seconds=2.0,
-    )
+    queued = await agent_manager.enqueue(row.id, priority=row.priority)
     if not queued:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "The task was prepared for retry but its previous executor "
-                "did not release in time. It will be recovered if the agent "
-                "manager restarts."
-            ),
+            detail="Agent manager is not currently accepting tasks.",
         )
 
     return _task_response(row)

@@ -29,14 +29,6 @@ def _utc_now() -> datetime:
 
 
 @dataclass(slots=True)
-class QueuedDispatch:
-    task_id: str
-    priority: int
-    sequence: int
-    generation: int
-
-
-@dataclass(slots=True)
 class AgentWorkerRuntime:
     """Live state for one real asyncio executor in the background-agent pool."""
 
@@ -46,7 +38,6 @@ class AgentWorkerRuntime:
     task_id: str | None
     agent_id: str | None
     task_title: str | None
-    dispatch_generation: int | None
     assigned_at: datetime | None
     updated_at: datetime
 
@@ -58,7 +49,6 @@ class AgentWorkerRuntime:
             "task_id": self.task_id,
             "agent_id": self.agent_id,
             "task_title": self.task_title,
-            "dispatch_generation": self.dispatch_generation,
             "assigned_at": self.assigned_at,
             "updated_at": self.updated_at,
         }
@@ -66,35 +56,27 @@ class AgentWorkerRuntime:
 
 class AgentManager:
     """
-    Local persistent background-agent worker pool.
+    Small local worker pool.
 
-    SQLite is authoritative for task state/history. The asyncio priority queue
-    is only an in-process dispatch mechanism and is rebuilt from persistent task
-    state whenever the manager starts.
+    Tasks are persistent in SQLite. The asyncio queue is only the in-process
+    dispatch mechanism, so a Jace restart can safely recover unfinished work.
+    11B.4 also asks the Agent Director to reconstruct any unfinished dependency
+    workflow after the worker pool has recovered its persisted child tasks.
 
-    A logical specialist (Research, Code, Files, Analyst, General) is not the
-    same thing as an executor slot. The worker runtime map exposes the real
-    asyncio executors so the Agent Office can truthfully show what is actually
-    running rather than manufacturing visual workers from queued work.
-
-    Queue entries carry a monotonically increasing dispatch generation. This is
-    important because asyncio.PriorityQueue cannot remove an arbitrary queued
-    item. Cancelling a queued task therefore invalidates that generation; any
-    stale item left in the priority queue becomes harmless. Retrying the same
-    task receives a fresh generation and can never collide with the stale item.
+    The office needs to distinguish a logical specialist (Research, Code, Files,
+    etc.) from the actual executor currently running that specialist's task. The
+    worker runtime map below is therefore authoritative for the real asyncio
+    executors while SQLite remains authoritative for task state/history.
     """
 
     def __init__(self) -> None:
-        self._queue: asyncio.PriorityQueue[tuple[int, int, str, int]] = (
+        self._queue: asyncio.PriorityQueue[tuple[int, int, str]] = (
             asyncio.PriorityQueue()
         )
         self._sequence = itertools.count()
         self._workers: list[asyncio.Task] = []
         self._worker_states: dict[int, AgentWorkerRuntime] = {}
-        self._queued_dispatches: dict[str, QueuedDispatch] = {}
-        self._dispatch_generation: dict[str, int] = {}
-        self._active_generation: dict[str, int] = {}
-        self._cancel_events: dict[tuple[str, int], asyncio.Event] = {}
+        self._cancel_events: dict[str, asyncio.Event] = {}
         self._queued_ids: set[str] = set()
         self._running_ids: set[str] = set()
         self._running = False
@@ -123,42 +105,6 @@ class AgentManager:
             for index in sorted(self._worker_states)
         ]
 
-    def executor_for_task(self, task_id: str) -> str | None:
-        for runtime in self._worker_states.values():
-            if runtime.state == "running" and runtime.task_id == task_id:
-                return runtime.id
-        return None
-
-    def queue_position(self, task_id: str) -> int | None:
-        """Return a 1-based position among currently valid queued dispatches."""
-        ordered = sorted(
-            self._queued_dispatches.values(),
-            key=lambda dispatch: (-dispatch.priority, dispatch.sequence),
-        )
-        for index, dispatch in enumerate(ordered, start=1):
-            if dispatch.task_id == task_id:
-                return index
-        return None
-
-    def _next_generation(self, task_id: str) -> int:
-        generation = self._dispatch_generation.get(task_id, 0) + 1
-        self._dispatch_generation[task_id] = generation
-        return generation
-
-    async def _publish_queue_changed(
-        self,
-        *,
-        reason: str,
-        task_id: str | None = None,
-    ) -> None:
-        await runtime_events.publish(
-            "agent.queue.changed",
-            reason=reason,
-            task_id=task_id,
-            queued_count=self.queued_count,
-            active_count=self.active_count,
-        )
-
     async def _set_worker_state(
         self,
         worker_index: int,
@@ -167,7 +113,6 @@ class AgentManager:
         task_id: str | None = None,
         agent_id: str | None = None,
         task_title: str | None = None,
-        dispatch_generation: int | None = None,
     ) -> None:
         runtime = self._worker_states.get(worker_index)
         if runtime is None:
@@ -178,12 +123,11 @@ class AgentManager:
         runtime.task_id = task_id
         runtime.agent_id = agent_id
         runtime.task_title = task_title
-        runtime.dispatch_generation = dispatch_generation
         runtime.assigned_at = now if state == "running" else None
         runtime.updated_at = now
 
-        # Runtime events are presentation hints. Reconnects always reconcile
-        # against /agents/workers plus the persistent task REST endpoints.
+        # Runtime events are intentionally presentation hints. Reconnects always
+        # reconcile against /agents/workers + persistent task REST endpoints.
         await runtime_events.publish(
             "agent.worker.changed",
             worker_id=runtime.id,
@@ -192,7 +136,6 @@ class AgentManager:
             task_id=runtime.task_id,
             agent_id=runtime.agent_id,
             task_title=runtime.task_title,
-            dispatch_generation=runtime.dispatch_generation,
             assigned_at=(
                 runtime.assigned_at.isoformat()
                 if runtime.assigned_at is not None
@@ -200,40 +143,11 @@ class AgentManager:
             ),
         )
 
-    async def _release_worker_if_owned(
-        self,
-        worker_index: int,
-        *,
-        task_id: str,
-        generation: int,
-    ) -> None:
-        runtime = self._worker_states.get(worker_index)
-        if runtime is None:
-            return
-        if runtime.task_id != task_id or runtime.dispatch_generation != generation:
-            return
-        await self._set_worker_state(worker_index, state="idle")
-
-    def _reset_dispatch_state(self) -> None:
-        """Drop all process-local dispatch state before a manager start."""
-        self._queue = asyncio.PriorityQueue()
-        self._sequence = itertools.count()
-        self._queued_dispatches.clear()
-        self._dispatch_generation.clear()
-        self._active_generation.clear()
-        self._cancel_events.clear()
-        self._queued_ids.clear()
-        self._running_ids.clear()
-
     async def start(self) -> None:
         if self._running or not agent_settings.enabled:
             return
 
-        # A stop/start inside the same backend process must not retain stale
-        # PriorityQueue entries from the previous worker pool.
-        self._reset_dispatch_state()
         self._running = True
-
         async with SessionLocal() as session:
             recovered = await recover_incomplete_tasks(session)
 
@@ -246,7 +160,6 @@ class AgentManager:
                 task_id=None,
                 agent_id=None,
                 task_title=None,
-                dispatch_generation=None,
                 assigned_at=None,
                 updated_at=now,
             )
@@ -296,8 +209,6 @@ class AgentManager:
 
         self._workers.clear()
         self._worker_states.clear()
-        self._queued_dispatches.clear()
-        self._active_generation.clear()
         self._running_ids.clear()
         self._queued_ids.clear()
         self._cancel_events.clear()
@@ -312,79 +223,22 @@ class AgentManager:
             if task_id in self._queued_ids or task_id in self._running_ids:
                 return False
 
-            # Always re-read the persistent task, even when a caller supplied a
-            # priority. That prevents a cancel/enqueue race from dispatching a
-            # task which is no longer actually queued in SQLite.
-            async with SessionLocal() as session:
-                task = await get_task(session, task_id)
-                if task is None or task.status != "queued" or task.cancel_requested:
-                    return False
+            if priority is None:
+                async with SessionLocal() as session:
+                    task = await get_task(session, task_id)
+                    if task is None or task.status != "queued":
+                        return False
+                    priority = task.priority
 
-            resolved_priority = int(task.priority if priority is None else priority)
-            generation = self._next_generation(task_id)
-            sequence = next(self._sequence)
-            dispatch = QueuedDispatch(
-                task_id=task_id,
-                priority=resolved_priority,
-                sequence=sequence,
-                generation=generation,
-            )
-
-            self._queued_dispatches[task_id] = dispatch
             self._queued_ids.add(task_id)
-            self._cancel_events[(task_id, generation)] = asyncio.Event()
-            await self._queue.put(
-                (-resolved_priority, sequence, task_id, generation)
-            )
+            await self._queue.put((-int(priority), next(self._sequence), task_id))
+            self._cancel_events.setdefault(task_id, asyncio.Event())
 
         await runtime_events.publish(
             "agent.task.queued",
             task_id=task_id,
-            queue_position=self.queue_position(task_id),
-            dispatch_generation=generation,
         )
-        await self._publish_queue_changed(reason="enqueued", task_id=task_id)
         return True
-
-    async def enqueue_when_released(
-        self,
-        task_id: str,
-        *,
-        priority: int | None = None,
-        timeout_seconds: float = 2.0,
-    ) -> bool:
-        """
-        Enqueue a retry once the previous generation has fully released.
-
-        A task can become persistently `cancelled` just before its executor's
-        finally block removes the old running generation. A user can therefore
-        press Retry during that tiny window. Waiting briefly here makes retry
-        deterministic rather than returning a misleading 503.
-        """
-        if not self._running:
-            return False
-
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + max(0.0, timeout_seconds)
-        while self._running:
-            if await self.enqueue(task_id, priority=priority):
-                return True
-
-            # If another caller already queued the same retry, regard it as
-            # accepted. This also makes the method robust to duplicate UI taps.
-            if task_id in self._queued_ids:
-                return True
-
-            async with SessionLocal() as session:
-                task = await get_task(session, task_id)
-            if task is None or task.status != "queued" or task.cancel_requested:
-                return False
-
-            if loop.time() >= deadline:
-                return False
-            await asyncio.sleep(0.025)
-
-        return False
 
     async def cancel(self, task_id: str) -> bool:
         async with SessionLocal() as session:
@@ -393,34 +247,8 @@ class AgentManager:
                 return False
             task = await request_cancel(session, task)
 
-        queue_changed = False
-        async with self._lock:
-            dispatch = self._queued_dispatches.pop(task_id, None)
-            if dispatch is not None:
-                # PriorityQueue has no arbitrary-remove operation. Invalidate
-                # this dispatch generation and leave the stale tuple in the
-                # queue; workers will recognise and discard it harmlessly.
-                self._queued_ids.discard(task_id)
-                self._dispatch_generation[task_id] = max(
-                    self._dispatch_generation.get(task_id, 0),
-                    dispatch.generation,
-                ) + 1
-                stale_event = self._cancel_events.pop(
-                    (task_id, dispatch.generation),
-                    None,
-                )
-                if stale_event is not None:
-                    stale_event.set()
-                queue_changed = True
-
-            active_generation = self._active_generation.get(task_id)
-            if active_generation is not None:
-                active_event = self._cancel_events.get(
-                    (task_id, active_generation)
-                )
-                if active_event is not None:
-                    active_event.set()
-
+        event = self._cancel_events.setdefault(task_id, asyncio.Event())
+        event.set()
         await runtime_events.publish(
             "agent.task.changed",
             task_id=task.id,
@@ -430,71 +258,26 @@ class AgentManager:
             progress_message=task.progress_message,
             conversation_id=task.conversation_id,
         )
-        if queue_changed:
-            await self._publish_queue_changed(reason="cancelled", task_id=task_id)
         return True
-
-    async def _claim_dispatch(
-        self,
-        *,
-        task_id: str,
-        generation: int,
-    ) -> asyncio.Event | None:
-        async with self._lock:
-            dispatch = self._queued_dispatches.get(task_id)
-            if dispatch is None or dispatch.generation != generation:
-                return None
-
-            self._queued_dispatches.pop(task_id, None)
-            self._queued_ids.discard(task_id)
-            self._running_ids.add(task_id)
-            self._active_generation[task_id] = generation
-            return self._cancel_events.setdefault(
-                (task_id, generation),
-                asyncio.Event(),
-            )
-
-    async def _release_dispatch(self, task_id: str, generation: int) -> None:
-        async with self._lock:
-            if self._active_generation.get(task_id) == generation:
-                self._active_generation.pop(task_id, None)
-                self._running_ids.discard(task_id)
-            self._cancel_events.pop((task_id, generation), None)
 
     async def _worker(self, worker_index: int) -> None:
         while self._running:
             try:
-                _, _, task_id, generation = await self._queue.get()
+                _, _, task_id = await self._queue.get()
             except asyncio.CancelledError:
                 break
 
-            claimed = False
+            self._queued_ids.discard(task_id)
+            self._running_ids.add(task_id)
+            cancel_event = self._cancel_events.setdefault(task_id, asyncio.Event())
+
             try:
-                cancel_event = await self._claim_dispatch(
-                    task_id=task_id,
-                    generation=generation,
-                )
-                if cancel_event is None:
-                    # Cancelled/retried queue entry from an older generation.
-                    continue
-                claimed = True
-
-                await self._publish_queue_changed(
-                    reason="dispatched",
-                    task_id=task_id,
-                )
-
                 async with SessionLocal() as session:
                     task = await get_task(session, task_id)
 
-                # A cancellation can land after the queue entry was claimed but
-                # before execute_agent_task has transitioned SQLite to running.
-                if (
-                    task is None
-                    or task.status != "queued"
-                    or task.cancel_requested
-                    or cancel_event.is_set()
-                ):
+                if task is None:
+                    continue
+                if task.cancel_requested or task.status == "cancelled":
                     continue
 
                 await self._set_worker_state(
@@ -503,7 +286,6 @@ class AgentManager:
                     task_id=task.id,
                     agent_id=task.agent_id,
                     task_title=task.title,
-                    dispatch_generation=generation,
                 )
 
                 try:
@@ -553,13 +335,9 @@ class AgentManager:
                     await self._fail_task(task_id, str(exc))
 
             finally:
-                if claimed:
-                    await self._release_dispatch(task_id, generation)
-                    await self._release_worker_if_owned(
-                        worker_index,
-                        task_id=task_id,
-                        generation=generation,
-                    )
+                self._running_ids.discard(task_id)
+                self._cancel_events.pop(task_id, None)
+                await self._set_worker_state(worker_index, state="idle")
                 self._queue.task_done()
 
     async def _fail_task(self, task_id: str, error: str) -> None:

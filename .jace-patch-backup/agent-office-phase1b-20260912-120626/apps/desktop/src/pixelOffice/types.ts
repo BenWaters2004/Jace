@@ -129,7 +129,6 @@ export interface OfficeCharacter {
 
   seatId: string;
   taskId: string | null;
-  executorId: string | null;
   taskTitle: string;
   activity: string;
   currentTool: string | null;

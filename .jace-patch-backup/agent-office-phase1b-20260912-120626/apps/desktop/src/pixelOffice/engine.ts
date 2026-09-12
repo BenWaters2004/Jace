@@ -1296,8 +1296,6 @@ export class JacePixelOfficeEngine {
               seat.id,
             taskId:
               null,
-            executorId:
-              null,
             taskTitle:
               "",
             activity:
@@ -1346,45 +1344,23 @@ export class JacePixelOfficeEngine {
           worker.task?.id ??
           null;
 
-        character.executorId =
-          worker.executor?.id ??
-          worker.task?.executor_id ??
-          null;
-
         character.taskTitle =
           worker.task?.title ??
           "";
 
-        const requiresExecutor =
-          worker.task !== null &&
-          [
-            "running",
-            "thinking",
-            "using_tool",
-            "waiting_permission",
-          ].includes(worker.task.status);
-
         character.activity =
-          requiresExecutor &&
-          !character.executorId
-            ? "Synchronising executor"
-            : worker.task?.status ===
-                  "queued" &&
-                worker.task
-                  .queue_position
-              ? `Queue #${worker.task.queue_position}`
-              : worker.task
-                  ?.progress_message ??
-                (
-                  worker.task
-                    ? worker.task
-                        .status
-                        .replace(
-                          /_/g,
-                          " ",
-                        )
-                    : "Standing by"
-                );
+          worker.task
+            ?.progress_message ??
+          (
+            worker.task
+              ? worker.task
+                  .status
+                  .replace(
+                    /_/g,
+                    " ",
+                  )
+              : "Standing by"
+          );
 
         character.currentTool =
           extractCurrentTool(
@@ -1397,12 +1373,9 @@ export class JacePixelOfficeEngine {
           0;
 
         character.desiredMode =
-          requiresExecutor &&
-          !character.executorId
-            ? "queued"
-            : taskMode(
-                worker.task,
-              );
+          taskMode(
+            worker.task,
+          );
 
         const taskChanged =
           previousTaskId !==
@@ -2983,7 +2956,7 @@ export class JacePixelOfficeEngine {
       if (
         character.seatId ===
           seatId &&
-        character.executorId
+        character.taskId
       ) {
         return true;
       }

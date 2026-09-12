@@ -33,7 +33,6 @@ export interface AgentWorkerRuntime {
   task_id: string | null;
   agent_id: string | null;
   task_title: string | null;
-  dispatch_generation: number | null;
   assigned_at: string | null;
   updated_at: string;
 }
@@ -69,8 +68,6 @@ export interface AgentTask {
   instruction: string;
   status: AgentTaskStatus;
   priority: number;
-  executor_id: string | null;
-  queue_position: number | null;
   progress: number;
   progress_message: string | null;
   model: string | null;
