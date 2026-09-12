@@ -351,9 +351,6 @@ class PendingToolApprovalResponse(BaseModel):
     risk: ToolRisk
     arguments: dict[str, Any]
     created_at: datetime
-    source: str = "chat"
-    task_id: str | None = None
-    agent_id: str | None = None
 
 
 class PendingToolApprovalsResponse(BaseModel):

@@ -26,9 +26,6 @@ from jace.memory.extractor import schedule_agent_memory_extraction
 from jace.performance import chat_activity
 from jace.runtime import runtime_events
 from jace.tools import ensure_tools_registered
-from jace.tools.approvals import approval_manager
-# Phase 1D background tool approval uses the same queue as foreground Jace.
-
 from jace.tools.base import ToolContext, ToolError
 from jace.tools.permissions import (
     create_tool_audit,
@@ -2776,47 +2773,6 @@ def _tool_evidence_payload(
     return payload
 
 
-async def _background_task_cancel_requested(task_id: str) -> bool:
-    """Read the persistent cancellation flag while a background tool approval waits."""
-    async with SessionLocal() as session:
-        current = await get_task(session, task_id)
-        return (
-            current is None
-            or bool(current.cancel_requested)
-            or current.status == "cancelled"
-        )
-
-
-async def _wait_for_background_approval(task_id: str, approval_id: str) -> bool:
-    """Wait for the shared tool approval queue without making agent cancellation wait for the timeout."""
-    wait_task = asyncio.create_task(approval_manager.wait(approval_id))
-    try:
-        while True:
-            done, _pending = await asyncio.wait({wait_task}, timeout=0.25)
-            if wait_task in done:
-                approved = wait_task.result()
-                if await _background_task_cancel_requested(task_id):
-                    raise AgentTaskCancelled()
-                return approved
-
-            if await _background_task_cancel_requested(task_id):
-                approval_manager.cancel(approval_id)
-                wait_task.cancel()
-                try:
-                    await wait_task
-                except (asyncio.CancelledError, asyncio.TimeoutError, LookupError):
-                    pass
-                raise AgentTaskCancelled()
-    except asyncio.CancelledError:
-        approval_manager.cancel(approval_id)
-        wait_task.cancel()
-        try:
-            await wait_task
-        except (asyncio.CancelledError, asyncio.TimeoutError, LookupError):
-            pass
-        raise
-
-
 async def _execute_tool(
     *,
     task: AgentTask,
@@ -2859,22 +2815,14 @@ async def _execute_tool(
 
     async with SessionLocal() as session:
         global_permission = await get_tool_permission(session, tool_name)
-        initial_status = (
-            "denied"
-            if global_permission == "deny"
-            else "awaiting_approval"
-            if global_permission == "ask"
-            else "approved"
-        )
         audit = await create_tool_audit(
             session,
             conversation_id=task.conversation_id,
             tool_name=tool_name,
             permission_mode=f"agent:{task.id}",
             arguments=arguments,
-            status=initial_status,
+            status="approved" if global_permission != "deny" else "denied",
         )
-
         if global_permission == "deny":
             error = "Tool denied by Jace's global tool policy."
             await update_tool_audit(
@@ -2895,142 +2843,7 @@ async def _execute_tool(
                 success=False,
                 error=error,
             )
-
-    approval_id: str | None = None
-    if global_permission == "ask":
-        approval = approval_manager.create(
-            conversation_id=task.conversation_id,
-            tool_name=tool_name,
-            label=definition.label,
-            description=definition.description,
-            risk=definition.risk,
-            arguments=arguments,
-            source="agent",
-            task_id=task.id,
-            agent_id=task.agent_id,
-        )
-        approval_id = approval.approval_id
-
-        async with SessionLocal() as session:
-            await update_tool_audit(
-                session,
-                audit.id,
-                status="awaiting_approval",
-                approval_id=approval_id,
-            )
-
-        await _set_state(
-            task.id,
-            status="waiting_permission",
-            progress=task.progress,
-            message=f"Waiting for permission: {definition.label}",
-            event_type="approval_required",
-            event_message=f"{task.agent_id.title()} Agent is waiting for permission to use {tool_name}.",
-            event_data={
-                "tool_name": tool_name,
-                "arguments": arguments,
-                "approval_id": approval_id,
-                "risk": definition.risk,
-            },
-        )
-
         try:
-            approved = await _wait_for_background_approval(task.id, approval_id)
-        except asyncio.TimeoutError:
-            async with SessionLocal() as session:
-                await update_tool_audit(
-                    session,
-                    audit.id,
-                    status="timed_out",
-                    error="User approval timed out.",
-                    completed=True,
-                )
-            await _set_state(
-                task.id,
-                status="using_tool",
-                progress=task.progress,
-                message=f"Permission timed out: {definition.label}",
-                event_type="approval_timed_out",
-                event_message=f"Permission timed out for {tool_name}.",
-                event_data={"tool_name": tool_name, "approval_id": approval_id},
-            )
-            error = "Tool execution was not approved before the approval timeout."
-            evidence = _tool_evidence_payload(
-                tool_name=tool_name,
-                arguments=arguments,
-                success=False,
-                error=error,
-            )
-            evidence.update({"approval_id": approval_id, "permission": "timed_out"})
-            return {
-                "role": "tool",
-                "tool_name": tool_name,
-                "content": error,
-            }, evidence
-        except AgentTaskCancelled:
-            async with SessionLocal() as session:
-                await update_tool_audit(
-                    session,
-                    audit.id,
-                    status="cancelled",
-                    error="Background task was cancelled while awaiting approval.",
-                    completed=True,
-                )
-            raise
-        except asyncio.CancelledError:
-            approval_manager.cancel(approval_id)
-            raise
-
-        if not approved:
-            async with SessionLocal() as session:
-                await update_tool_audit(
-                    session,
-                    audit.id,
-                    status="denied",
-                    error="User denied background-agent tool execution.",
-                    completed=True,
-                )
-            await _set_state(
-                task.id,
-                status="using_tool",
-                progress=task.progress,
-                message=f"Permission denied: {definition.label}",
-                event_type="approval_denied",
-                event_message=f"The user denied {tool_name} for {task.agent_id.title()} Agent.",
-                event_data={"tool_name": tool_name, "approval_id": approval_id},
-            )
-            error = "The user denied this background-agent tool call."
-            evidence = _tool_evidence_payload(
-                tool_name=tool_name,
-                arguments=arguments,
-                success=False,
-                error=error,
-            )
-            evidence.update({"approval_id": approval_id, "permission": "denied"})
-            return {
-                "role": "tool",
-                "tool_name": tool_name,
-                "content": error,
-            }, evidence
-
-        async with SessionLocal() as session:
-            await update_tool_audit(
-                session,
-                audit.id,
-                status="approved",
-            )
-        await _set_state(
-            task.id,
-            status="using_tool",
-            progress=task.progress,
-            message=f"Permission granted: using {tool_name}",
-            event_type="approval_granted",
-            event_message=f"The user approved {tool_name} for {task.agent_id.title()} Agent.",
-            event_data={"tool_name": tool_name, "approval_id": approval_id},
-        )
-
-    try:
-        async with SessionLocal() as session:
             result = await definition.execute(
                 arguments,
                 ToolContext(
@@ -3039,6 +2852,7 @@ async def _execute_tool(
                     user_message=task.instruction,
                 ),
             )
+
             full_content = result.content
             content = full_content[:8_000]
             display = (result.display or full_content)[:1_500]
@@ -3049,29 +2863,30 @@ async def _execute_tool(
                 result_preview=display,
                 completed=True,
             )
+
             message: dict[str, Any] = {
                 "role": "tool",
                 "tool_name": tool_name,
                 "content": content,
             }
+
             if result.images:
                 message["images"] = result.images
 
-        evidence = _tool_evidence_payload(
-            tool_name=tool_name,
-            arguments=arguments,
-            success=True,
-            # Evidence extraction must see the complete JSON payload. Only the
-            # model-visible message above is bounded to 8k.
-            content=full_content,
-            display=display,
-        )
-        if approval_id:
-            evidence.update({"approval_id": approval_id, "permission": "approved"})
-        return message, evidence
-    except (ToolError, ValueError) as exc:
-        error = str(exc)
-        async with SessionLocal() as session:
+            return message, _tool_evidence_payload(
+                tool_name=tool_name,
+                arguments=arguments,
+                success=True,
+                # Evidence extraction must see the complete JSON payload. Truncating a
+                # large read_workspace_file result before JSON parsing can turn a
+                # successful read into an empty evidence record. Only the model-visible
+                # tool message above is bounded to 8k.
+                content=full_content,
+                display=display,
+            )
+        except (ToolError, ValueError) as exc:
+            error = str(exc)
+
             await update_tool_audit(
                 session,
                 audit.id,
@@ -3079,24 +2894,21 @@ async def _execute_tool(
                 error=error,
                 completed=True,
             )
-        message = {
-            "role": "tool",
-            "tool_name": tool_name,
-            "content": f"Tool failed: {error}",
-        }
-        evidence = _tool_evidence_payload(
-            tool_name=tool_name,
-            arguments=arguments,
-            success=False,
-            error=error,
-        )
-        if approval_id:
-            evidence.update({"approval_id": approval_id, "permission": "approved"})
-        return message, evidence
-    except Exception as exc:
-        error = f"Unexpected tool failure: {exc}"
-        logger.exception("Background agent tool %s failed unexpectedly", tool_name)
-        async with SessionLocal() as session:
+
+            message = {
+                "role": "tool",
+                "tool_name": tool_name,
+                "content": f"Tool failed: {error}",
+            }
+            return message, _tool_evidence_payload(
+                tool_name=tool_name,
+                arguments=arguments,
+                success=False,
+                error=error,
+            )
+        except Exception as exc:
+            error = f"Unexpected tool failure: {exc}"
+
             await update_tool_audit(
                 session,
                 audit.id,
@@ -3104,20 +2916,19 @@ async def _execute_tool(
                 error=error,
                 completed=True,
             )
-        message = {
-            "role": "tool",
-            "tool_name": tool_name,
-            "content": error,
-        }
-        evidence = _tool_evidence_payload(
-            tool_name=tool_name,
-            arguments=arguments,
-            success=False,
-            error=error,
-        )
-        if approval_id:
-            evidence.update({"approval_id": approval_id, "permission": "approved"})
-        return message, evidence
+
+            message = {
+                "role": "tool",
+                "tool_name": tool_name,
+                "content": error,
+            }
+            return message, _tool_evidence_payload(
+                tool_name=tool_name,
+                arguments=arguments,
+                success=False,
+                error=error,
+            )
+
 
 async def _conversation_context(task: AgentTask) -> list[dict[str, Any]]:
     if (

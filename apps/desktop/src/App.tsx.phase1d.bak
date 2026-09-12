@@ -1,4 +1,4 @@
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+﻿import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -39,7 +39,6 @@ import {
   getHealth,
   getMemories,
   getModels,
-  getPendingToolApprovals,
   getSettings,
   getToolAudit,
   getTools,
@@ -513,47 +512,6 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [connectionState, screen, controlStatus?.active_session?.id, refreshControl]);
 
-  // Phase 1D: approvals are global runtime work, not just chat-stream events.
-  // Poll the shared queue so background Agent Office workers can surface the
-  // same approval modal even when no foreground chat request is generating.
-  useEffect(() => {
-    if (connectionState === "backend-offline") return;
-
-    let cancelled = false;
-    async function pollToolApprovals() {
-      try {
-        const response = await getPendingToolApprovals();
-        if (cancelled) return;
-        setPendingApproval((current) => {
-          if (
-            current &&
-            response.approvals.some(
-              (approval) => approval.approval_id === current.approval_id,
-            )
-          ) {
-            // Preserve the foreground call_id when this approval came from the
-            // streaming chat path; the REST representation intentionally does
-            // not need one.
-            return current;
-          }
-          return response.approvals[0] ?? null;
-        });
-      } catch {
-        // Approval discovery is best-effort. The task remains persisted in
-        // waiting_permission and will be rediscovered on the next successful poll.
-      }
-    }
-
-    void pollToolApprovals();
-    const timer = window.setInterval(() => {
-      void pollToolApprovals();
-    }, 750);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [connectionState]);
-
   async function ensureConversation(): Promise<string> {
     if (activeConversationId) return activeConversationId;
     if (!settings) throw new Error("Jace settings are not available yet.");
@@ -858,7 +816,7 @@ export default function App() {
       }
     } finally {
       abortRef.current = null;
-      setPendingApproval((current) => current?.call_id ? null : current);
+      setPendingApproval(null);
       isGeneratingRef.current = false;
       setIsGenerating(false);
     }
@@ -892,7 +850,7 @@ export default function App() {
     setToolContextCount(0);
     setPerformanceDiagnostics(null);
     setToolActivity([]);
-    setPendingApproval((current) => current?.call_id ? null : current);
+    setPendingApproval(null);
     setError(null);
     setScreen("chat");
   }

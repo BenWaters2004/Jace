@@ -21,9 +21,6 @@ class PendingApproval:
     arguments: dict
     created_at: datetime
     future: asyncio.Future[bool]
-    source: str = "chat"
-    task_id: str | None = None
-    agent_id: str | None = None
 
 
 class ApprovalManager:
@@ -39,9 +36,6 @@ class ApprovalManager:
         description: str,
         risk: str,
         arguments: dict,
-        source: str = "chat",
-        task_id: str | None = None,
-        agent_id: str | None = None,
     ) -> PendingApproval:
         loop = asyncio.get_running_loop()
         approval = PendingApproval(
@@ -54,9 +48,6 @@ class ApprovalManager:
             arguments=arguments,
             created_at=utc_now(),
             future=loop.create_future(),
-            source=source,
-            task_id=task_id,
-            agent_id=agent_id,
         )
         self._pending[approval.approval_id] = approval
         return approval

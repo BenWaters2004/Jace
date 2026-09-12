@@ -149,9 +149,6 @@ async def pending_approvals():
                 risk=approval.risk,
                 arguments=approval.arguments,
                 created_at=approval.created_at,
-                source=approval.source,
-                task_id=approval.task_id,
-                agent_id=approval.agent_id,
             )
             for approval in approval_manager.list()
         ]

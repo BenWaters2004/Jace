@@ -368,12 +368,6 @@ function TaskLifecycle(props: {
     eventTypes.has("worker_recovered") ||
     eventTypes.has("director_recovered");
   const toolUsed = props.task.used_tools.length > 0 || eventTypes.has("tool_started");
-  const approvalReached =
-    props.task.status === "waiting_permission" ||
-    eventTypes.has("approval_required") ||
-    eventTypes.has("approval_granted") ||
-    eventTypes.has("approval_denied") ||
-    eventTypes.has("approval_timed_out");
   const reachedRunning = Boolean(props.task.started_at) || eventTypes.has("started");
   const reachedThinking = reachedRunning && (
     props.task.status !== "running" ||
@@ -386,9 +380,9 @@ function TaskLifecycle(props: {
     { key: "running", label: "Executor", reached: reachedRunning, current: props.task.status === "running" },
     { key: "thinking", label: "Reasoning", reached: reachedThinking, current: props.task.status === "thinking" },
     { key: "tool", label: "Tools", reached: toolUsed, current: props.task.status === "using_tool" },
-    { key: "approval", label: "Approval", reached: approvalReached, current: props.task.status === "waiting_permission" },
     { key: "finish", label: terminal ? statusLabel(props.task) : "Finish", reached: terminal, current: terminal },
   ];
+
   return (
     <section className="agent-interaction-subsection agent-lifecycle-section">
       <div className="agent-subsection-title">
@@ -814,11 +808,8 @@ function ExecutorStrip(props: {
           ? props.office.tasks.find((candidate) => candidate.id === executor.task_id) ?? null
           : null;
         const running = executor.state === "running";
-        const waitingApproval = task?.status === "waiting_permission";
         const healthLabel = running
-          ? waitingApproval
-            ? "WAITING APPROVAL"
-            : task?.agent_name ?? executor.agent_id ?? "BUSY"
+          ? task?.agent_name ?? executor.agent_id ?? "BUSY"
           : executor.state === "recovering"
             ? "RECOVERING"
             : executor.state === "offline"

@@ -38,13 +38,6 @@ export function ToolApprovalModal({ approval, onDecision }: ToolApprovalModalPro
           <code>{approval.tool_name}</code>
         </div>
 
-        {approval.source === "agent" && (
-          <div className="approval-details">
-            <span>Requested by</span>
-            <code>{`${(approval.agent_id || "background").toUpperCase()} AGENT`}</code>
-          </div>
-        )}
-
         <div className="approval-arguments">
           <span>Arguments</span>
           <pre>{prettyArguments(approval.arguments)}</pre>

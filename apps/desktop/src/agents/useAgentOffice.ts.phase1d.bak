@@ -132,10 +132,6 @@ export function useAgentOffice() {
         [
           "tool_started",
           "tool_completed",
-          "approval_required",
-          "approval_granted",
-          "approval_denied",
-          "approval_timed_out",
           "worker_recovered",
           "recovered",
           "director_recovered",
