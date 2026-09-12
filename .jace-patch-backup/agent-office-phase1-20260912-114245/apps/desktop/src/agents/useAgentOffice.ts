@@ -13,7 +13,6 @@ import {
   getAgentTask,
   getAgentTaskEvents,
   getAgentTasks,
-  getAgentWorkers,
   retryAgentTask,
 } from "./api";
 import {
@@ -28,7 +27,6 @@ import type {
   AgentTask,
   AgentTaskCreateRequest,
   AgentTaskEvent,
-  AgentWorkerRuntime,
 } from "./types";
 import {
   runtimeTransportConnected,
@@ -45,7 +43,6 @@ export interface OfficeWorker {
   id: string;
   definition: AgentDefinition;
   task: AgentTask | null;
-  executor: AgentWorkerRuntime | null;
   overflowIndex: number;
   latestEvent: AgentTaskEvent | null;
 }
@@ -80,7 +77,6 @@ export function useAgentOffice() {
     useState<AgentDefinition[]>([]);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [status, setStatus] = useState<AgentStatus | null>(null);
-  const [executors, setExecutors] = useState<AgentWorkerRuntime[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedAgentId, setSelectedAgentId] =
@@ -220,24 +216,18 @@ export function useAgentOffice() {
     hydrateRunningRef.current = true;
 
     try {
-      const [
-        definitionResponse,
-        taskResponse,
-        statusResponse,
-        workerResponse,
-      ] = await Promise.all([
-        getAgentDefinitions(),
-        getAgentTasks(100),
-        getAgentStatus(),
-        getAgentWorkers(),
-      ]);
+      const [definitionResponse, taskResponse, statusResponse] =
+        await Promise.all([
+          getAgentDefinitions(),
+          getAgentTasks(100),
+          getAgentStatus(),
+        ]);
 
       if (!mountedRef.current) return;
 
       setDefinitions(definitionResponse.agents);
       replaceSnapshot(taskResponse.tasks);
       setStatus(statusResponse);
-      setExecutors(workerResponse.workers);
       setError(null);
 
       for (const task of taskResponse.tasks) {
@@ -350,13 +340,6 @@ export function useAgentOffice() {
         latestSequenceRef.current = event.sequence;
       }
 
-      if (event.type === "agent.worker.changed") {
-        // Worker events are intentionally lossy presentation hints. Reconcile
-        // both worker-slot ownership and persistent task state from REST.
-        void hydrate();
-        return;
-      }
-
       if (
         isAgentTaskEvent(event) &&
         typeof event.task_id === "string"
@@ -377,19 +360,6 @@ export function useAgentOffice() {
       }
     };
   }, [hydrate, refreshTask]);
-
-  useEffect(() => {
-    if (realtimeConnected) return;
-
-    // The event stream is a fast path, not the source of truth. While it is
-    // disconnected, periodically reconcile so queued/running/completed tasks
-    // and their real executor slots cannot become visually stale.
-    const timer = window.setInterval(() => {
-      void hydrate();
-    }, 5_000);
-
-    return () => window.clearInterval(timer);
-  }, [hydrate, realtimeConnected]);
 
   useEffect(() => {
     const timer = window.setInterval(
@@ -424,14 +394,6 @@ export function useAgentOffice() {
     [clock, tasks],
   );
 
-  const executorByTaskId = useMemo(() => {
-    const map = new Map<string, AgentWorkerRuntime>();
-    for (const executor of executors) {
-      if (executor.task_id) map.set(executor.task_id, executor);
-    }
-    return map;
-  }, [executors]);
-
   const workers = useMemo<OfficeWorker[]>(() => {
     const output: OfficeWorker[] = [];
 
@@ -456,10 +418,6 @@ export function useAgentOffice() {
           matchingActive[0] ??
           matchingRecent[0] ??
           null,
-        executor:
-          executorByTaskId.get(
-            (matchingActive[0] ?? matchingRecent[0])?.id ?? "",
-          ) ?? null,
         overflowIndex: 0,
         latestEvent:
           latestTaskEventsById[
@@ -479,8 +437,6 @@ export function useAgentOffice() {
             name: `${definition.name} ${index + 1}`,
           },
           task: matchingActive[index],
-          executor:
-            executorByTaskId.get(matchingActive[index].id) ?? null,
           overflowIndex: index,
           latestEvent:
             latestTaskEventsById[matchingActive[index].id] ?? null,
@@ -489,13 +445,7 @@ export function useAgentOffice() {
     }
 
     return output;
-  }, [
-    activeTasks,
-    definitions,
-    executorByTaskId,
-    latestTaskEventsById,
-    recentTerminalTasks,
-  ]);
+  }, [activeTasks, definitions, latestTaskEventsById, recentTerminalTasks]);
 
   const selectedWorker = useMemo(
     () =>
@@ -716,7 +666,6 @@ export function useAgentOffice() {
     definitions,
     tasks,
     status: derivedStatus,
-    executors,
     error,
     realtimeConnected,
     notice,

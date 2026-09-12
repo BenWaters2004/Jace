@@ -408,9 +408,6 @@ function SelectedTaskDetails(props: {
   const task = props.task;
   const current = task.id === props.office.selectedCurrentTask?.id;
   const active = isAgentTaskActive(task);
-  const executor =
-    props.office.workers.find((worker) => worker.task?.id === task.id)?.executor ??
-    null;
 
   return (
     <div className="agent-selected-task-card">
@@ -429,23 +426,6 @@ function SelectedTaskDetails(props: {
         <span>{formatElapsed(task.started_at, task.completed_at)}</span>
         <span>P{task.priority}</span>
         <span>{task.reasoning_mode}</span>
-        {active && (
-          <span
-            title={
-              executor
-                ? `Executed by real background slot ${executor.id}`
-                : task.status === "queued"
-                  ? "Waiting for a real background executor slot"
-                  : "Synchronising executor ownership"
-            }
-          >
-            {executor
-              ? `EXEC ${executor.id.toUpperCase()}`
-              : task.status === "queued"
-                ? "WAITING SLOT"
-                : "EXECUTOR SYNC"}
-          </span>
-        )}
       </div>
 
       <div className="agent-progress-track" aria-hidden="true">
@@ -623,9 +603,6 @@ export function AgentOffice(props: {
   const office = useAgentOffice();
   const busyCount = office.activeTasks.length;
   const workerCount = office.status?.workers ?? 0;
-  const busyExecutors = office.executors.filter(
-    (executor) => executor.state === "running",
-  ).length;
 
   return (
     <section className="cc-panel agent-office-panel phase11-agent-office">
@@ -661,8 +638,8 @@ export function AgentOffice(props: {
                 office.status.manager_running ? "online" : "offline"
               }`}
             >
-              {office.status.manager_running ? "●" : "○"} {busyExecutors}/{workerCount} worker
-{workerCount === 1 ? "" : "s"} busy
+              {office.status.manager_running ? "●" : "○"} {workerCount} worker
+              {workerCount === 1 ? "" : "s"}
             </span>
           )}
 

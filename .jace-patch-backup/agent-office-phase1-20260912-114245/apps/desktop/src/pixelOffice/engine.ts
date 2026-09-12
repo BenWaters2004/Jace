@@ -2292,12 +2292,6 @@ export class JacePixelOfficeEngine {
       ctx,
     );
 
-    // Agent labels are UI, not world geometry. Render them after every wall,
-    // prop and character so furniture can never paint over a name tag.
-    this.renderCharacterLabels(
-      ctx,
-    );
-
     ctx.restore();
 
     this.renderOverlay(
@@ -2834,23 +2828,6 @@ export class JacePixelOfficeEngine {
       );
   }
 
-  private renderCharacterLabels(
-    ctx:
-      CanvasRenderingContext2D,
-  ) {
-    for (
-      const character
-      of this.characters.values()
-    ) {
-      this.drawCharacterLabel(
-        ctx,
-        character,
-        character.id ===
-          this.selectedCharacterId,
-      );
-    }
-  }
-
   private wallBitmask(
     col: number,
     row: number,
@@ -3196,6 +3173,11 @@ export class JacePixelOfficeEngine {
       );
     }
 
+    this.drawCharacterLabel(
+      ctx,
+      character,
+      selected,
+    );
   }
 
   private drawSpeechBubble(

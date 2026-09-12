@@ -6,7 +6,6 @@ import type {
   AgentTaskCreateRequest,
   AgentTaskEventsResponse,
   AgentTaskListResponse,
-  AgentWorkerListResponse,
 } from "./types";
 
 async function agentRequest<T>(
@@ -20,6 +19,7 @@ async function agentRequest<T>(
       ...(options?.headers ?? {}),
     },
   });
+
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
 
@@ -46,9 +46,6 @@ export const getAgentDefinitions = () =>
 
 export const getAgentStatus = () =>
   agentRequest<AgentStatus>("/agents/status");
-
-export const getAgentWorkers = () =>
-  agentRequest<AgentWorkerListResponse>("/agents/workers");
 
 export const getAgentTasks = (limit = 100) =>
   agentRequest<AgentTaskListResponse>(

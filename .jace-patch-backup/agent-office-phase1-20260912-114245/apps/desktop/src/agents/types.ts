@@ -9,7 +9,6 @@ export type AgentTaskStatus =
   | "cancelled";
 
 export type AgentReasoningMode = "fast" | "balanced" | "deep";
-export type AgentWorkerExecutionState = "idle" | "running";
 
 export interface AgentDefinition {
   id: string;
@@ -24,21 +23,6 @@ export interface AgentDefinition {
 
 export interface AgentDefinitionListResponse {
   agents: AgentDefinition[];
-}
-
-export interface AgentWorkerRuntime {
-  id: string;
-  index: number;
-  state: AgentWorkerExecutionState;
-  task_id: string | null;
-  agent_id: string | null;
-  task_title: string | null;
-  assigned_at: string | null;
-  updated_at: string;
-}
-
-export interface AgentWorkerListResponse {
-  workers: AgentWorkerRuntime[];
 }
 
 export interface AgentTaskCreateRequest {
@@ -70,6 +54,7 @@ export interface AgentTask {
   priority: number;
   progress: number;
   progress_message: string | null;
+
   model: string | null;
   reasoning_mode: string;
   allowed_tools: string[];
