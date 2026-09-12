@@ -46,28 +46,6 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 def _task_response(row) -> AgentTaskResponse:
     definition = get_agent_definition(row.agent_id)
-
-    # JACE_AGENT_OFFICE_PHASE_1G_HOTFIX
-    # SQLite task state and the in-process executor map are updated by separate
-    # async operations. A list request can therefore observe the tiny hand-off
-    # window where one side has advanced and the other has not. Never expose
-    # contradictory presentation metadata such as:
-    #   queued + executor_id
-    #   completed + executor_id
-    #   running + queue_position
-    # The persistent task status remains authoritative; runtime annotations are
-    # included only when they are compatible with that state.
-    executor_id = agent_manager.executor_for_task(row.id)
-    queue_position = agent_manager.queue_position(row.id)
-
-    if row.status == "queued":
-        executor_id = None
-    elif row.status in {"running", "thinking", "using_tool", "waiting_permission"}:
-        queue_position = None
-    else:
-        executor_id = None
-        queue_position = None
-
     return AgentTaskResponse(
         id=row.id,
         conversation_id=row.conversation_id,
@@ -81,8 +59,8 @@ def _task_response(row) -> AgentTaskResponse:
         instruction=row.instruction,
         status=row.status,
         priority=row.priority,
-        executor_id=executor_id,
-        queue_position=queue_position,
+        executor_id=agent_manager.executor_for_task(row.id),
+        queue_position=agent_manager.queue_position(row.id),
         progress=row.progress,
         progress_message=row.progress_message,
         model=row.model,
