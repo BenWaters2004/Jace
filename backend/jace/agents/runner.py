@@ -516,6 +516,10 @@ def _objective_evidence_affinities(task: AgentTask) -> set[str]:
         affinities.add("docs")
     if words & _BOOTSTRAP_DATA_TERMS:
         affinities.add("data")
+    if words & {"test", "tests", "testing", "regression", "pytest", "jest", "vitest", "spec", "specs"}:
+        affinities.add("test")
+    if words & {"script", "scripts", "installer", "install", "migration", "migrate", "smoke", "bootstrap"}:
+        affinities.add("script")
     return affinities
 
 
@@ -524,8 +528,19 @@ def _bootstrap_path_kind(path: str) -> str:
     name = normalized.rsplit("/", 1)[-1]
     suffix = Path(name).suffix.casefold()
     padded = f"/{normalized}/"
-    if "/test/" in padded or "/tests/" in padded or name.startswith("test_") or ".test." in name or ".spec." in name:
+    if (
+        "/test/" in padded
+        or "/tests/" in padded
+        or name.startswith("test_")
+        or name.startswith("test-")
+        or name.endswith("_test.py")
+        or name.endswith("_test.go")
+        or ".test." in name
+        or ".spec." in name
+    ):
         return "test"
+    if "/scripts/" in padded or "/script/" in padded:
+        return "script"
     if suffix in _BOOTSTRAP_PRESENTATION_EXTENSIONS:
         return "presentation"
     if suffix in _BOOTSTRAP_CONFIG_EXTENSIONS or name in {
@@ -628,8 +643,12 @@ def _source_read_relevance(task: AgentTask, execution: dict[str, Any]) -> tuple[
     discovery_low_signal_hits = discovery_queries & _BOOTSTRAP_LOW_SIGNAL_TERMS
 
     score = 0.0
-    if kind in {"logic", "test"}:
+    if kind == "logic":
         score += 4.0
+    elif kind == "test":
+        score += 4.0 if "test" in affinities else -4.0
+    elif kind == "script":
+        score += 4.0 if "script" in affinities else -3.0
     elif kind == "presentation":
         score += 4.0 if "presentation" in affinities else -1.5
     elif kind == "config":
@@ -645,8 +664,12 @@ def _source_read_relevance(task: AgentTask, execution: dict[str, Any]) -> tuple[
             score += 0.5
 
     has_code_structure = bool(_BOOTSTRAP_CODE_SIGNAL_RE.search(text))
-    if has_code_structure and kind in {"logic", "test", "other"}:
+    if has_code_structure and kind in {"logic", "other"}:
         score += 2.0
+    elif has_code_structure and kind == "test" and "test" in affinities:
+        score += 2.0
+    elif has_code_structure and kind == "script" and "script" in affinities:
+        score += 1.5
 
     # An audited search hit is structural evidence about why the file was selected.
     # High-signal objective queries are strongest, but several lifecycle/error terms
@@ -666,7 +689,11 @@ def _source_read_relevance(task: AgentTask, execution: dict[str, Any]) -> tuple[
     if discovery_score > 0:
         score += min(1.5, discovery_score / 12.0)
 
-    if kind in {"logic", "test"}:
+    if kind in {"logic", "test", "script"}:
+        if kind == "test" and "test" not in affinities:
+            return False, score, f"test evidence is supporting-only for this non-test objective; score={score:.2f}"
+        if kind == "script" and "script" not in affinities:
+            return False, score, f"script/tooling evidence is supporting-only for this runtime objective; score={score:.2f}"
         direct_semantic_match = bool(high_signal_hits)
         anchored_semantic_match = bool(discovery_distinctive_hits) or (
             len(discovery_low_signal_hits) >= 2 and has_code_structure
@@ -696,58 +723,393 @@ def _source_read_relevance(task: AgentTask, execution: dict[str, Any]) -> tuple[
     )
 
 
-def _structural_expansion_terms(records: list[dict[str, Any]], *, limit: int = 8) -> list[str]:
-    """Extract concrete code symbols/keys from verified evidence for graph-like follow-up search.
+def _source_record_path(record: dict[str, Any]) -> str:
+    evidence = record.get("evidence")
+    if not isinstance(evidence, dict):
+        return ""
+    return str(evidence.get("path") or "").strip()
 
-    This is intentionally language-agnostic: identifiers, function/class names and
-    stable quoted keys/event names are useful across Python, TS/JS, PHP, Rust, Java,
-    C#, etc.  The Director can therefore move from one real implementation file to
-    callers/consumers without assuming a frontend/backend layout.
+
+def _source_record_focus_score(
+    record: dict[str, Any],
+    *,
+    task: AgentTask | None,
+    draft: str,
+    index: int,
+) -> tuple[float, str]:
+    """Rank source evidence by semantic/provenance strength rather than recency."""
+    path = _source_record_path(record)
+    if not path:
+        return -999.0, "missing-path"
+    relevance = record.get("source_relevance")
+    relevance_score = 0.0
+    reason = ""
+    if isinstance(relevance, dict):
+        try:
+            relevance_score = float(relevance.get("score") or 0.0)
+        except (TypeError, ValueError):
+            relevance_score = 0.0
+        reason = str(relevance.get("reason") or "")
+    raw_discovery = record.get("discovery_evidence")
+    discovery = raw_discovery if isinstance(raw_discovery, dict) else {}
+    named = bool(discovery.get("named_followup"))
+    cross = bool(discovery.get("cross_reference_followup"))
+    gap = bool(discovery.get("gap_followup"))
+    structural = bool(discovery.get("structural_followup"))
+    queries = {
+        str(v).casefold().strip("._:-")
+        for v in (discovery.get("queries") or [])
+        if str(v or "").strip()
+    }
+    score = relevance_score
+    folded_reason = reason.casefold()
+    if "direct=" in folded_reason:
+        score += 14.0
+    if "search=" in folded_reason:
+        score += 7.0
+    if named:
+        score += 15.0
+    if cross:
+        score += 7.0
+    elif structural:
+        score += 3.0
+    if gap:
+        score -= 2.5
+    kind = _bootstrap_path_kind(path)
+    affinities = _objective_evidence_affinities(task) if task is not None else set()
+    if kind == "logic":
+        score += 3.0
+    elif kind == "test" and "test" not in affinities:
+        score -= 18.0
+    elif kind == "script" and "script" not in affinities:
+        score -= 14.0
+    if task is not None:
+        objective_terms = {
+            term.casefold().strip("._:-")
+            for term in _source_bootstrap_terms(task, limit=12)
+            if term.casefold().strip("._:-")
+        }
+        distinctive = objective_terms - _BOOTSTRAP_LOW_SIGNAL_TERMS
+        if queries & distinctive:
+            score += 9.0
+        elif queries & objective_terms:
+            score += 3.0
+    if draft:
+        normalized = path.replace("\\", "/").casefold().lstrip("./")
+        concrete, _ = _artifact_references_in_draft(draft, set(), include_already_read=True)
+        draft_paths = {v.replace("\\", "/").casefold().lstrip("./") for v in concrete}
+        draft_bases = {v.split("/")[-1] for v in draft_paths}
+        if normalized in draft_paths or normalized.split("/")[-1] in draft_bases:
+            score += 8.0
+
+        gap_text = _missing_evidence_excerpt(draft)
+        if gap_text:
+            gap_concrete, _ = _artifact_references_in_draft(
+                gap_text, set(), include_already_read=True
+            )
+            gap_paths = {v.replace("\\", "/").casefold().lstrip("./") for v in gap_concrete}
+            gap_bases = {v.split("/")[-1] for v in gap_paths}
+            if normalized in gap_paths or normalized.split("/")[-1] in gap_bases:
+                # A source-backed draft asking for a file Jace already read is a
+                # contradiction to reconcile, not a reason to expand elsewhere.
+                score += 28.0
+    score += min(index, 1000) * 0.001
+    return score, reason or "no-relevance-reason"
+
+
+def _focused_source_records(
+    records: list[dict[str, Any]],
+    *,
+    task: AgentTask | None,
+    draft: str,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Choose a compact, provenance-diverse set of the strongest source records."""
+    unique: list[tuple[int, dict[str, Any]]] = []
+    seen: set[str] = set()
+    for index, record in enumerate(records):
+        path = _source_record_path(record)
+        evidence = record.get("evidence")
+        text = str(evidence.get("text") or "").strip() if isinstance(evidence, dict) else ""
+        if not path or not text:
+            continue
+        key = path.replace("\\", "/").casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((index, record))
+    ranked = sorted(
+        unique,
+        key=lambda item: (-_source_record_focus_score(item[1], task=task, draft=draft, index=item[0])[0], item[0]),
+    )
+    selected: list[dict[str, Any]] = []
+    keys: set[str] = set()
+    def add(record: dict[str, Any]) -> None:
+        if len(selected) >= limit:
+            return
+        path = _source_record_path(record)
+        key = path.replace("\\", "/").casefold()
+        if path and key not in keys:
+            keys.add(key); selected.append(record)
+    buckets: list[list[dict[str, Any]]] = [[], [], [], []]
+    for _, record in ranked:
+        discovery = record.get("discovery_evidence")
+        d = discovery if isinstance(discovery, dict) else {}
+        relevance = record.get("source_relevance")
+        reason = str(relevance.get("reason") or "").casefold() if isinstance(relevance, dict) else ""
+        if bool(d.get("named_followup")):
+            buckets[1].append(record)
+        elif "direct=" in reason or (not d.get("structural_followup") and not d.get("gap_followup")):
+            buckets[0].append(record)
+        elif bool(d.get("cross_reference_followup")) or bool(d.get("structural_followup")):
+            buckets[2].append(record)
+        else:
+            buckets[3].append(record)
+
+    # Reconciliation comes first. If the unresolved handoff explicitly asks for
+    # runner.py/director.py/etc. and those artifacts are already in the successful
+    # read ledger, force up to two of them into the focused dossier. This prevents
+    # later cross-reference noise from evicting the exact evidence the model says
+    # it still needs.
+    gap_text = _missing_evidence_excerpt(draft) if draft else ""
+    if gap_text:
+        gap_refs, _ = _artifact_references_in_draft(
+            gap_text, set(), include_already_read=True
+        )
+        gap_norm = {v.replace("\\", "/").casefold().lstrip("./") for v in gap_refs}
+        gap_bases = {v.split("/")[-1] for v in gap_norm}
+        reconciled = 0
+        for _, record in ranked:
+            path = _source_record_path(record)
+            normal = path.replace("\\", "/").casefold().lstrip("./")
+            if normal in gap_norm or normal.split("/")[-1] in gap_bases:
+                add(record)
+                reconciled += 1
+                if reconciled >= 2 or len(selected) >= limit:
+                    break
+
+    # Keep one strongest objective-anchored seed, then prefer the connected
+    # implementation graph. This prevents three near-duplicate UI/bootstrap
+    # files from crowding execution/persistence/consumer evidence out of a
+    # five-file dossier. A second direct seed is added afterwards if space
+    # remains.
+    for record in buckets[0][:1]: add(record)
+    for record in buckets[1][:1]: add(record)
+    for record in buckets[2][:3]: add(record)
+    for record in buckets[0][1:2]: add(record)
+    for _, record in ranked:
+        add(record)
+        if len(selected) >= limit: break
+    return selected
+
+
+
+def _targeted_source_excerpt(
+    record: dict[str, Any],
+    *,
+    task: AgentTask | None,
+    draft: str,
+    max_chars: int = 2800,
+) -> str:
+    """Render line-numbered windows around the evidence that matters.
+
+    A successful workspace read can contain hundreds of lines. Older finalisers
+    kept only ``text[:2250]``, which meant the model often saw imports and type
+    guards but not a later handler in the *same already-read file*. Select up to
+    three separated windows using audited search anchors, objective terms and
+    exact symbols/event keys mentioned by the specialist draft. When the draft
+    explicitly says an excerpt was cut/truncated, bias one window to the tail of
+    the captured read as well.
     """
+    evidence = record.get("evidence")
+    if not isinstance(evidence, dict):
+        return ""
+    text = str(evidence.get("text") or "")
+    if not text.strip():
+        return ""
+    lines = text.splitlines()
+    if not lines:
+        return ""
+    try:
+        start_line = max(1, int(evidence.get("start_line") or 1))
+    except (TypeError, ValueError):
+        start_line = 1
+    discovery_raw = record.get("discovery_evidence")
+    discovery = discovery_raw if isinstance(discovery_raw, dict) else {}
+
+    weighted_terms: list[tuple[int, str]] = []
+    seen_terms: set[str] = set()
+
+    def add_term(value: str, weight: int) -> None:
+        cleaned = str(value or "").strip().strip("`'\"")
+        if len(cleaned) < 4 or len(cleaned) > 120:
+            return
+        folded = cleaned.casefold()
+        if folded in seen_terms or folded in _BOOTSTRAP_STOPWORDS:
+            return
+        if re.fullmatch(r"[0-9._:/-]+", cleaned):
+            return
+        seen_terms.add(folded)
+        weighted_terms.append((weight, cleaned))
+
+    for query in discovery.get("queries") or []:
+        add_term(str(query), 14)
+    if task is not None:
+        for term in _source_bootstrap_terms(task, limit=16):
+            folded = term.casefold().strip("._:-")
+            add_term(term, 4 if folded in _BOOTSTRAP_LOW_SIGNAL_TERMS else 10)
+
+    # Exact code/event/route tokens from the source-backed draft are especially
+    # useful: they let a later finalisation pass jump straight to the handler it
+    # just said was missing instead of showing the beginning of the file again.
+    for match in re.finditer(r"`([^`\n]{3,140})`", draft or ""):
+        token = match.group(1).strip()
+        if re.search(r"[A-Za-z]", token):
+            add_term(token, 18)
+    gap = _missing_evidence_excerpt(draft or "") if draft else ""
+    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_.:-]{3,90}\b", gap):
+        folded = token.casefold().strip("._:-")
+        if folded not in _GAP_TERM_STOPWORDS and folded not in _BOOTSTRAP_LOW_SIGNAL_TERMS:
+            add_term(token, 7)
+
+    absolute_anchors: set[int] = set()
+    for value in discovery.get("lines") or []:
+        try:
+            line_no = int(value)
+        except (TypeError, ValueError):
+            continue
+        if line_no >= start_line and line_no < start_line + len(lines):
+            absolute_anchors.add(line_no)
+
+    candidates: list[tuple[float, int]] = []
+    for index, line in enumerate(lines):
+        absolute = start_line + index
+        folded_line = line.casefold()
+        score = 30.0 if absolute in absolute_anchors else 0.0
+        matched = False
+        for weight, term in weighted_terms:
+            if term.casefold() in folded_line:
+                score += float(weight)
+                matched = True
+        if matched and re.search(
+            r"\b(?:async\s+def|def|class|function|const|let|var|if|elif|switch|case|return|await)\b",
+            line,
+            re.IGNORECASE,
+        ):
+            score += 3.0
+        if score > 0:
+            candidates.append((score, index))
+
+    # If the previous handoff explicitly complained that its excerpt ended
+    # before the interesting logic, ensure the tail of the already-captured
+    # read is considered. This is not a new filesystem claim; it exposes source
+    # Jace already read successfully.
+    if re.search(
+        r"(?:excerpt|source|output).{0,60}(?:cut|cuts|end|ends|truncat|mid-function)|not visible in (?:the )?(?:provided|available) (?:source|excerpt)",
+        draft or "",
+        re.IGNORECASE | re.DOTALL,
+    ):
+        candidates.append((28.0, len(lines) - 1))
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    centers: list[int] = []
+    for _score, index in candidates:
+        if all(abs(index - existing) >= 24 for existing in centers):
+            centers.append(index)
+        if len(centers) >= 3:
+            break
+    if not centers:
+        centers = [0]
+        if len(lines) > 55:
+            centers.append(len(lines) - 1)
+
+    windows: list[tuple[int, int]] = []
+    radius = 11
+    for center in sorted(centers):
+        lo = max(0, center - radius)
+        hi = min(len(lines), center + radius + 1)
+        if windows and lo <= windows[-1][1] + 3:
+            windows[-1] = (windows[-1][0], max(windows[-1][1], hi))
+        else:
+            windows.append((lo, hi))
+
+    per_window = max(650, max_chars // max(1, len(windows)))
+    rendered: list[str] = []
+    for lo, hi in windows:
+        header = f"LINES {start_line + lo}-{start_line + hi - 1}"
+        body_lines: list[str] = []
+        used = len(header) + 1
+        for index in range(lo, hi):
+            row = f"L{start_line + index}: {lines[index]}"
+            if used + len(row) + 1 > per_window and body_lines:
+                break
+            body_lines.append(row)
+            used += len(row) + 1
+        rendered.append(header + "\n" + "\n".join(body_lines))
+    return "\n...\n".join(rendered)[:max_chars]
+
+def _focused_source_paths(
+    records: list[dict[str, Any]],
+    *,
+    task: AgentTask | None,
+    draft: str,
+    limit: int = 5,
+) -> list[str]:
+    return [
+        _source_record_path(record).replace("\\", "/").casefold()
+        for record in _focused_source_records(records, task=task, draft=draft, limit=limit)
+        if _source_record_path(record)
+    ]
+
+
+def _structural_expansion_terms(records: list[dict[str, Any]], *, task: AgentTask | None = None, limit: int = 8) -> list[str]:
+    """Extract graph anchors only from the strongest verified evidence."""
     weighted: list[tuple[int, str]] = []
     seen: set[str] = set()
-
     def add(value: str, weight: int) -> None:
         cleaned = str(value or "").strip().strip("`'\"")
         if len(cleaned) < 4 or len(cleaned) > 100:
             return
         folded = cleaned.casefold()
-        if folded in seen or folded in _BOOTSTRAP_STOPWORDS:
-            return
-        if folded in _BOOTSTRAP_LOW_SIGNAL_TERMS:
+        if folded in seen or folded in _BOOTSTRAP_STOPWORDS or folded in _BOOTSTRAP_LOW_SIGNAL_TERMS:
             return
         if re.fullmatch(r"[0-9._:/-]+", cleaned):
             return
-        seen.add(folded)
-        weighted.append((weight, cleaned))
-
-    for record in records:
+        seen.add(folded); weighted.append((weight, cleaned))
+    affinities = _objective_evidence_affinities(task) if task is not None else set()
+    for record in _focused_source_records(records, task=task, draft="", limit=6):
         evidence = record.get("evidence")
-        if not isinstance(evidence, dict):
-            continue
+        if not isinstance(evidence, dict): continue
+        source_path = str(evidence.get("path") or "")
+        kind = _bootstrap_path_kind(source_path)
+        if kind == "test" and "test" not in affinities: continue
+        if kind == "script" and "script" not in affinities: continue
         text = str(evidence.get("text") or "")
-        # Stable event/topic/route/config keys in quotes are excellent cross-file anchors.
-        for match in re.finditer(r"[\"']([A-Za-z_][A-Za-z0-9_.:/-]{3,99})[\"']", text):
-            value = match.group(1)
-            weight = 8 if any(ch in value for ch in ".:/") else 5
-            add(value, weight)
-        # Common declaration shapes across several languages.
+        raw_discovery = record.get("discovery_evidence")
+        discovery = raw_discovery if isinstance(raw_discovery, dict) else {}
+        snippets = [str(v) for v in (discovery.get("snippets") or []) if str(v).strip()]
+        extraction_text = ("\n".join(snippets[:8]) + "\n" + text[:7000]).strip()
+        for match in re.finditer(r"[\"'`]([^\"'`\n]{4,140})[\"'`]", extraction_text):
+            value = match.group(1).strip()
+            if value.startswith("/"):
+                route = re.split(r"[?$]", value, maxsplit=1)[0].strip()
+                if route and re.search(r"[A-Za-z]", route): add(route, 12)
+                continue
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.:/-]{3,119}", value):
+                add(value, 9 if any(ch in value for ch in ".:/") else 5)
         for pattern in (
             r"\b(?:async\s+def|def|class|function)\s+([A-Za-z_][A-Za-z0-9_]*)",
             r"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=",
             r"\b(?:interface|type|enum|struct|trait|impl)\s+([A-Za-z_][A-Za-z0-9_]*)",
             r"\b(?:public|private|protected|internal)?\s*(?:static\s+)?(?:async\s+)?[A-Za-z_<>,.?\[\]]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
         ):
-            for match in re.finditer(pattern, text):
-                add(match.group(1), 6)
-        # Imports/references often expose the connecting service/type even if the
-        # objective's natural-language vocabulary differs from the implementation.
-        for match in re.finditer(r"\b(?:import|from|use)\s+([A-Za-z_][A-Za-z0-9_:.\\/-]{2,99})", text):
+            for match in re.finditer(pattern, extraction_text): add(match.group(1), 6)
+        for match in re.finditer(r"\b(?:import|from|use)\s+([A-Za-z_][A-Za-z0-9_:.\\/-]{2,99})", extraction_text):
             value = match.group(1).split(".")[-1].split("::")[-1].split("/")[-1].split("\\")[-1]
             add(value, 4)
-
     weighted.sort(key=lambda item: (-item[0], item[1].casefold()))
     return [value for _, value in weighted[:limit]]
+
 
 def _select_bootstrap_workspaces(task: AgentTask, catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Select only workspaces that are unambiguous for deterministic bootstrap.
@@ -812,7 +1174,12 @@ def _bootstrap_candidate_score(
     snippet = str(result.get("snippet") or "").strip()
     folded_query = str(query or "").casefold().strip()
     score = 0.0
-    if kind in {"logic", "test"}: score += 7.0
+    if kind == "logic":
+        score += 7.0
+    elif kind == "test":
+        score += 6.0 if "test" in affinities else -5.0
+    elif kind == "script":
+        score += 5.0 if "script" in affinities else -4.0
     elif kind == "presentation": score += 5.0 if "presentation" in affinities else -4.0
     elif kind == "config": score += 5.0 if "config" in affinities else 0.0
     elif kind == "docs": score += 5.0 if "docs" in affinities else -3.0
@@ -821,7 +1188,12 @@ def _bootstrap_candidate_score(
     if bool(result.get("path_match")): score += 1.5
     if snippet:
         score += 2.0
-        if _BOOTSTRAP_CODE_SIGNAL_RE.search(snippet) and kind in {"logic", "test", "other"}: score += 2.5
+        if _BOOTSTRAP_CODE_SIGNAL_RE.search(snippet) and kind in {"logic", "other"}:
+            score += 2.5
+        elif _BOOTSTRAP_CODE_SIGNAL_RE.search(snippet) and kind == "test" and "test" in affinities:
+            score += 2.0
+        elif _BOOTSTRAP_CODE_SIGNAL_RE.search(snippet) and kind == "script" and "script" in affinities:
+            score += 1.5
     if folded_query:
         query_weight = 0.8 if folded_query in _BOOTSTRAP_LOW_SIGNAL_TERMS else 2.0
         if folded_query in name: score += 2.5 * query_weight
@@ -1033,7 +1405,8 @@ async def _bootstrap_source_evidence(
     paths: set[str] = set()
     # Read a small ranked set, but anchor each read around the search hit rather
     # than blindly reading line 1 of a large file.
-    read_budget = min(max(required_reads + 3, 4), 6)
+    # Seed only slightly beyond the minimum; verified graph traversal can expand later.
+    read_budget = min(max(required_reads + 1, 3), 4)
     workspace_id = str(targets[0].get("id") or "")
     for index, candidate in enumerate(candidate_records[:read_budget]):
         path = str(candidate.get("path") or "")
@@ -1095,7 +1468,7 @@ async def _bootstrap_source_evidence(
     # This approximates a lightweight call/reference graph without assuming any
     # project framework or directory structure.
     if len(paths) < required_reads and read_records and "search_workspace_files" in available_tools:
-        expansion_terms = _structural_expansion_terms(read_records, limit=8)
+        expansion_terms = _structural_expansion_terms(read_records, task=task, limit=8)
         expansion_search_records: list[dict[str, Any]] = []
         for index, term in enumerate(expansion_terms):
             _, execution = await _record_bootstrap_tool_execution(
@@ -1224,7 +1597,7 @@ async def _bootstrap_named_followup_evidence(
             "workspace_id": workspace_id,
             "path": candidate,
             "start_line": 1,
-            "max_lines": 500,
+            "max_lines": 360,
         }
         _, execution = await _record_bootstrap_tool_execution(
             task_id=task_id,
@@ -1372,6 +1745,18 @@ def _repair_workspace_tool_arguments(
     if tool_name == "list_workspace_files" and not str(fixed.get("path") or "").strip():
         fixed["path"] = "."
         notes.append("defaulted list_workspace_files path to '.'")
+    if tool_name == "search_workspace_files":
+        raw_search_path = str(fixed.get("path") or "").strip().replace("\\", "/")
+        if not raw_search_path:
+            fixed["path"] = "."
+            notes.append("defaulted search_workspace_files path to '.'")
+        else:
+            leaf = raw_search_path.rstrip("/").rsplit("/", 1)[-1]
+            suffix = Path(leaf).suffix.casefold()
+            if suffix in _BOOTSTRAP_SOURCE_EXTENSIONS or suffix in _BOOTSTRAP_DOC_EXTENSIONS:
+                parent = raw_search_path.rstrip("/").rsplit("/", 1)[0] if "/" in raw_search_path.rstrip("/") else "."
+                fixed["path"] = parent or "."
+                notes.append("changed file-like search_workspace_files path to its containing directory")
     return fixed, notes
 
 
@@ -1389,6 +1774,13 @@ def _workspace_failure_nudge(
         return (
             "WORKSPACE PATH CORRECTION: that directory path failed. Paths are relative to the approved workspace root. "
             "Call list_workspace_files with path='.' to rediscover the actual top-level structure, then choose an existing relative path."
+        )
+    if tool_name == "search_workspace_files" and (
+        "must be a directory" in lowered or "not a directory" in lowered or "does not exist" in lowered
+    ):
+        return (
+            "WORKSPACE SEARCH PATH CORRECTION: search_workspace_files.path must be a directory, not a file. "
+            "Use path='.' for a project-wide search or the containing directory of the file you were examining."
         )
     if "unknown computer workspace" in lowered:
         ids = ", ".join(str(item.get("id") or "") for item in catalog)
@@ -1477,6 +1869,8 @@ _UNRESOLVED_FRONTIER_RE = re.compile(
     r"(?:"
     r"\bmissing evidence\b|"
     r"\bunresolved (?:issues?|questions?|evidence|limitations?)\b|"
+    r"\bidentified gap in evidence\b|"
+    r"\bmissing component(?:s)? to inspect\b|"
     r"\broot cause cannot be determined\b|"
     r"\brequired additional inspection\b|"
     r"\b(?:still )?need(?:s|ed)? to inspect\b|"
@@ -1487,11 +1881,19 @@ _UNRESOLVED_FRONTIER_RE = re.compile(
     r")",
     re.IGNORECASE | re.DOTALL,
 )
+_ARTIFACT_SOURCE_EXTENSIONS = (
+    "properties", "graphql", "gradle", "svelte", "proto", "html", "tsx", "jsx", "php", "swift",
+    "toml", "yaml", "yml", "scss", "sass", "less", "bash", "ps1", "java", "kts", "dart",
+    "vue", "json", "xml", "sql", "css", "cpp", "hpp", "pyi", "conf", "hcl", "gql", "ini",
+    "cfg", "html", "htm", "py", "ts", "js", "rs", "go", "kt", "rb", "sh", "cs", "fsx", "fs",
+    "tf", "md", "c", "h",
+)
+_ARTIFACT_EXT_RE = "|".join(sorted({re.escape(ext) for ext in _ARTIFACT_SOURCE_EXTENSIONS}, key=len, reverse=True))
 _ARTIFACT_PATH_RE = re.compile(
-    r"(?<![A-Za-z0-9_])([A-Za-z0-9_. -]+(?:[/\\][A-Za-z0-9_. -]+)+\.[A-Za-z0-9]{1,12}|"
-    r"[A-Za-z0-9_.-]+\.(?:py|pyi|ts|tsx|js|jsx|php|rs|go|java|kt|kts|swift|dart|rb|vue|svelte|"
-    r"json|toml|ya?ml|xml|sql|md|html?|css|scss|sass|less|sh|bash|ps1|cs|fs|fsx|cpp|c|h|hpp|"
-    r"gradle|properties|ini|cfg|conf|tf|hcl|proto|graphql|gql))",
+    rf"(?<![A-Za-z0-9_])("
+    rf"(?:[A-Za-z0-9_. -]+(?:[/\\][A-Za-z0-9_. -]+)+\.(?:{_ARTIFACT_EXT_RE}))|"
+    rf"(?:[A-Za-z0-9_.-]+\.(?:{_ARTIFACT_EXT_RE}))"
+    rf")(?![A-Za-z0-9_])",
     re.IGNORECASE,
 )
 
@@ -1511,45 +1913,105 @@ def _draft_has_unresolved_frontier(text: str) -> bool:
     return bool(_UNRESOLVED_FRONTIER_RE.search(text or ""))
 
 
-def _unread_artifacts_named_in_draft(text: str, source_paths: set[str]) -> list[str]:
-    """Extract concrete unread source artifacts, prioritising explicit markdown/code paths."""
-    read = {path.replace("\\", "/").casefold() for path in source_paths}
+def _artifact_references_in_draft(
+    text: str,
+    source_paths: set[str],
+    *,
+    include_already_read: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Extract source artifact references and separate concrete paths from guesses.
+
+    ``include_already_read=False`` is the frontier-discovery mode: paths Jace has
+    already inspected are omitted so they cannot trigger redundant filesystem
+    reads. ``include_already_read=True`` is the reconciliation mode used by the
+    evidence dossier: a draft that says ``runner.py is still missing`` after
+    runner.py was already read must pull that existing evidence *into* the next
+    finalisation pass rather than search elsewhere.
+
+    The artifact regex is extension-boundary-aware. Event keys such as
+    ``agent.task.completed`` therefore cannot be truncated to the fake source
+    path ``agent.task.c``, and ``ChatView.tsx`` cannot be shortened to
+    ``ChatView.ts``.
+    """
+    read = {path.replace("\\", "/").casefold().lstrip("./") for path in source_paths}
     basenames = {path.split("/")[-1] for path in read}
-    candidates: list[str] = []
+    concrete: list[str] = []
+    speculative: list[str] = []
     seen: set[str] = set()
 
-    def add(raw_value: str) -> None:
+    speculative_re = re.compile(
+        r"(?:\blikely\b|\bprobably\b|\bpossibly\b|\bperhaps\b|\bmaybe\b|"
+        r"\bmay\s+be\b|\bmight\s+be\b|\bcould\s+be\b|\bsuch\s+as\b|"
+        r"\bfor\s+example\b|\be\.?g\.?\b|\bor\s+similar\b)",
+        re.IGNORECASE,
+    )
+
+    def add(raw_value: str, start_pos: int, end_pos: int) -> None:
         raw = str(raw_value or "").strip("`'\".,;:()[]{} *-_")
         raw = raw.replace("\\/", "/")
         if not raw:
             return
         normal = raw.replace("\\", "/").casefold().lstrip("./")
         base = normal.split("/")[-1]
-        if normal in read or base in basenames or normal in seen:
+        if (not include_already_read) and (normal in read or base in basenames):
+            return
+        if normal in seen:
             return
         seen.add(normal)
-        candidates.append(raw)
 
-    # Explicit backtick references are strongest. A specialist that names
-    # `backend/foo/runner.py` should cause an exact approved-workspace read before
-    # any broad conceptual search.
+        context_start = max(0, start_pos - 180)
+        context_end = min(len(text or ""), end_pos + 100)
+        context = str(text or "")[context_start:context_end]
+        bucket = speculative if speculative_re.search(context) else concrete
+        bucket.append(raw)
+
     for match in re.finditer(r"`([^`\n]{2,220})`", text or ""):
         token = match.group(1).strip()
         artifact = _ARTIFACT_PATH_RE.search(token)
         if artifact:
-            add(artifact.group(1))
-        if len(candidates) >= 8:
+            add(artifact.group(1), match.start(1), match.end(1))
+        if len(concrete) + len(speculative) >= 12:
             break
 
-    if len(candidates) < 8:
+    if len(concrete) + len(speculative) < 12:
         for match in _ARTIFACT_PATH_RE.finditer(text or ""):
-            add(match.group(1))
-            if len(candidates) >= 8:
+            add(match.group(1), match.start(1), match.end(1))
+            if len(concrete) + len(speculative) >= 12:
                 break
 
-    indexed = list(enumerate(candidates))
-    indexed.sort(key=lambda item: (0 if "/" in item[1].replace("\\", "/") else 1, item[0]))
-    return [value for _, value in indexed]
+    def ordered(values: list[str]) -> list[str]:
+        indexed = list(enumerate(values))
+        indexed.sort(key=lambda item: (0 if "/" in item[1].replace("\\", "/") else 1, item[0]))
+        return [value for _, value in indexed]
+
+    return ordered(concrete), ordered(speculative)
+
+
+def _already_read_artifacts_named_in_draft(text: str, source_paths: set[str]) -> list[str]:
+    """Return canonical already-read paths that the unresolved draft asks for again."""
+    if not text or not source_paths:
+        return []
+    concrete, _ = _artifact_references_in_draft(
+        _missing_evidence_excerpt(text) or text,
+        source_paths,
+        include_already_read=True,
+    )
+    if not concrete:
+        return []
+    referenced = {value.replace("\\", "/").casefold().lstrip("./") for value in concrete}
+    referenced_bases = {value.split("/")[-1] for value in referenced}
+    matched: list[str] = []
+    for source_path in source_paths:
+        normal = str(source_path or "").replace("\\", "/").casefold().lstrip("./")
+        if not normal:
+            continue
+        if normal in referenced or normal.split("/")[-1] in referenced_bases:
+            matched.append(str(source_path))
+    return sorted(set(matched), key=lambda value: value.replace("\\", "/").casefold())
+
+def _unread_artifacts_named_in_draft(text: str, source_paths: set[str]) -> list[str]:
+    concrete, _ = _artifact_references_in_draft(text, source_paths)
+    return concrete
 
 
 
@@ -1613,6 +2075,10 @@ def _gap_search_terms(
 ) -> list[str]:
     """Build project-agnostic search terms for the unresolved evidence frontier."""
     excerpt = _missing_evidence_excerpt(draft)
+    # Concrete paths are handled by the named-artifact resolver. Speculative paths
+    # must not leak basenames such as ``workers.py`` into free-text search, where
+    # they can pull the frontier toward unrelated files.
+    excerpt = _ARTIFACT_PATH_RE.sub(" ", excerpt)
     weighted: list[tuple[float, str]] = []
     seen: set[str] = set()
 
@@ -1630,7 +2096,9 @@ def _gap_search_terms(
 
     for match in re.finditer(r"`([^`\n]{2,120})`", excerpt):
         token = match.group(1).strip()
-        if _GAP_CODE_REF_RE.fullmatch(token) or _ARTIFACT_PATH_RE.search(token):
+        if _ARTIFACT_PATH_RE.search(token):
+            continue
+        if _GAP_CODE_REF_RE.fullmatch(token):
             add(token, 10.0)
         elif len(token.split()) <= 4:
             add(token, 8.0)
@@ -1653,14 +2121,129 @@ def _gap_search_terms(
             if len(phrase) <= 72:
                 add(phrase, weight)
 
-    for symbol in _structural_expansion_terms(evidence_records, limit=10):
-        add(symbol, 8.5)
-
     for term in _source_bootstrap_terms(task, limit=10):
         add(term, 2.0)
 
     weighted.sort(key=lambda item: (-item[0], item[1].casefold()))
     return [value for _, value in weighted[:limit]]
+
+
+async def _bootstrap_cross_reference_followup_evidence(
+    *,
+    task_id: str,
+    task: AgentTask,
+    agent_name: str,
+    workspace_catalog: list[dict[str, Any]],
+    available_tools: set[str],
+    used_tools: list[str],
+    evidence_records: list[dict[str, Any]],
+    already_read: set[str],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Follow verified symbols/routes from existing evidence into connected source.
+
+    This is intentionally preferred over natural-language gap search. It traverses
+    actual implementation anchors discovered in source (route strings, event keys,
+    type/function names, imports) and therefore behaves like a lightweight
+    cross-reference graph without assuming a framework or directory layout.
+    """
+    if "search_workspace_files" not in available_tools or "read_workspace_file" not in available_tools:
+        return [], set()
+    targets = _select_bootstrap_workspaces(task, workspace_catalog)
+    if not targets:
+        return [], set()
+    workspace_id = str(targets[0].get("id") or "")
+    if not workspace_id:
+        return [], set()
+
+    terms = _structural_expansion_terms(evidence_records, task=task, limit=12)
+    if not terms:
+        return [], set()
+
+    search_records: list[dict[str, Any]] = []
+    for index, term in enumerate(terms[:10]):
+        _, execution = await _record_bootstrap_tool_execution(
+            task_id=task_id,
+            task=task,
+            agent_name=agent_name,
+            tool_name="search_workspace_files",
+            arguments={
+                "workspace_id": workspace_id,
+                "query": term,
+                "path": ".",
+                "include_content": True,
+                "max_results": 16,
+            },
+            used_tools=used_tools,
+            progress=min(0.835 + index * 0.005, 0.89),
+        )
+        if execution.get("success") is True:
+            search_records.append(execution)
+
+    candidates = _rank_bootstrap_candidate_records(search_records, task=task)
+    records: list[dict[str, Any]] = []
+    new_paths: set[str] = set()
+    for candidate in candidates:
+        if len(records) >= 3:
+            break
+        candidate_path = str(candidate.get("path") or "").strip()
+        if not candidate_path:
+            continue
+        normalized = candidate_path.replace("\\", "/").casefold()
+        if normalized in already_read or normalized in new_paths:
+            continue
+        queries = [str(v) for v in (candidate.get("queries") or []) if str(v).strip()]
+        if not queries:
+            continue
+
+        start_line, max_lines = _anchored_read_window(candidate.get("lines") or [], max_lines=440)
+        _, execution = await _record_bootstrap_tool_execution(
+            task_id=task_id,
+            task=task,
+            agent_name=agent_name,
+            tool_name="read_workspace_file",
+            arguments={
+                "workspace_id": workspace_id,
+                "path": candidate_path,
+                "start_line": start_line,
+                "max_lines": max_lines,
+            },
+            used_tools=used_tools,
+            progress=min(0.89 + len(records) * 0.008, 0.925),
+            discovery_evidence={
+                "queries": queries,
+                "lines": candidate.get("lines") or [],
+                "snippets": candidate.get("snippets") or [],
+                "candidate_score": candidate.get("score") or 0.0,
+                "anchored_start_line": start_line,
+                "structural_followup": True,
+                "cross_reference_followup": True,
+            },
+        )
+        if execution.get("success") is not True:
+            continue
+        evidence = execution.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        source_path = str(evidence.get("path") or "").strip()
+        try:
+            returned_lines = int(evidence.get("returned_lines") or 0)
+        except (TypeError, ValueError):
+            returned_lines = 0
+        if not source_path or returned_lines <= 0 or not str(evidence.get("text") or "").strip():
+            continue
+        relevant, relevance_score, relevance_reason = _source_read_relevance(task, execution)
+        execution["source_relevance"] = {
+            "relevant": bool(relevant), "score": relevance_score, "reason": relevance_reason,
+        }
+        if not relevant:
+            continue
+        key = source_path.replace("\\", "/").casefold()
+        if key in already_read or key in new_paths:
+            continue
+        new_paths.add(key)
+        records.append(execution)
+
+    return records, new_paths
 
 
 async def _bootstrap_gap_followup_evidence(
@@ -1716,7 +2299,7 @@ async def _bootstrap_gap_followup_evidence(
     records: list[dict[str, Any]] = []
     new_paths: set[str] = set()
     for candidate in candidates:
-        if len(records) >= 5:
+        if len(records) >= 2:
             break
         candidate_path = str(candidate.get("path") or "").strip()
         if not candidate_path:
@@ -1780,23 +2363,29 @@ async def _bootstrap_gap_followup_evidence(
     return records, new_paths
 
 
-def _source_evidence_dossier(records: list[dict[str, Any]]) -> str:
+def _source_evidence_dossier(
+    records: list[dict[str, Any]],
+    *,
+    task: AgentTask | None = None,
+    draft: str = "",
+) -> str:
+    """Distil the strongest source evidence for the local reasoning model."""
+    selected = _focused_source_records(records, task=task, draft=draft, limit=5)
     chunks: list[str] = []
-    seen_paths: set[str] = set()
-    for record in records:
+    for record in selected:
         evidence = record.get("evidence")
-        if not isinstance(evidence, dict):
-            continue
+        if not isinstance(evidence, dict): continue
         path = str(evidence.get("path") or "").strip()
         text = str(evidence.get("text") or "").strip()
-        if not path or not text:
+        if not path or not text: continue
+        score, why = _source_record_focus_score(record, task=task, draft=draft, index=0)
+        excerpt = _targeted_source_excerpt(record, task=task, draft=draft, max_chars=2700)
+        if not excerpt:
             continue
-        normalized = path.replace("\\", "/").casefold()
-        if normalized in seen_paths:
-            continue
-        seen_paths.add(normalized)
-        chunks.append(f"SOURCE FILE: {path}\n{text[:6000]}\nEND SOURCE FILE: {path}")
-    return "\n\n".join(chunks)[:14000]
+        chunks.append(f"SOURCE FILE: {path}\nEVIDENCE FOCUS: score={score:.2f}; {why}\n{excerpt}\nEND SOURCE FILE: {path}")
+    return "\n\n".join(chunks)[:13_500]
+
+
 
 
 async def _finalize_source_backed_handoff(
@@ -1819,7 +2408,7 @@ async def _finalize_source_backed_handoff(
     usable, verifiable handoff instead of the generic "completed without text"
     fallback.
     """
-    dossier = _source_evidence_dossier(evidence_records)
+    dossier = _source_evidence_dossier(evidence_records, task=task, draft=draft)
     if not dossier:
         return draft
 
@@ -1828,16 +2417,20 @@ async def _finalize_source_backed_handoff(
         f"Task: {task.title}\n"
         f"Instruction: {task.instruction}\n\n"
         f"Previous draft (may be empty or unreliable):\n{draft or '[none]'}\n\n"
-        "The following source excerpts were successfully read by Jace and are the ONLY authority "
-        "for local implementation claims in this handoff.\n\n"
+        "The following line-numbered source windows were selected from files Jace successfully read and are the ONLY authority "
+        "for local implementation claims in this handoff. Windows may come from later parts of a file; do not assume omitted middle lines are absent from the source.\n\n"
         f"{dossier}\n\n"
         "Write a concise specialist handoff to Jace. Requirements:\n"
         "- Cite every source file you rely on using its exact relative path.\n"
         "- Cite at least one exact function/class/symbol from the excerpts in backticks.\n"
         "- Separate verified source facts from hypotheses or missing evidence.\n"
         "- Do not invent any file, symbol, handler, registry, state, or architecture term.\n"
+        "- RECONCILE THE PREVIOUS DRAFT WITH THE SOURCE FILE HEADERS BELOW. If the previous draft says a file still needs inspection but that same file is supplied below, it has already been inspected. Analyze the supplied windows and do not request that file again.\n"
+        "- NEVER fabricate a plausible path for missing evidence. If an exact path is not present in a supplied "
+        "SOURCE FILE header, describe the missing responsibility semantically (for example, 'task execution loop' "
+        "or 'completion event consumer') rather than guessing worker.py/handler.ts/etc.\n"
         "- If these excerpts are insufficient to establish the root cause, say exactly what additional "
-        "file/flow needs inspection rather than guessing.\n"
+        "responsibility/flow needs inspection rather than guessing a filename.\n"
         "- Do not call tools; this is the final handoff.\n"
         "END SOURCE-BACKED FINAL HANDOFF"
     )
@@ -1862,21 +2455,41 @@ async def _finalize_source_backed_handoff(
         if text:
             return text
 
-    # Keep this explicitly unverified.  The Director/Analyst can still inspect
-    # the captured raw evidence directly rather than losing the successful read.
-    paths = [
-        str(record.get("evidence", {}).get("path") or "").strip()
-        for record in evidence_records
-        if isinstance(record.get("evidence"), dict)
-    ]
-    paths = [path for path in paths if path]
+    # Keep this explicitly unverified, but preserve the strongest evidence paths
+    # and observed symbols so downstream Analyst has a useful handoff even if the
+    # small model emits an empty response twice.
+    focused = _focused_source_records(evidence_records, task=task, draft=draft, limit=5)
+    evidence_lines: list[str] = []
+    for record in focused:
+        evidence = record.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        path = str(evidence.get("path") or "").strip()
+        text = str(evidence.get("text") or "")
+        if not path:
+            continue
+        symbols: list[str] = []
+        for pattern in (
+            r"\b(?:async\s+def|def|class|function)\s+([A-Za-z_][A-Za-z0-9_]*)",
+            r"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=",
+            r"\b(?:interface|type|enum|struct|trait)\s+([A-Za-z_][A-Za-z0-9_]*)",
+        ):
+            for match in re.finditer(pattern, text):
+                symbol = match.group(1)
+                if symbol not in symbols:
+                    symbols.append(symbol)
+                if len(symbols) >= 4:
+                    break
+            if len(symbols) >= 4:
+                break
+        suffix = f" — observed symbols: {', '.join(f'`{symbol}`' for symbol in symbols)}" if symbols else ""
+        evidence_lines.append(f"- {path}{suffix}")
     return (
-        "UNVERIFIED ANALYSIS: source inspection succeeded, but the Code/File specialist "
-        "did not produce a textual source analysis after finalisation retries. "
-        f"Successfully read: {', '.join(dict.fromkeys(paths)) or 'unknown source path'}. "
-        "The Director should pass the captured source excerpts to Analyst rather than inventing a conclusion."
+        "UNVERIFIED ANALYSIS: source inspection succeeded, but the Code/File specialist did not produce a textual source analysis after finalisation retries. "
+        "Strongest captured evidence:\n"
+        + ("\n".join(evidence_lines) if evidence_lines else "- no focused source excerpt was available")
+        + "\nThe requested conclusion remains unverified; Analyst must reason only from the captured source evidence."
     )
-
 
 async def _close_source_evidence_frontier(
     *,
@@ -1912,13 +2525,56 @@ async def _close_source_evidence_frontier(
     if not text or not evidence_records or not _draft_has_unresolved_frontier(text):
         return text, evidence_records, successful_source_paths
 
-    initial_named = _unread_artifacts_named_in_draft(text, successful_source_paths)
+    # 11B.4.21: reconcile claims against the successful-read ledger before
+    # expanding the frontier. A model can correctly identify runner.py as the
+    # missing responsibility while overlooking that Jace has already read it.
+    # That contradiction is solved by re-finalising with runner.py forced into
+    # the focused dossier, not by searching for unrelated new files.
+    already_read_claims = _already_read_artifacts_named_in_draft(text, successful_source_paths)
+    if already_read_claims:
+        logger.info(
+            "Director-managed %s task %s reconciling unresolved draft against %d already-read artifact(s): %s",
+            agent_name,
+            task_id,
+            len(already_read_claims),
+            ", ".join(already_read_claims),
+        )
+        text = await _finalize_source_backed_handoff(
+            task_id=task_id,
+            cancel_event=cancel_event,
+            task=task,
+            model=model,
+            reasoning_mode=reasoning_mode,
+            temperature=temperature,
+            system_prompt=system_prompt,
+            evidence_records=evidence_records,
+            draft=text,
+        )
+        if not _draft_has_unresolved_frontier(text):
+            logger.info(
+                "Director-managed %s task %s closed the evidence contradiction using already-read source evidence before frontier expansion.",
+                agent_name,
+                task_id,
+            )
+            return text, evidence_records, successful_source_paths
+        repeated_claims = _already_read_artifacts_named_in_draft(text, successful_source_paths)
+        if repeated_claims:
+            logger.info(
+                "Director-managed %s task %s still requested already-read artifact(s) after reconciliation (%s); refusing to broaden the frontier from a contradictory missing-file claim.",
+                agent_name,
+                task_id,
+                ", ".join(repeated_claims),
+            )
+            return text, evidence_records, successful_source_paths
+
+    initial_named, initial_speculative = _artifact_references_in_draft(text, successful_source_paths)
     logger.info(
-        "Director-managed %s task %s entering post-budget evidence-frontier closure with %d named unread artifact(s): %s",
+        "Director-managed %s task %s entering post-budget evidence-frontier closure with %d concrete named unread artifact(s): %s%s",
         agent_name,
         task_id,
         len(initial_named),
         ", ".join(initial_named) or "[none]",
+        (f"; ignored {len(initial_speculative)} speculative guessed artifact(s): {', '.join(initial_speculative)}" if initial_speculative else ""),
     )
 
     for round_index in range(max(0, int(max_rounds))):
@@ -1948,6 +2604,22 @@ async def _close_source_evidence_frontier(
                 route = "named artifact"
 
         if not added_records:
+            cross_records, cross_paths = await _bootstrap_cross_reference_followup_evidence(
+                task_id=task_id,
+                task=task,
+                agent_name=agent_name,
+                workspace_catalog=workspace_catalog,
+                available_tools=available_tools,
+                used_tools=used_tools,
+                evidence_records=evidence_records,
+                already_read=successful_source_paths,
+            )
+            if cross_records:
+                added_records.extend(cross_records)
+                added_paths.update(cross_paths)
+                route = "verified cross-reference"
+
+        if not added_records:
             gap_records, gap_paths = await _bootstrap_gap_followup_evidence(
                 task_id=task_id,
                 task=task,
@@ -1962,7 +2634,7 @@ async def _close_source_evidence_frontier(
             if gap_records:
                 added_records.extend(gap_records)
                 added_paths.update(gap_paths)
-                route = "gap search"
+                route = "semantic gap search"
 
         if not added_records:
             logger.info(
@@ -1974,8 +2646,11 @@ async def _close_source_evidence_frontier(
             )
             break
 
+        before_focus = set(_focused_source_paths(evidence_records, task=task, draft=text, limit=5))
         evidence_records.extend(added_records)
         successful_source_paths.update(added_paths)
+        after_focus = set(_focused_source_paths(evidence_records, task=task, draft=text, limit=5))
+        focus_improved = bool(after_focus - before_focus)
         actual_new = sorted(successful_source_paths - before)
         logger.info(
             "Director-managed %s task %s post-budget evidence-frontier closure round %d/%d followed %s evidence into %d additional relevant source file(s): %s",
@@ -1987,6 +2662,13 @@ async def _close_source_evidence_frontier(
             len(actual_new),
             ", ".join(actual_new) or "[none]",
         )
+
+        if not focus_improved:
+            logger.info(
+                "Director-managed %s task %s stopped post-budget frontier expansion after round %d/%d because new evidence did not improve the focused finalisation dossier.",
+                agent_name, task_id, round_index + 1, max_rounds,
+            )
+            break
 
         text = await _finalize_source_backed_handoff(
             task_id=task_id,
@@ -2054,7 +2736,8 @@ def _tool_evidence_payload(
             "sha256": parsed.get("sha256"),
             "start_line": parsed.get("start_line"),
             "returned_lines": parsed.get("returned_lines"),
-            "text": str(parsed.get("text") or "")[:5000],
+            "text": str(parsed.get("text") or "")[:18_000],
+            "total_lines": parsed.get("total_lines"),
         }
     elif tool_name == "search_workspace_files":
         results = parsed.get("results")
@@ -2170,8 +2853,9 @@ async def _execute_tool(
                 ),
             )
 
-            content = result.content[:8_000]
-            display = (result.display or result.content)[:1_500]
+            full_content = result.content
+            content = full_content[:8_000]
+            display = (result.display or full_content)[:1_500]
             await update_tool_audit(
                 session,
                 audit.id,
@@ -2193,7 +2877,11 @@ async def _execute_tool(
                 tool_name=tool_name,
                 arguments=arguments,
                 success=True,
-                content=content,
+                # Evidence extraction must see the complete JSON payload. Truncating a
+                # large read_workspace_file result before JSON parsing can turn a
+                # successful read into an empty evidence record. Only the model-visible
+                # tool message above is bounded to 8k.
+                content=full_content,
                 display=display,
             )
         except (ToolError, ValueError) as exc:
@@ -2584,6 +3272,7 @@ async def execute_agent_task(
     evidence_nudges = 0
     max_evidence_nudges = 6 if requires_local_source else 0
     source_finalized = False
+    reconciled_missing_paths: set[str] = set()
     if requires_local_source:
         logger.info(
             "Director-managed %s task %s requires %d DISTINCT relevant source read(s) as a minimum investigation seed using project-discovered paths.",
@@ -2731,6 +3420,58 @@ async def execute_agent_task(
                     draft=proposed_text,
                 )
 
+            if requires_local_source and coverage_ok and _draft_has_unresolved_frontier(candidate_text):
+                read_claims = _already_read_artifacts_named_in_draft(
+                    candidate_text, successful_source_paths
+                )
+                new_read_claims = [
+                    path for path in read_claims
+                    if path.replace("\\", "/").casefold() not in reconciled_missing_paths
+                ]
+                if new_read_claims:
+                    reconciled_missing_paths.update(
+                        path.replace("\\", "/").casefold() for path in new_read_claims
+                    )
+                    logger.info(
+                        "Director-managed %s task %s reconciling source-backed draft against already-read artifact(s) before frontier expansion: %s",
+                        definition.name, task_id, ", ".join(new_read_claims),
+                    )
+                    candidate_text = await _finalize_source_backed_handoff(
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                        task=task,
+                        model=model,
+                        reasoning_mode=reasoning_mode,
+                        temperature=temperature,
+                        system_prompt=worker_system_prompt,
+                        evidence_records=source_evidence_records,
+                        draft=candidate_text,
+                    )
+                    if not _draft_has_unresolved_frontier(candidate_text):
+                        final_text = candidate_text
+                        source_finalized = True
+                        break
+                    repeated = _already_read_artifacts_named_in_draft(
+                        candidate_text, successful_source_paths
+                    )
+                    if repeated and evidence_nudges < max_evidence_nudges:
+                        evidence_nudges += 1
+                        messages.append({"role": "assistant", "content": candidate_text})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "EVIDENCE RECONCILIATION REQUIRED. The artifact(s) you just described as still needing inspection were already read successfully: "
+                                + ", ".join(repeated)
+                                + ". Do not search for replacements or broaden to unrelated files. Analyze the supplied source evidence for those artifacts and correct the contradiction. "
+                                "Only identify a new missing responsibility if it is genuinely not present in the already-read evidence."
+                            ),
+                        })
+                        logger.info(
+                            "Director-managed %s task %s kept an already-read artifact in its missing-evidence claim after reconciliation; forcing one bounded reasoning retry without frontier broadening.",
+                            definition.name, task_id,
+                        )
+                        continue
+
             if (
                 requires_local_source
                 and coverage_ok
@@ -2778,10 +3519,45 @@ async def execute_agent_task(
                     )
                     continue
 
-                # If the worker described a missing layer/concept rather than an exact
-                # file path, continue deterministically from that evidence frontier.
-                # Search terms come from the worker's own missing-evidence statement
-                # plus symbols/imports discovered in source already captured.
+                # Prefer verified cross-references from source already captured before
+                # using natural-language gap search. This follows real routes, event
+                # keys, symbols and imports rather than guessed filenames.
+                cross_records, cross_paths = await _bootstrap_cross_reference_followup_evidence(
+                    task_id=task_id,
+                    task=task,
+                    agent_name=definition.name,
+                    workspace_catalog=workspace_catalog,
+                    available_tools=set(tool_names),
+                    used_tools=used_tools,
+                    evidence_records=source_evidence_records,
+                    already_read=successful_source_paths,
+                )
+                if cross_records:
+                    source_evidence_records.extend(cross_records)
+                    successful_source_paths.update(cross_paths)
+                    successful_source_reads = len(successful_source_paths)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "DIRECTOR VERIFIED CROSS-REFERENCE FOLLOW-UP\n"
+                            "Your source-backed draft identified an unresolved implementation layer. "
+                            "Jace followed concrete routes, event keys, symbols, types or imports already present in verified source and captured connected implementation evidence. "
+                            "Reassess the objective using this expanded source graph before requesting broader semantic search.\n\n"
+                            f"{_source_evidence_dossier(cross_records, task=task, draft=candidate_text)}\n"
+                            "END DIRECTOR VERIFIED CROSS-REFERENCE FOLLOW-UP"
+                        ),
+                    })
+                    logger.info(
+                        "Director-managed %s task %s followed verified cross-references into %d additional relevant source file(s): %s",
+                        definition.name,
+                        task_id,
+                        len(cross_paths),
+                        ", ".join(sorted(cross_paths)),
+                    )
+                    continue
+
+                # If cross-reference traversal cannot expand the graph, use only the
+                # semantic responsibilities named in the missing-evidence statement.
                 gap_records, gap_paths = await _bootstrap_gap_followup_evidence(
                     task_id=task_id,
                     task=task,
@@ -2800,16 +3576,16 @@ async def execute_agent_task(
                     messages.append({
                         "role": "user",
                         "content": (
-                            "DIRECTOR EVIDENCE-FRONTIER FOLLOW-UP\n"
-                            "Your source-backed draft identified an unresolved implementation layer. "
-                            "Jace searched the approved workspace using that missing-evidence description and concrete symbols from source already read, then captured additional anchored evidence. "
-                            "Reassess the objective using the expanded evidence graph. Do not stop merely because the original minimum source-count threshold was already met.\n\n"
-                            f"{_source_evidence_dossier(gap_records)}\n"
-                            "END DIRECTOR EVIDENCE-FRONTIER FOLLOW-UP"
+                            "DIRECTOR SEMANTIC EVIDENCE-FRONTIER FOLLOW-UP\n"
+                            "Verified cross-reference traversal could not close the remaining implementation gap. "
+                            "Jace therefore searched the approved workspace using only the semantic responsibilities described in the missing-evidence statement and captured additional anchored evidence. "
+                            "Reassess the objective using the expanded evidence graph.\n\n"
+                            f"{_source_evidence_dossier(gap_records, task=task, draft=candidate_text)}\n"
+                            "END DIRECTOR SEMANTIC EVIDENCE-FRONTIER FOLLOW-UP"
                         ),
                     })
                     logger.info(
-                        "Director-managed %s task %s expanded the unresolved evidence frontier into %d additional relevant source file(s): %s",
+                        "Director-managed %s task %s expanded the unresolved evidence frontier by semantic gap search into %d additional relevant source file(s): %s",
                         definition.name,
                         task_id,
                         len(gap_paths),

@@ -708,36 +708,179 @@ async def _task_tool_evidence(task_id: str) -> list[dict[str, Any]]:
     return records
 
 
-def _source_evidence_context(records: list[dict[str, Any]]) -> str:
-    chunks: list[str] = []
-    for record in records:
-        if record.get("success") is not True:
+def _director_evidence_focus_score(record: dict[str, Any], index: int) -> float:
+    """Rank raw source reads for downstream Analyst context by provenance strength."""
+    relevance = record.get("source_relevance")
+    score = 0.0
+    reason = ""
+    if isinstance(relevance, dict):
+        try:
+            score = float(relevance.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        reason = str(relevance.get("reason") or "").casefold()
+    discovery = record.get("discovery_evidence")
+    d = discovery if isinstance(discovery, dict) else {}
+    if "direct=" in reason:
+        score += 14.0
+    if "search=" in reason:
+        score += 7.0
+    if bool(d.get("named_followup")):
+        score += 15.0
+    if bool(d.get("cross_reference_followup")):
+        score += 7.0
+    elif bool(d.get("structural_followup")):
+        score += 3.0
+    if bool(d.get("gap_followup")):
+        score -= 2.5
+    # Recency is only a tiebreaker. It must not let the last broad search evict
+    # stronger producer/consumer/persistence evidence.
+    score += min(index, 1000) * 0.001
+    return score
+
+
+def _director_focused_read_records(records: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
+    unique: list[tuple[int, dict[str, Any]]] = []
+    seen: set[str] = set()
+    for index, record in enumerate(records):
+        if record.get("success") is not True or record.get("tool_name") != "read_workspace_file":
             continue
-        tool_name = str(record.get("tool_name") or "")
         evidence = record.get("evidence")
         if not isinstance(evidence, dict):
             continue
-        if tool_name == "read_workspace_file":
+        path = str(evidence.get("path") or "").strip()
+        text = str(evidence.get("text") or "").strip()
+        if not path or not text:
+            continue
+        key = path.replace("\\", "/").casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((index, record))
+    unique.sort(key=lambda item: (-_director_evidence_focus_score(item[1], item[0]), item[0]))
+    return [record for _, record in unique[:limit]]
+
+
+
+def _director_targeted_excerpt(
+    record: dict[str, Any],
+    *,
+    objective: str = "",
+    result: str = "",
+    max_chars: int = 2350,
+) -> str:
+    """Expose the relevant windows of a successful read to downstream Analyst."""
+    evidence = record.get("evidence")
+    if not isinstance(evidence, dict):
+        return ""
+    text = str(evidence.get("text") or "")
+    lines = text.splitlines()
+    if not lines:
+        return ""
+    try:
+        start_line = max(1, int(evidence.get("start_line") or 1))
+    except (TypeError, ValueError):
+        start_line = 1
+    discovery = record.get("discovery_evidence")
+    d = discovery if isinstance(discovery, dict) else {}
+    stop = {
+        "this", "that", "with", "from", "into", "work", "best", "whatever", "agents", "need", "keep",
+        "chat", "free", "project", "system", "actual", "source", "evidence", "file", "files", "component",
+        "inspect", "review", "investigate", "determine", "recommend", "missing", "verified", "facts",
+    }
+    terms: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    def add(value: str, weight: int) -> None:
+        value = str(value or "").strip().strip("`'\"")
+        folded = value.casefold().strip("._:-")
+        if len(value) < 4 or len(value) > 120 or folded in stop or folded in seen:
+            return
+        if re.fullmatch(r"[0-9._:/-]+", value):
+            return
+        seen.add(folded); terms.append((weight, value))
+    for query in d.get("queries") or []: add(str(query), 13)
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.:-]{3,90}", objective or ""):
+        add(token, 8)
+    for match in re.finditer(r"`([^`\n]{3,140})`", result or ""):
+        add(match.group(1), 17)
+
+    anchors: set[int] = set()
+    for value in d.get("lines") or []:
+        try: line_no = int(value)
+        except (TypeError, ValueError): continue
+        if start_line <= line_no < start_line + len(lines): anchors.add(line_no)
+    ranked: list[tuple[float, int]] = []
+    for index, line in enumerate(lines):
+        score = 28.0 if start_line + index in anchors else 0.0
+        folded_line = line.casefold()
+        for weight, term in terms:
+            if term.casefold() in folded_line: score += weight
+        if score > 0: ranked.append((score, index))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    centers: list[int] = []
+    for _, index in ranked:
+        if all(abs(index - other) >= 22 for other in centers): centers.append(index)
+        if len(centers) >= 3: break
+    if not centers:
+        centers = [0] + ([len(lines) - 1] if len(lines) > 55 else [])
+    windows: list[tuple[int, int]] = []
+    for center in sorted(centers):
+        lo, hi = max(0, center - 10), min(len(lines), center + 11)
+        if windows and lo <= windows[-1][1] + 3: windows[-1] = (windows[-1][0], max(windows[-1][1], hi))
+        else: windows.append((lo, hi))
+    per_window = max(600, max_chars // max(1, len(windows)))
+    rendered: list[str] = []
+    for lo, hi in windows:
+        rows = [f"LINES {start_line + lo}-{start_line + hi - 1}"]
+        used = len(rows[0]) + 1
+        for index in range(lo, hi):
+            row = f"L{start_line + index}: {lines[index]}"
+            if used + len(row) + 1 > per_window and len(rows) > 1: break
+            rows.append(row); used += len(row) + 1
+        rendered.append("\n".join(rows))
+    return "\n...\n".join(rendered)[:max_chars]
+
+def _source_evidence_context(records: list[dict[str, Any]], *, objective: str = "", result: str = "") -> str:
+    """Build a compact Analyst evidence context from the strongest source reads.
+
+    Chronological truncation previously meant late/high-value runtime files such
+    as execution or persistence components could be absent from Analyst context
+    even though Code had read them successfully. Rank first, then bound text.
+    """
+    focused_reads = _director_focused_read_records(records, limit=5)
+    if focused_reads:
+        chunks: list[str] = []
+        for record in focused_reads:
+            evidence = record.get("evidence")
+            if not isinstance(evidence, dict):
+                continue
             path = str(evidence.get("path") or "").strip()
             text = str(evidence.get("text") or "").strip()
             if path and text:
-                chunks.append(
-                    f"READ {path}\n{_trim_context(text, 3500)}\nEND READ {path}"
-                )
-        elif tool_name == "search_workspace_files":
-            query = str(evidence.get("query") or "").strip()
-            results = evidence.get("results")
-            if isinstance(results, list) and results:
-                paths = [
-                    str(item.get("path") or "")
-                    for item in results[:12]
-                    if isinstance(item, dict) and item.get("path")
-                ]
-                if paths:
-                    chunks.append(
-                        f"SEARCH {query!r}: " + ", ".join(paths)
-                    )
+                excerpt = _director_targeted_excerpt(record, objective=objective, result=result, max_chars=2300)
+                if excerpt:
+                    chunks.append(f"READ {path}\n{excerpt}\nEND READ {path}")
+        return "\n\n".join(chunks)[:12_000]
+
+    chunks: list[str] = []
+    for record in records:
+        if record.get("success") is not True or record.get("tool_name") != "search_workspace_files":
+            continue
+        evidence = record.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        query = str(evidence.get("query") or "").strip()
+        results = evidence.get("results")
+        if isinstance(results, list) and results:
+            paths = [
+                str(item.get("path") or "")
+                for item in results[:12]
+                if isinstance(item, dict) and item.get("path")
+            ]
+            if paths:
+                chunks.append(f"SEARCH {query!r}: " + ", ".join(paths))
     return "\n\n".join(chunks)[:12_000]
+
 
 
 def _successful_records(records: list[dict[str, Any]], tool_name: str) -> list[dict[str, Any]]:
@@ -868,7 +1011,7 @@ def _verification_for_step(
     tool_evidence: list[dict[str, Any]],
 ) -> tuple[bool, str, str]:
     lowered = (result or "").casefold()
-    all_evidence_context = _source_evidence_context(tool_evidence)
+    all_evidence_context = _source_evidence_context(tool_evidence, objective=objective, result=result)
     evidence_context = all_evidence_context
     explicitly_unverified = (
         "unverified" in lowered
@@ -901,7 +1044,7 @@ def _verification_for_step(
             # were created.
             return False, "Creation plan prepared, but no authorised workspace write completed.", evidence_context
         relevant_reads = _relevant_source_records(tool_evidence)
-        evidence_context = _source_evidence_context(relevant_reads)
+        evidence_context = _source_evidence_context(relevant_reads, objective=objective, result=result)
         read_paths, corpus = _read_paths_and_corpus(relevant_reads)
         if not read_paths:
             raw_paths, _raw_corpus = _read_paths_and_corpus(tool_evidence)
