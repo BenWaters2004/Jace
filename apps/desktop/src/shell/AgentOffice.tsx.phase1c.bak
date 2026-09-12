@@ -358,164 +358,6 @@ function TaskActivityHistory(props: {
   );
 }
 
-function TaskLifecycle(props: {
-  task: AgentTask;
-  events: AgentTaskEvent[];
-}) {
-  const eventTypes = new Set(props.events.map((event) => event.event_type));
-  const recovered =
-    eventTypes.has("recovered") ||
-    eventTypes.has("worker_recovered") ||
-    eventTypes.has("director_recovered");
-  const toolUsed = props.task.used_tools.length > 0 || eventTypes.has("tool_started");
-  const reachedRunning = Boolean(props.task.started_at) || eventTypes.has("started");
-  const reachedThinking = reachedRunning && (
-    props.task.status !== "running" ||
-    eventTypes.has("thinking") ||
-    toolUsed
-  );
-  const terminal = ["completed", "failed", "cancelled"].includes(props.task.status);
-  const stages = [
-    { key: "queued", label: "Queued", reached: true, current: props.task.status === "queued" },
-    { key: "running", label: "Executor", reached: reachedRunning, current: props.task.status === "running" },
-    { key: "thinking", label: "Reasoning", reached: reachedThinking, current: props.task.status === "thinking" },
-    { key: "tool", label: "Tools", reached: toolUsed, current: props.task.status === "using_tool" },
-    { key: "finish", label: terminal ? statusLabel(props.task) : "Finish", reached: terminal, current: terminal },
-  ];
-
-  return (
-    <section className="agent-interaction-subsection agent-lifecycle-section">
-      <div className="agent-subsection-title">
-        <strong>Lifecycle</strong>
-        <span>{recovered ? "RECOVERED" : "LIVE EVENT LOG"}</span>
-      </div>
-      <div className="agent-lifecycle-track">
-        {stages.map((stage, index) => (
-          <div
-            key={stage.key}
-            className={`agent-lifecycle-stage ${stage.reached ? "reached" : ""} ${stage.current ? "current" : ""}`}
-          >
-            <span>{index + 1}</span>
-            <small>{stage.label}</small>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function RecentToolActivity(props: {
-  events: AgentTaskEvent[];
-}) {
-  const rows = [...props.events]
-    .filter((event) => event.event_type === "tool_started" || event.event_type === "tool_completed")
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 6);
-  if (rows.length === 0) return null;
-
-  return (
-    <section className="agent-interaction-subsection">
-      <div className="agent-subsection-title">
-        <strong>Real tool activity</strong>
-        <span>{rows.length} recent</span>
-      </div>
-      <div className="agent-tool-activity-list">
-        {rows.map((event) => {
-          const toolName = typeof event.data?.tool_name === "string"
-            ? event.data.tool_name
-            : event.message?.split(" ")[0] || "tool";
-          const success = event.event_type === "tool_completed"
-            ? event.data?.success !== false
-            : null;
-          return (
-            <div key={event.id} className={`agent-tool-activity-row ${event.event_type}`}>
-              <span className="agent-tool-activity-dot" />
-              <div>
-                <strong>{toolName}</strong>
-                <small>
-                  {event.event_type === "tool_started"
-                    ? "running"
-                    : success
-                      ? "completed"
-                      : "failed"}
-                  {" · "}{formatTimestamp(event.created_at)}
-                </small>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function DirectorWorkflowHierarchy(props: {
-  office: AgentOfficeState;
-  task: AgentTask;
-}) {
-  const workflowId = typeof props.task.metadata?.director_workflow_id === "string"
-    ? props.task.metadata.director_workflow_id
-    : null;
-  const plan = props.task.metadata?.director_plan;
-  if (!workflowId || !plan || typeof plan !== "object") return null;
-  const rawSteps = (plan as { steps?: unknown }).steps;
-  if (!Array.isArray(rawSteps)) return null;
-
-  const workflowTasks = props.office.tasks.filter(
-    (candidate) => candidate.metadata?.director_workflow_id === workflowId,
-  );
-  const recovered = workflowTasks.some(
-    (candidate) => candidate.metadata?.director_recovered === true,
-  );
-
-  return (
-    <section className="agent-interaction-subsection agent-director-tree-section">
-      <div className="agent-subsection-title">
-        <strong>Agent Director workflow</strong>
-        <span>{recovered ? "RECOVERED AFTER RESTART" : `${rawSteps.length} STEPS`}</span>
-      </div>
-      <div className="agent-director-tree">
-        {rawSteps.map((rawStep, index) => {
-          if (!rawStep || typeof rawStep !== "object") return null;
-          const step = rawStep as Record<string, unknown>;
-          const stepId = typeof step.id === "string" ? step.id : `step-${index + 1}`;
-          const agentId = typeof step.agent_id === "string" ? step.agent_id : "agent";
-          const title = typeof step.title === "string" ? step.title : stepId;
-          const dependencies = Array.isArray(step.depends_on)
-            ? step.depends_on.filter((value): value is string => typeof value === "string")
-            : [];
-          const child = workflowTasks.find(
-            (candidate) => candidate.metadata?.director_step_id === stepId,
-          ) ?? null;
-          return (
-            <button
-              type="button"
-              key={stepId}
-              className={`agent-director-node ${child?.status ?? "pending"}`}
-              onClick={() => child && props.office.setSelectedTaskId(child.id)}
-              disabled={!child}
-            >
-              <span className="agent-director-index">{index + 1}</span>
-              <div>
-                <strong>{title}</strong>
-                <small>
-                  {agentId.toUpperCase()}
-                  {dependencies.length > 0 ? ` · after ${dependencies.join(", ")}` : " · root"}
-                  {child?.executor_id ? ` · ${child.executor_id.toUpperCase()}` : ""}
-                  {child?.queue_position ? ` · queue #${child.queue_position}` : ""}
-                </small>
-              </div>
-              <span className={`agent-task-status ${child?.status ?? "queued"}`}>
-                {child ? statusLabel(child) : "pending"}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function AgentTaskHistory(props: {
   office: AgentOfficeState;
 }) {
@@ -647,9 +489,6 @@ function SelectedTaskDetails(props: {
         </div>
         <TaskTools task={task} />
       </section>
-      <TaskLifecycle task={task} events={props.office.selectedTaskEvents} />
-      <RecentToolActivity events={props.office.selectedTaskEvents} />
-      <DirectorWorkflowHierarchy office={props.office} task={task} />
 
       {task.result && (
         <section className="agent-result-preview interaction-result">
@@ -808,28 +647,19 @@ function ExecutorStrip(props: {
           ? props.office.tasks.find((candidate) => candidate.id === executor.task_id) ?? null
           : null;
         const running = executor.state === "running";
-        const healthLabel = running
-          ? task?.agent_name ?? executor.agent_id ?? "BUSY"
-          : executor.state === "recovering"
-            ? "RECOVERING"
-            : executor.state === "offline"
-              ? "OFFLINE"
-              : "IDLE";
         return (
           <div
             key={executor.id}
-            className={`agent-executor-slot ${executor.state}`}
+            className={`agent-executor-slot ${running ? "running" : "idle"}`}
             title={
               running
                 ? `${executor.id}: ${task?.agent_name ?? executor.agent_id ?? "agent"} — ${task?.title ?? executor.task_title ?? "working"}`
-                : executor.last_error
-                  ? `${executor.id}: ${executor.state} — ${executor.last_error}`
-                  : `${executor.id}: ${executor.state}`
+                : `${executor.id}: idle`
             }
           >
             <span className="agent-executor-dot" />
             <strong>W{executor.index}</strong>
-            <span>{healthLabel}</span>
+            <span>{running ? task?.agent_name ?? executor.agent_id ?? "BUSY" : "IDLE"}</span>
           </div>
         );
       })}

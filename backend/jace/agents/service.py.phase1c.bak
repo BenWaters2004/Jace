@@ -288,10 +288,6 @@ async def prepare_retry(session: AsyncSession, task: AgentTask) -> AgentTask:
     task.started_at = None
     task.completed_at = None
     task.used_tools_json = "[]"
-    metadata = task_metadata(task)
-    metadata.pop("worker_crash_recoveries", None)
-    metadata.pop("last_worker_crash", None)
-    task.metadata_json = json.dumps(metadata, ensure_ascii=False)
     task.updated_at = utc_now()
 
     await append_event(
@@ -305,110 +301,6 @@ async def prepare_retry(session: AsyncSession, task: AgentTask) -> AgentTask:
     await session.refresh(task)
     return task
 
-
-
-async def recover_task_after_worker_crash(
-    session: AsyncSession,
-    task: AgentTask,
-    *,
-    worker_id: str,
-    error: str,
-    max_recoveries: int = 1,
-) -> AgentTask:
-    """Recover one task whose executor coroutine exited unexpectedly.
-
-    A worker crash is different from an ordinary specialist/tool failure: the
-    task did not finish cleanly, so Jace gives it one automatic redispatch. The
-    recovery count is persisted in task metadata so a task that repeatedly
-    crashes executors cannot loop forever.
-    """
-    if task.status in TERMINAL_STATUSES:
-        return task
-    if task.cancel_requested:
-        return await update_task_state(
-            session,
-            task,
-            status="cancelled",
-            progress_message="Cancelled",
-            completed=True,
-            event_type="cancelled",
-            event_message=(
-                f"{worker_id} exited after cancellation had already been requested."
-            ),
-            event_data_value={"worker_id": worker_id, "executor_exit": True},
-        )
-
-    metadata = task_metadata(task)
-    raw_recoveries = metadata.get("worker_crash_recoveries", 0)
-    try:
-        recoveries = max(0, int(raw_recoveries))
-    except (TypeError, ValueError):
-        recoveries = 0
-
-    previous_status = task.status
-    if recoveries >= max_recoveries:
-        metadata["worker_crash_recoveries"] = recoveries
-        metadata["last_worker_crash"] = {
-            "worker_id": worker_id,
-            "error": error[:2000],
-        }
-        task.metadata_json = json.dumps(metadata, ensure_ascii=False)
-        return await update_task_state(
-            session,
-            task,
-            status="failed",
-            progress_message="Executor repeatedly crashed",
-            error=(
-                f"{worker_id} exited unexpectedly more than once while running "
-                f"this task. Last executor error: {error}"
-            ),
-            completed=True,
-            event_type="worker_crash_failed",
-            event_message=(
-                f"{worker_id} repeatedly exited unexpectedly; Jace stopped "
-                "automatic recovery for this task."
-            ),
-            event_data_value={
-                "worker_id": worker_id,
-                "previous_status": previous_status,
-                "error": error[:2000],
-                "recovery_count": recoveries,
-            },
-        )
-
-    recoveries += 1
-    metadata["worker_crash_recoveries"] = recoveries
-    metadata["last_worker_crash"] = {
-        "worker_id": worker_id,
-        "error": error[:2000],
-    }
-    task.metadata_json = json.dumps(metadata, ensure_ascii=False)
-    task.status = "queued"
-    task.progress_message = f"Recovered after {worker_id} restarted"
-    task.started_at = None
-    task.completed_at = None
-    task.cancel_requested = False
-    task.error = None
-    task.updated_at = utc_now()
-    await append_event(
-        session,
-        task,
-        event_type="worker_recovered",
-        message=(
-            f"Recovered task after {worker_id} exited unexpectedly. "
-            "The task was returned to the dispatcher."
-        ),
-        data={
-            "worker_id": worker_id,
-            "previous_status": previous_status,
-            "error": error[:2000],
-            "recovery_count": recoveries,
-        },
-        commit=False,
-    )
-    await session.commit()
-    await session.refresh(task)
-    return task
 
 async def recover_incomplete_tasks(session: AsyncSession) -> list[AgentTask]:
     result = await session.execute(

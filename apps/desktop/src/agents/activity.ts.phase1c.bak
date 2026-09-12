@@ -136,20 +136,6 @@ export function getAgentBubbleDescriptor(
   }
 
   if (task.status === "thinking") {
-    if (latestEvent?.event_type === "tool_completed") {
-      const eventTool = latestEvent.data?.tool_name;
-      const tool = typeof eventTool === "string" ? eventTool.toLowerCase() : "";
-      if (tool.includes("web") || tool.includes("search")) {
-        return { text: "Reviewing web results…", tone: "thinking" };
-      }
-      if (tool.includes("read") || tool.includes("file") || tool.includes("workspace")) {
-        return { text: "Reviewing file evidence…", tone: "thinking" };
-      }
-      if (tool) return { text: `Reviewing ${shorten(tool, 24)}…`, tone: "thinking" };
-    }
-    if (latestEvent?.event_type === "worker_recovered" || latestEvent?.event_type === "recovered") {
-      return { text: "Recovered — resuming…", tone: "thinking" };
-    }
     const progress = meaningfulProgressMessage(task);
     return {
       text: progress ?? "Thinking…",

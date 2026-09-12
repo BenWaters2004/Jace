@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 from jace.agents.definitions import get_agent_definition
 from jace.agents.models import AgentTask
 from jace.agents.service import (
-    append_event,
     create_task,
     event_data,
     get_task,
@@ -566,32 +565,6 @@ async def _existing_workflow_tasks(workflow_id: str) -> dict[str, AgentTask]:
                 mapped[step_id] = row
     return mapped
 
-
-
-async def _mark_workflow_recovered(workflow_id: str) -> None:
-    """Persist restart recovery on every child so the office can reconstruct it."""
-    async with SessionLocal() as session:
-        rows = await list_tasks(session, limit=500)
-        changed = False
-        for row in rows:
-            metadata = task_metadata(row)
-            if metadata.get("director_workflow_id") != workflow_id:
-                continue
-            if metadata.get("director_recovered") is True:
-                continue
-            metadata["director_recovered"] = True
-            row.metadata_json = json.dumps(metadata, ensure_ascii=False)
-            await append_event(
-                session,
-                row,
-                event_type="director_recovered",
-                message="Agent Director reconstructed this workflow after Jace restarted.",
-                data={"workflow_id": workflow_id},
-                commit=False,
-            )
-            changed = True
-        if changed:
-            await session.commit()
 
 async def _wait_for_terminal(task_id: str) -> AgentTask:
     while True:
@@ -1794,12 +1767,6 @@ async def resume_director_workflows() -> int:
             name=f"jace-agent-director-recovered-{workflow_id}",
         )
         _track_workflow(task, workflow_id)
-        await _mark_workflow_recovered(workflow_id)
-        await runtime_events.publish(
-            "agent.director.recovered",
-            workflow_id=workflow_id,
-            conversation_id=conversation_id,
-        )
         resumed += 1
 
     if resumed:

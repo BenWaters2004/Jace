@@ -121,34 +121,20 @@ export function useAgentOffice() {
       const response = await getAgentTaskEvents(taskId, 24);
       if (!mountedRef.current) return;
 
-      const newestEvent = [...response.events]
+      const latestEvent = [...response.events]
         .sort(
           (a, b) =>
             new Date(b.created_at).getTime() -
             new Date(a.created_at).getTime(),
-        )[0] ?? null;
-      const latestEvent =
-        newestEvent &&
-        [
-          "tool_started",
-          "tool_completed",
-          "worker_recovered",
-          "recovered",
-          "director_recovered",
-          "yielded_to_foreground",
-        ].includes(newestEvent.event_type)
-          ? newestEvent
-          : null;
+        )
+        .find((event) => event.event_type === "tool_started") ?? null;
 
-      setLatestTaskEventsById((current) => {
-        if (latestEvent) {
-          return { ...current, [taskId]: latestEvent };
-        }
-        if (!(taskId in current)) return current;
-        const next = { ...current };
-        delete next[taskId];
-        return next;
-      });
+      if (latestEvent) {
+        setLatestTaskEventsById((current) => ({
+          ...current,
+          [taskId]: latestEvent,
+        }));
+      }
     } catch {
       // Bubble detail is optional. Task/event inspection still works normally.
     }
@@ -255,7 +241,7 @@ export function useAgentOffice() {
       setError(null);
 
       for (const task of taskResponse.tasks) {
-        if (isAgentTaskActive(task) && task.status !== "queued") {
+        if (task.status === "using_tool") {
           void refreshLatestTaskEvent(task.id);
         }
       }
@@ -310,7 +296,7 @@ export function useAgentOffice() {
           ]);
         });
 
-        if (isAgentTaskActive(task) && task.status !== "queued") {
+        if (task.status === "using_tool") {
           void refreshLatestTaskEvent(task.id);
         }
 
@@ -372,13 +358,9 @@ export function useAgentOffice() {
         return;
       }
 
-      if (
-        event.type === "agent.worker.changed" ||
-        event.type === "agent.worker.crashed" ||
-        event.type.startsWith("agent.director.")
-      ) {
-        // Worker/Director runtime events are presentation hints. Persistent task
-        // state and /agents/workers remain authoritative after reconnects.
+      if (event.type === "agent.worker.changed") {
+        // Worker events are intentionally lossy presentation hints. Reconcile
+        // both worker-slot ownership and persistent task state from REST.
         void hydrate();
         return;
       }

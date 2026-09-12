@@ -17,7 +17,7 @@ AgentTaskStatus = Literal[
 ]
 
 ReasoningMode = Literal["fast", "balanced", "deep"]
-AgentWorkerExecutionState = Literal["idle", "running", "recovering", "offline"]
+AgentWorkerExecutionState = Literal["idle", "running"]
 
 
 class AgentDefinitionResponse(BaseModel):
@@ -47,9 +47,6 @@ class AgentWorkerResponse(BaseModel):
     dispatch_generation: int | None
     assigned_at: datetime | None
     updated_at: datetime
-    restart_count: int = 0
-    last_error: str | None = None
-    last_exit_at: datetime | None = None
 
 
 class AgentWorkerListResponse(BaseModel):

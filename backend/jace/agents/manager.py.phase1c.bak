@@ -11,9 +11,7 @@ from jace.agents.config import agent_settings
 from jace.agents.runner import AgentTaskCancelled, execute_agent_task
 from jace.agents.service import (
     get_task,
-    list_tasks,
     recover_incomplete_tasks,
-    recover_task_after_worker_crash,
     request_cancel,
     update_task_state,
 )
@@ -23,7 +21,7 @@ from jace.runtime import runtime_events
 logger = logging.getLogger("uvicorn.error")
 
 
-AgentWorkerExecutionState = Literal["idle", "running", "recovering", "offline"]
+AgentWorkerExecutionState = Literal["idle", "running"]
 
 
 def _utc_now() -> datetime:
@@ -51,9 +49,6 @@ class AgentWorkerRuntime:
     dispatch_generation: int | None
     assigned_at: datetime | None
     updated_at: datetime
-    restart_count: int = 0
-    last_error: str | None = None
-    last_exit_at: datetime | None = None
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -66,9 +61,6 @@ class AgentWorkerRuntime:
             "dispatch_generation": self.dispatch_generation,
             "assigned_at": self.assigned_at,
             "updated_at": self.updated_at,
-            "restart_count": self.restart_count,
-            "last_error": self.last_error,
-            "last_exit_at": self.last_exit_at,
         }
 
 
@@ -98,7 +90,6 @@ class AgentManager:
         )
         self._sequence = itertools.count()
         self._workers: list[asyncio.Task] = []
-        self._supervisor_task: asyncio.Task | None = None
         self._worker_states: dict[int, AgentWorkerRuntime] = {}
         self._queued_dispatches: dict[str, QueuedDispatch] = {}
         self._dispatch_generation: dict[str, int] = {}
@@ -207,13 +198,6 @@ class AgentManager:
                 if runtime.assigned_at is not None
                 else None
             ),
-            restart_count=runtime.restart_count,
-            last_error=runtime.last_error,
-            last_exit_at=(
-                runtime.last_exit_at.isoformat()
-                if runtime.last_exit_at is not None
-                else None
-            ),
         )
 
     async def _release_worker_if_owned(
@@ -229,139 +213,6 @@ class AgentManager:
         if runtime.task_id != task_id or runtime.dispatch_generation != generation:
             return
         await self._set_worker_state(worker_index, state="idle")
-
-    def _spawn_worker(self, worker_index: int) -> asyncio.Task:
-        return asyncio.create_task(
-            self._worker(worker_index),
-            name=f"jace-agent-worker-{worker_index + 1}",
-        )
-
-    async def _recover_worker_exit(self, worker_index: int, error: str) -> None:
-        runtime = self._worker_states.get(worker_index)
-        if runtime is None:
-            return
-
-        worker_id = runtime.id
-        task_id = runtime.task_id
-        generation = runtime.dispatch_generation
-        runtime.restart_count += 1
-        runtime.last_error = error[:2000]
-        runtime.last_exit_at = _utc_now()
-
-        await runtime_events.publish(
-            "agent.worker.crashed",
-            worker_id=worker_id,
-            worker_index=runtime.index,
-            task_id=task_id,
-            agent_id=runtime.agent_id,
-            dispatch_generation=generation,
-            restart_count=runtime.restart_count,
-            error=runtime.last_error,
-        )
-
-        recovered_task = None
-        if task_id is not None and generation is not None:
-            # The dead coroutine cannot execute this generation again. Release
-            # its process-local ownership before preparing a fresh dispatch.
-            await self._release_dispatch(task_id, generation)
-            async with SessionLocal() as session:
-                current = await get_task(session, task_id)
-                if current is not None:
-                    recovered_task = await recover_task_after_worker_crash(
-                        session,
-                        current,
-                        worker_id=worker_id,
-                        error=error,
-                    )
-
-        await self._set_worker_state(worker_index, state="recovering")
-
-        if recovered_task is not None:
-            await runtime_events.publish(
-                "agent.task.changed",
-                task_id=recovered_task.id,
-                agent_id=recovered_task.agent_id,
-                status=recovered_task.status,
-                progress=recovered_task.progress,
-                progress_message=recovered_task.progress_message,
-                conversation_id=recovered_task.conversation_id,
-            )
-            if recovered_task.status == "queued":
-                accepted = await self.enqueue_when_released(
-                    recovered_task.id,
-                    priority=recovered_task.priority,
-                    timeout_seconds=1.5,
-                )
-                if not accepted:
-                    logger.error(
-                        "Could not redispatch task %s after %s recovered.",
-                        recovered_task.id,
-                        worker_id,
-                    )
-
-    async def _reconcile_orphaned_queued_tasks(self) -> None:
-        """Re-dispatch persistent queued tasks which lost only their in-memory slot."""
-        async with SessionLocal() as session:
-            queued = await list_tasks(session, status="queued", limit=500)
-        for task in queued:
-            if task.cancel_requested:
-                continue
-            if task.id in self._queued_ids or task.id in self._running_ids:
-                continue
-            await self.enqueue(task.id, priority=task.priority)
-
-    async def _supervise_workers(self) -> None:
-        """Restart executor coroutines that exit outside normal manager shutdown."""
-        while self._running:
-            await asyncio.sleep(0.35)
-            for worker_index, worker in enumerate(tuple(self._workers)):
-                if not self._running:
-                    return
-                if not worker.done():
-                    continue
-
-                if worker.cancelled():
-                    error = "Executor coroutine was cancelled unexpectedly."
-                else:
-                    try:
-                        exception = worker.exception()
-                    except asyncio.CancelledError:
-                        exception = None
-                    error = (
-                        f"{type(exception).__name__}: {exception}"
-                        if exception is not None
-                        else "Executor coroutine exited unexpectedly."
-                    )
-
-                logger.error(
-                    "Agent executor worker-%s exited unexpectedly: %s",
-                    worker_index + 1,
-                    error,
-                )
-                try:
-                    await self._recover_worker_exit(worker_index, error)
-                except Exception as recovery_error:
-                    logger.exception(
-                        "Failed to recover agent executor worker-%s: %s",
-                        worker_index + 1,
-                        recovery_error,
-                    )
-                    runtime = self._worker_states.get(worker_index)
-                    if runtime is not None:
-                        runtime.last_error = str(recovery_error)[:2000]
-                        runtime.last_exit_at = _utc_now()
-                        await self._set_worker_state(worker_index, state="offline")
-
-                if not self._running:
-                    return
-                runtime = self._worker_states.get(worker_index)
-                restart_count = runtime.restart_count if runtime is not None else 1
-                await asyncio.sleep(min(2.0, 0.20 * (2 ** min(restart_count - 1, 3))))
-                if not self._running:
-                    return
-                self._workers[worker_index] = self._spawn_worker(worker_index)
-                await self._set_worker_state(worker_index, state="idle")
-                await self._reconcile_orphaned_queued_tasks()
 
     def _reset_dispatch_state(self) -> None:
         """Drop all process-local dispatch state before a manager start."""
@@ -402,13 +253,12 @@ class AgentManager:
             for index in range(agent_settings.max_parallel_tasks)
         }
         self._workers = [
-            self._spawn_worker(index)
+            asyncio.create_task(
+                self._worker(index),
+                name=f"jace-agent-worker-{index + 1}",
+            )
             for index in range(agent_settings.max_parallel_tasks)
         ]
-        self._supervisor_task = asyncio.create_task(
-            self._supervise_workers(),
-            name="jace-agent-worker-supervisor",
-        )
 
         for task in recovered:
             await self.enqueue(task.id, priority=task.priority)
@@ -437,11 +287,6 @@ class AgentManager:
 
         for event in self._cancel_events.values():
             event.set()
-
-        if self._supervisor_task is not None:
-            self._supervisor_task.cancel()
-            await asyncio.gather(self._supervisor_task, return_exceptions=True)
-            self._supervisor_task = None
 
         for worker in self._workers:
             worker.cancel()
@@ -624,7 +469,6 @@ class AgentManager:
                 break
 
             claimed = False
-            preserve_assignment_for_supervisor = False
             try:
                 cancel_event = await self._claim_dispatch(
                     task_id=task_id,
@@ -634,6 +478,7 @@ class AgentManager:
                     # Cancelled/retried queue entry from an older generation.
                     continue
                 claimed = True
+
                 await self._publish_queue_changed(
                     reason="dispatched",
                     task_id=task_id,
@@ -641,6 +486,7 @@ class AgentManager:
 
                 async with SessionLocal() as session:
                     task = await get_task(session, task_id)
+
                 # A cancellation can land after the queue entry was claimed but
                 # before execute_agent_task has transitioned SQLite to running.
                 if (
@@ -650,6 +496,7 @@ class AgentManager:
                     or cancel_event.is_set()
                 ):
                     continue
+
                 await self._set_worker_state(
                     worker_index,
                     state="running",
@@ -658,6 +505,7 @@ class AgentManager:
                     task_title=task.title,
                     dispatch_generation=generation,
                 )
+
                 try:
                     await asyncio.wait_for(
                         execute_agent_task(task_id, cancel_event=cancel_event),
@@ -700,39 +548,18 @@ class AgentManager:
                 except asyncio.CancelledError:
                     if not self._running:
                         break
-                    preserve_assignment_for_supervisor = True
                     raise
                 except Exception as exc:
                     await self._fail_task(task_id, str(exc))
-            except asyncio.CancelledError:
-                if self._running:
-                    runtime = self._worker_states.get(worker_index)
-                    preserve_assignment_for_supervisor = bool(
-                        claimed
-                        and runtime is not None
-                        and runtime.task_id == task_id
-                        and runtime.dispatch_generation == generation
-                    )
-                    raise
-                break
-            except Exception:
-                runtime = self._worker_states.get(worker_index)
-                preserve_assignment_for_supervisor = bool(
-                    claimed
-                    and runtime is not None
-                    and runtime.task_id == task_id
-                    and runtime.dispatch_generation == generation
-                )
-                raise
+
             finally:
                 if claimed:
                     await self._release_dispatch(task_id, generation)
-                    if not preserve_assignment_for_supervisor:
-                        await self._release_worker_if_owned(
-                            worker_index,
-                            task_id=task_id,
-                            generation=generation,
-                        )
+                    await self._release_worker_if_owned(
+                        worker_index,
+                        task_id=task_id,
+                        generation=generation,
+                    )
                 self._queue.task_done()
 
     async def _fail_task(self, task_id: str, error: str) -> None:
