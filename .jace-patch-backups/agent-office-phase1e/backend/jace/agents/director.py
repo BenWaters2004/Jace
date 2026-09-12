@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 from jace.agents.definitions import get_agent_definition
 from jace.agents.models import AgentTask
-from jace.agents.readiness import get_agent_readiness
 from jace.agents.service import (
     append_event,
     create_task,
@@ -1224,21 +1223,6 @@ async def _run_step(
 ) -> StepOutcome:
     row = existing
     if row is None:
-        # Phase 1E: Director must respect specialist readiness before creating work.
-        from jace.agents.manager import agent_manager
-        readiness = await get_agent_readiness(
-            step.agent_id,
-            manager_running=agent_manager.running,
-        )
-        if readiness["status"] == "unavailable":
-            return StepOutcome(
-                step_id=step.id,
-                agent_id=step.agent_id,
-                title=step.title,
-                status="failed",
-                error=f'{readiness["agent_name"]} is unavailable: {readiness["summary"]}',
-                task_id=None,
-            )
         parent_task_id = None
         for dependency in step.depends_on:
             candidate = outcomes.get(dependency)

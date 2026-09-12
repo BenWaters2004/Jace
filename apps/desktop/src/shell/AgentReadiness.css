@@ -1,0 +1,137 @@
+/* JACE_AGENT_READINESS_PHASE_1E */
+.agent-readiness-card {
+  border: 1px solid var(--jace-border, rgba(255, 255, 255, 0.09));
+  background: var(--jace-panel-raised, rgba(255, 255, 255, 0.035));
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.agent-readiness-head,
+.agent-readiness-facts,
+.agent-readiness-overview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-readiness-head {
+  justify-content: space-between;
+}
+
+.agent-readiness-head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.agent-readiness-head span,
+.agent-readiness-card small,
+.agent-readiness-facts span {
+  color: var(--jace-text-muted, rgba(255, 255, 255, 0.58));
+  font-size: 11px;
+}
+
+.agent-readiness-card p {
+  margin: 0;
+  color: var(--jace-text, rgba(255, 255, 255, 0.86));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-readiness-badge,
+.agent-readiness-overview-pill {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.agent-readiness-badge.ready,
+.agent-readiness-overview-pill.ready {
+  color: #6ee7a7;
+}
+
+.agent-readiness-badge.degraded,
+.agent-readiness-overview-pill.degraded {
+  color: #f6c85f;
+}
+
+.agent-readiness-badge.unavailable,
+.agent-readiness-overview-pill.unavailable {
+  color: #ff7b88;
+}
+
+.agent-readiness-badge.checking {
+  color: var(--jace-text-muted, rgba(255, 255, 255, 0.58));
+}
+
+.agent-readiness-issues {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-readiness-issue {
+  display: grid;
+  grid-template-columns: 7px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.agent-readiness-issue::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.agent-readiness-issue.info {
+  color: #7ed7ff;
+}
+
+.agent-readiness-issue.warning {
+  color: #f6c85f;
+}
+
+.agent-readiness-issue.error {
+  color: #ff7b88;
+}
+
+.agent-tool-readiness {
+  opacity: 0.98;
+}
+
+.agent-tool-readiness.denied,
+.agent-tool-readiness.missing {
+  opacity: 0.55;
+}
+
+.agent-tool-readiness small {
+  display: block;
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-assignment-readiness-block {
+  border: 1px solid rgba(255, 123, 136, 0.35);
+  background: rgba(255, 123, 136, 0.07);
+  border-radius: 9px;
+  padding: 8px 9px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #ffadb5;
+}
+
+.agent-readiness-overview {
+  margin-right: 2px;
+}

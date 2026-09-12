@@ -15,14 +15,12 @@ import type {
 import {
   useAgentOffice,
 } from "../agents/useAgentOffice";
-import { useAgentReadiness } from "../agents/useAgentReadiness";
 import {
   PixelAgentOffice,
 } from "./PixelAgentOffice";
 import "./AgentOffice.css";
 import "./AgentOfficeVisuals.css";
 import "./AgentInteractions.css";
-import "./AgentReadiness.css";
 
 function formatElapsed(
   start: string | null,
@@ -95,8 +93,6 @@ function taskActivityText(task: AgentTask): string {
 }
 
 type AgentOfficeState = ReturnType<typeof useAgentOffice>;
-type AgentReadinessState = ReturnType<typeof useAgentReadiness>;
-// Phase 1E: specialist runtime readiness
 
 function TaskTools(props: {
   task: AgentTask;
@@ -129,20 +125,15 @@ function TaskTools(props: {
 
 function AgentToolCapabilities(props: {
   office: AgentOfficeState;
-  readiness: AgentReadinessState;
 }) {
   const definition = props.office.selectedAgentDefinition;
   if (!definition) return null;
 
-  const agentReadiness = props.readiness.byAgentId.get(definition.id) ?? null;
-  const readinessByTool = new Map(
-    (agentReadiness?.tools ?? []).map((tool) => [tool.name, tool]),
-  );
   const tools = [
-    ...definition.default_tools.map((tool) => ({ tool, kind: "default" as const })),
+    ...definition.default_tools.map((tool) => ({ tool, kind: "default" })),
     ...definition.optional_tools
       .filter((tool) => !definition.default_tools.includes(tool))
-      .map((tool) => ({ tool, kind: "optional" as const })),
+      .map((tool) => ({ tool, kind: "optional" })),
   ];
 
   if (tools.length === 0) {
@@ -155,100 +146,20 @@ function AgentToolCapabilities(props: {
 
   return (
     <div className="agent-interaction-tool-grid capabilities">
-      {tools.map(({ tool, kind }) => {
-        const state = readinessByTool.get(tool);
-        const permission = state?.permission ?? "unknown";
-        const className = [
-          kind,
-          "agent-tool-readiness",
-          permission,
-        ].join(" ");
-        return (
-          <span
-            key={`${kind}-${tool}`}
-            className={className}
-            title={
-              state
-                ? `${state.label} · ${state.permission}${state.requires_approval ? " · approval required" : ""}`
-                : "Readiness has not been checked yet"
-            }
-          >
-            {tool}
-            <small>
-              {kind} · {state?.registered === false ? "missing" : permission}
-            </small>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function AgentReadinessPanel(props: {
-  office: AgentOfficeState;
-  readiness: AgentReadinessState;
-}) {
-  const agent = props.office.selectedAgentDefinition;
-  if (!agent) return null;
-
-  const state = props.readiness.byAgentId.get(agent.id) ?? null;
-  if (!state) {
-    return (
-      <section className="agent-readiness-card">
-        <div className="agent-readiness-head">
-          <div>
-            <span>Runtime readiness</span>
-            <strong>{props.readiness.error ? "Readiness unavailable" : "Checking specialist…"}</strong>
-          </div>
-          <span className="agent-readiness-badge checking">CHECKING</span>
-        </div>
-        {props.readiness.error && <p>{props.readiness.error}</p>}
-      </section>
-    );
-  }
-
-  return (
-    <section className="agent-readiness-card">
-      <div className="agent-readiness-head">
-        <div>
-          <span>Runtime readiness</span>
-          <strong>{state.model}</strong>
-        </div>
-        <span className={`agent-readiness-badge ${state.status}`}>
-          {state.status}
+      {tools.map(({ tool, kind }) => (
+        <span key={`${kind}-${tool}`} className={kind}>
+          {tool}
+          <small>{kind}</small>
         </span>
-      </div>
-      <p>{state.summary}</p>
-      <div className="agent-readiness-facts">
-        <span>{state.model_available ? "Model available" : "Model missing"}</span>
-        <span>{state.readable_workspace_count} readable workspace{state.readable_workspace_count === 1 ? "" : "s"}</span>
-        <span>{state.writable_workspace_count} writable workspace{state.writable_workspace_count === 1 ? "" : "s"}</span>
-      </div>
-      {state.issues.length > 0 && (
-        <div className="agent-readiness-issues">
-          {state.issues.map((issue) => (
-            <div
-              key={`${issue.code}-${issue.message}`}
-              className={`agent-readiness-issue ${issue.severity}`}
-            >
-              <span>{issue.message}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+      ))}
+    </div>
   );
 }
 
 function AgentAssignmentForm(props: {
   office: AgentOfficeState;
-  readiness: AgentReadinessState;
 }) {
   const agent = props.office.selectedAgentDefinition;
-  const agentReadiness = agent
-    ? props.readiness.byAgentId.get(agent.id) ?? null
-    : null;
-  const unavailable = agentReadiness?.status === "unavailable";
   const [title, setTitle] = useState("");
   const [instruction, setInstruction] = useState("");
   const [priority, setPriority] = useState(0);
@@ -271,7 +182,7 @@ function AgentAssignmentForm(props: {
     event.preventDefault();
 
     const cleanInstruction = instruction.trim();
-    if (!cleanInstruction || submitting || unavailable) return;
+    if (!cleanInstruction || submitting) return;
 
     const cleanTitle =
       title.trim() ||
@@ -317,16 +228,9 @@ function AgentAssignmentForm(props: {
           <span>Direct assignment</span>
           <strong>Give {agent.name} some work</strong>
         </div>
-        <span className={`agent-readiness-badge ${agentReadiness?.status ?? "checking"}`}>
-          {agentReadiness?.status ?? (props.readiness.loading ? "checking" : "unknown")}
-        </span>
+        <span className="agent-idle-pill">IDLE</span>
       </div>
 
-      {unavailable && (
-        <div className="agent-assignment-readiness-block">
-          {agentReadiness?.summary ?? "This specialist is currently unavailable."}
-        </div>
-      )}
       <label>
         <span>Task title <small>optional</small></span>
         <input
@@ -385,7 +289,7 @@ function AgentAssignmentForm(props: {
       <button
         type="submit"
         className="agent-primary-action"
-        disabled={submitting || !instruction.trim() || unavailable}
+        disabled={submitting || !instruction.trim()}
       >
         {submitting ? "Assigning…" : `Assign to ${agent.name}`}
       </button>
@@ -808,7 +712,6 @@ function SelectedTaskDetails(props: {
 
 function AgentInteractionPanel(props: {
   office: AgentOfficeState;
-  readiness: AgentReadinessState;
 }) {
   const agent = props.office.selectedAgentDefinition;
   const worker = props.office.selectedWorker;
@@ -849,10 +752,7 @@ function AgentInteractionPanel(props: {
       </div>
 
       <div className="agent-interaction-scroll">
-        <AgentReadinessPanel office={props.office} readiness={props.readiness} />
-        {workerIsIdle && (
-          <AgentAssignmentForm office={props.office} readiness={props.readiness} />
-        )}
+        {workerIsIdle && <AgentAssignmentForm office={props.office} />}
 
         {detailTask ? (
           <SelectedTaskDetails office={props.office} task={detailTask} />
@@ -895,7 +795,7 @@ function AgentInteractionPanel(props: {
               <strong>Agent tools</strong>
             </div>
           </div>
-          <AgentToolCapabilities office={props.office} readiness={props.readiness} />
+          <AgentToolCapabilities office={props.office} />
         </section>
       </div>
     </aside>
@@ -953,7 +853,6 @@ export function AgentOffice(props: {
   void props.activities;
 
   const office = useAgentOffice();
-  const readiness = useAgentReadiness();
   const workerCount = office.status?.workers ?? 0;
   const busyExecutors = office.executors.filter(
     (executor) => executor.state === "running",
@@ -977,25 +876,6 @@ export function AgentOffice(props: {
         </div>
 
         <div className="agent-office-actions">
-          {readiness.snapshot && (
-            <div className="agent-readiness-overview" title="Specialist runtime readiness">
-              {readiness.counts.unavailable > 0 && (
-                <span className="agent-readiness-overview-pill unavailable">
-                  {readiness.counts.unavailable} unavailable
-                </span>
-              )}
-              {readiness.counts.degraded > 0 && (
-                <span className="agent-readiness-overview-pill degraded">
-                  {readiness.counts.degraded} degraded
-                </span>
-              )}
-              {readiness.counts.unavailable === 0 && readiness.counts.degraded === 0 && (
-                <span className="agent-readiness-overview-pill ready">
-                  all ready
-                </span>
-              )}
-            </div>
-          )}
           <span
             className={`agent-realtime-pill ${
               office.realtimeConnected ? "online" : "fallback"
@@ -1050,7 +930,7 @@ export function AgentOffice(props: {
             onSelectWorker={office.selectWorker}
           />
 
-          <AgentInteractionPanel office={office} readiness={readiness} />
+          <AgentInteractionPanel office={office} />
 
           {office.notice && (
             <button

@@ -45,59 +45,6 @@ export interface AgentWorkerListResponse {
   workers: AgentWorkerRuntime[];
 }
 
-export type AgentReadinessStatus = "ready" | "degraded" | "unavailable";
-export type AgentReadinessIssueSeverity = "info" | "warning" | "error";
-
-export interface AgentReadinessIssue {
-  code: string;
-  severity: AgentReadinessIssueSeverity;
-  message: string;
-}
-
-export interface AgentToolReadiness {
-  name: string;
-  label: string;
-  category: string;
-  risk: string;
-  kind: "default" | "optional";
-  registered: boolean;
-  permission: "allow" | "ask" | "deny" | "missing";
-  available: boolean;
-  requires_approval: boolean;
-}
-
-export interface AgentReadiness {
-  agent_id: string;
-  agent_name: string;
-  status: AgentReadinessStatus;
-  summary: string;
-  model: string;
-  model_available: boolean;
-  readable_workspace_count: number;
-  writable_workspace_count: number;
-  issues: AgentReadinessIssue[];
-  tools: AgentToolReadiness[];
-}
-
-export interface AgentReadinessWorkspace {
-  id: string;
-  label: string;
-  root_path: string;
-}
-
-export interface AgentReadinessSnapshot {
-  generated_at: string;
-  manager_running: boolean;
-  agent_system_enabled: boolean;
-  ollama_connected: boolean;
-  ollama_error: string | null;
-  default_model: string;
-  installed_models: string[];
-  readable_workspaces: AgentReadinessWorkspace[];
-  writable_workspaces: AgentReadinessWorkspace[];
-  agents: AgentReadiness[];
-}
-
 export interface AgentTaskCreateRequest {
   agent_id: string;
   title: string;

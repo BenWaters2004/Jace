@@ -1,7 +1,6 @@
 import { API_BASE_URL } from "../constants";
 import type {
   AgentDefinitionListResponse,
-  AgentReadinessSnapshot,
   AgentStatus,
   AgentTask,
   AgentTaskCreateRequest,
@@ -47,9 +46,6 @@ export const getAgentDefinitions = () =>
 
 export const getAgentStatus = () =>
   agentRequest<AgentStatus>("/agents/status");
-
-export const getAgentReadiness = () =>
-  agentRequest<AgentReadinessSnapshot>("/agents/readiness");
 
 export const getAgentWorkers = () =>
   agentRequest<AgentWorkerListResponse>("/agents/workers");

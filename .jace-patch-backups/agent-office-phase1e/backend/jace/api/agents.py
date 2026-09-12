@@ -7,10 +7,6 @@ from jace.agents.definitions import (
     list_agent_definitions,
 )
 from jace.agents.manager import agent_manager
-from jace.agents.readiness import (
-    build_agent_readiness_snapshot,
-    get_agent_readiness,
-)
 from jace.agents.schemas import (
     AgentDefinitionListResponse,
     AgentDefinitionResponse,
@@ -100,13 +96,6 @@ async def agent_workers():
     )
 
 
-@router.get("/readiness")
-async def agent_readiness():
-    # Phase 1E: authoritative specialist readiness.
-    return await build_agent_readiness_snapshot(
-        manager_running=agent_manager.running,
-    )
-
 @router.get("", response_model=AgentDefinitionListResponse)
 async def agent_definitions():
     return AgentDefinitionListResponse(
@@ -153,21 +142,6 @@ async def post_agent_task(request: AgentTaskCreate):
             status_code=503,
             detail="Agent manager is not currently accepting tasks.",
         )
-    # Phase 1E: do not queue a specialist that cannot actually operate.
-    try:
-        readiness = await get_agent_readiness(
-            request.agent_id,
-            manager_running=agent_manager.running,
-            model_override=request.model,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if readiness["status"] == "unavailable":
-        raise HTTPException(
-            status_code=409,
-            detail=f'{readiness["agent_name"]} is unavailable: {readiness["summary"]}',
-        )
-
     async with SessionLocal() as session:
         try:
             row = await create_task(
@@ -263,17 +237,6 @@ async def retry_agent_task(task_id: str):
         row = await get_task(session, task_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Agent task not found.")
-
-        readiness = await get_agent_readiness(
-            row.agent_id,
-            manager_running=agent_manager.running,
-            model_override=row.model,
-        )
-        if readiness["status"] == "unavailable":
-            raise HTTPException(
-                status_code=409,
-                detail=f'{readiness["agent_name"]} is unavailable: {readiness["summary"]}',
-            )
 
         try:
             row = await prepare_retry(session, row)
