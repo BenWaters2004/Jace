@@ -1,5 +1,13 @@
 // JACE_AGENT_DIAGNOSTICS_PHASE_1F
-import { useCallback, useEffect, useMemo, useState } from "react";
+// Phase 1F hotfix: keep diagnostic state live while tests are running and
+// reconcile immediately when agent tasks reach a terminal state.
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { subscribeRuntimeEvents } from "../shell/runtime";
 import {
   getAgentDiagnostics,
   runAgentDiagnostic,
@@ -14,10 +22,12 @@ const IDLE_REFRESH_MS = 15_000;
 const ACTIVE_REFRESH_MS = 2_500;
 
 export function useAgentDiagnostics() {
-  const [snapshot, setSnapshot] = useState<AgentDiagnosticsSnapshot | null>(null);
+  const [snapshot, setSnapshot] =
+    useState<AgentDiagnosticsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState<Set<string>>(new Set());
+  const [submitting, setSubmitting] =
+    useState<Set<string>>(new Set());
   const [runningAll, setRunningAll] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -26,7 +36,11 @@ export function useAgentDiagnostics() {
       setSnapshot(next);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load agent self-tests.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not load agent self-tests.",
+      );
     } finally {
       setLoading(false);
     }
@@ -34,45 +48,86 @@ export function useAgentDiagnostics() {
 
   useEffect(() => {
     void refresh();
-    const active = (snapshot?.counts.running ?? 0) > 0;
-    const timer = window.setTimeout(
+
+    const active =
+      (snapshot?.counts.running ?? 0) > 0;
+    const timer = window.setInterval(
       () => void refresh(),
       active ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS,
     );
-    return () => window.clearTimeout(timer);
+
+    return () => window.clearInterval(timer);
   }, [refresh, snapshot?.counts.running]);
+
+  useEffect(() => {
+    return subscribeRuntimeEvents((event) => {
+      if (
+        event.type === "agent.task.completed" ||
+        event.type === "agent.task.failed"
+      ) {
+        void refresh();
+        return;
+      }
+
+      if (
+        event.type === "runtime.snapshot" ||
+        event.type === "runtime.transport.connected"
+      ) {
+        void refresh();
+      }
+    });
+  }, [refresh]);
 
   const byAgentId = useMemo(() => {
     const map = new Map<string, AgentDiagnostic>();
-    for (const item of snapshot?.agents ?? []) map.set(item.agent_id, item);
+    for (const item of snapshot?.agents ?? []) {
+      map.set(item.agent_id, item);
+    }
     return map;
   }, [snapshot]);
 
-  const run = useCallback(async (agentId: string) => {
-    setSubmitting((current) => new Set(current).add(agentId));
-    try {
-      await runAgentDiagnostic(agentId);
-      await refresh();
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not run the agent self-test.");
-    } finally {
+  const run = useCallback(
+    async (agentId: string) => {
       setSubmitting((current) => {
         const next = new Set(current);
-        next.delete(agentId);
+        next.add(agentId);
         return next;
       });
-    }
-  }, [refresh]);
+
+      try {
+        await runAgentDiagnostic(agentId);
+        await refresh();
+        setError(null);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not run the agent self-test.",
+        );
+      } finally {
+        setSubmitting((current) => {
+          const next = new Set(current);
+          next.delete(agentId);
+          return next;
+        });
+      }
+    },
+    [refresh],
+  );
 
   const runAll = useCallback(async () => {
     setRunningAll(true);
+
     try {
       await runAllAgentDiagnostics();
       await refresh();
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not queue the agent self-tests.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not queue the agent self-tests.",
+      );
     } finally {
       setRunningAll(false);
     }
