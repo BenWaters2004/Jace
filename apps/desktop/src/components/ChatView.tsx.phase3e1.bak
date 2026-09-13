@@ -140,7 +140,6 @@ function persistedAgentMessages(
 // JACE_STEP3_PHASE3A_GENERATED_JSX_REPAIR
 // JACE_STEP3_RICH_CHAT_PHASE3A_V2_SYNTAX_FIX
 // JACE_STEP3_RICH_CHAT_PHASE3E
-// JACE_STEP3_RICH_CHAT_PHASE3E1
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -640,14 +639,7 @@ export function ChatView(props: ChatViewProps) {
                   }
                   title="Remove attachment"
                 >
-                  <svg
-                    className="pending-attachment-remove-icon"
-                    viewBox="0 0 20 20"
-                    aria-hidden="true"
-                    focusable="false"
-                  >
-                    <path d="M5 5l10 10M15 5 5 15" />
-                  </svg>
+                  ×
                 </button>
               </div>
             ))}
@@ -693,15 +685,7 @@ export function ChatView(props: ChatViewProps) {
               props.pendingAttachments.length >= props.attachmentLimit
             }
             title="Attach image, PDF, document or audio"
-          ><span className="composer-plus-glyph" aria-hidden="true">
-            <svg
-              className="composer-plus-icon"
-              viewBox="0 0 20 20"
-              focusable="false"
-            >
-              <path d="M10 4v12M4 10h12" />
-            </svg>
-          </span></button>
+          ><span className="composer-plus-glyph" aria-hidden="true">+</span></button>
 
           <textarea
             ref={composerTextareaRef}

@@ -94,10 +94,10 @@
       180deg,
       rgba(20, 39, 44, 0.99),
       rgba(12, 26, 30, 0.99)
-    ) !important;
+    );
   box-shadow:
     0 12px 30px rgba(0, 0, 0, 0.4),
-    0 0 22px rgba(71, 215, 231, 0.3);
+    0 0 22px rgba(71, 214, 231, 0.14);
 }
 
 .chat-scroll-to-bottom:active {
@@ -427,73 +427,6 @@
   .chat-shell .composer-talk-button:active::after {
     animation: none !important;
     transition: none !important;
-  }
-}
-
-/* JACE_STEP3_RICH_CHAT_PHASE3E1 */
-/* Composer/file-drop polish and fixed-position chat controls. */
-.chat-shell .composer-attachment-trigger,
-.chat-shell .attach-button,
-.chat-shell .composer button:has(.composer-plus-glyph) {
-  display: grid !important;
-  place-items: center !important;
-  padding: 0 !important;
-  text-align: center !important;
-  line-height: 1 !important;
-}
-
-.chat-shell .composer-plus-glyph {
-  display: grid !important;
-  width: 100%;
-  height: 100%;
-  place-items: center !important;
-  pointer-events: none;
-  line-height: 0;
-}
-
-.chat-shell .composer-plus-icon {
-  display: block;
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-}
-
-.chat-shell .pending-attachment > button {
-  display: grid !important;
-  place-items: center !important;
-  padding: 0 !important;
-  text-align: center !important;
-  line-height: 0 !important;
-}
-
-.chat-shell .pending-attachment-remove-icon {
-  display: block;
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-}
-
-/* Keep the centred jump-to-latest button centred on hover/press. */
-.chat-shell .chat-scroll-to-bottom:hover,
-.chat-shell .chat-scroll-to-bottom:active {
-  transform: translateX(-50%) !important;
-}
-
-/* Preserve the horizontal centring during the entrance animation too. */
-@keyframes chat-scroll-button-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(6px) scale(0.92);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
   }
 }
 

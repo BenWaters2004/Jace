@@ -410,23 +410,6 @@ function ParagraphBlock({
   );
 }
 
-// JACE_STEP3_RICH_CHAT_PHASE3E1_CODE_LANGUAGE
-function CodeLanguageLabel({ language }: { language: string }) {
-  return (
-    <span className="rich-code-language">
-      <svg
-        className="rich-code-language-icon"
-        viewBox="0 0 20 20"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <path d="m7 5-5 5 5 5M13 5l5 5-5 5M11.5 3 8.5 17" />
-      </svg>
-      <span>{language || "text"}</span>
-    </span>
-  );
-}
-
 function CodeBlock({
   code,
   language,
@@ -450,7 +433,7 @@ function CodeBlock({
   const body = (
     <div className="rich-code-block">
       <div className="rich-code-header">
-        <CodeLanguageLabel language={language} />
+        <span>{language || "text"}</span>
         <CopyTextButton value={code} />
       </div>
       <pre className="rich-code-pre">
@@ -464,10 +447,8 @@ function CodeBlock({
   return (
     <details className="rich-structured-block">
       <summary>
-        <span className="rich-structured-language">
-          <CodeLanguageLabel language={language.toUpperCase()} />
-          <span aria-hidden="true">·</span>
-          <span>{lineCount} lines</span>
+        <span>
+          {language.toUpperCase()} · {lineCount} lines
         </span>
         <CopyTextButton value={code} label="Copy" />
       </summary>
