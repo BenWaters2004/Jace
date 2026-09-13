@@ -28,7 +28,6 @@ import {
   AGENT_TERMINAL_BROWSER_EVENT,
 } from "../agents/useAgentOffice";
 import "./ChatView.css";
-import { ToolActivityPanel } from "./ToolActivityPanel";
 import { ChatRichContent } from "./ChatRichContent";
 
 interface ChatViewProps {
@@ -654,7 +653,24 @@ export function ChatView(props: ChatViewProps) {
       </div>
 
       <div className="composer-wrap">
-        <ToolActivityPanel activities={props.toolActivity} />
+        {props.toolActivity.length > 0 && (
+          <div className="tool-activity-strip">
+            {props.toolActivity.map((activity) => (
+              <div
+                className={`tool-activity-item ${activity.status}`}
+                key={activity.callId}
+              >
+                <span className="tool-activity-icon">⌁</span>
+
+                <div>
+                  <strong>{activity.label}</strong>
+                  <span>{activity.summary || toolStatusText(activity.status)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {props.error && (
           <div className="error-banner">
             <div>

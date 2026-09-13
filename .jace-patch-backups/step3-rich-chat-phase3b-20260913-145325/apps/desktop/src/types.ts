@@ -430,9 +430,6 @@ export interface ToolActivity {
   label: string;
   status: ToolActivityStatus;
   arguments: Record<string, unknown>;
-  description?: string;
-  risk?: ToolRisk;
-  permission?: ToolPermissionMode;
   summary?: string;
 }
 

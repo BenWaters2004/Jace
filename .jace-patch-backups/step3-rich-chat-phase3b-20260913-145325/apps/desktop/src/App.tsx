@@ -655,9 +655,6 @@ export default function App(
         label: event.label,
         status: event.permission === "ask" ? "awaiting_approval" : "requested",
         arguments: event.arguments,
-        description: event.description,
-        risk: event.risk,
-        permission: event.permission,
       };
       return [...current.filter((item) => item.callId !== event.call_id), next];
     });

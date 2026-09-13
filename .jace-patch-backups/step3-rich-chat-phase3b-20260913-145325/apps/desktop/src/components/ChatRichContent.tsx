@@ -253,14 +253,6 @@ const INLINE_PATTERNS: Array<{
   },
 ];
 
-function richLinkClass(label: string, auto = false) {
-  if (/^\[?\d{1,3}\]?$/.test(label.trim())) {
-    return "rich-citation-link";
-  }
-
-  return auto ? "rich-external-link" : "rich-external-link";
-}
-
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   if (!text) return [];
 
@@ -298,27 +290,13 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       const label = bestMatch[1] ?? fullMatch;
       const href = bestMatch[2] ?? "#";
       nodes.push(
-        <a
-          key={tokenKey}
-          className={richLinkClass(label)}
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          title={href}
-        >
+        <a key={tokenKey} href={href} target="_blank" rel="noreferrer">
           {renderInline(label, `${tokenKey}-label`)}
         </a>,
       );
     } else if (bestKind === "auto-link") {
       nodes.push(
-        <a
-          key={tokenKey}
-          className={richLinkClass(fullMatch, true)}
-          href={fullMatch}
-          target="_blank"
-          rel="noreferrer"
-          title={fullMatch}
-        >
+        <a key={tokenKey} href={fullMatch} target="_blank" rel="noreferrer">
           {fullMatch}
         </a>,
       );
