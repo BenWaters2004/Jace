@@ -100,62 +100,14 @@ type Camera = { x: number; y: number; z: number };
 type CineSegment = { d: number; f: Camera; t: Camera; out?: boolean; chipShot?: boolean };
 type Cine = { t: number; segs: CineSegment[] };
 
-// JACE_DESKTOP_WINDOWS_PHASE_2E
-let GREEN = "#3ddc84";
-let GREEN_HOT = "#a6ffd0";
+const GREEN = "#3ddc84";
+const GREEN_HOT = "#a6ffd0";
 const AMBER = "#e7c368";
 const AMBER_HOT = "#ffe9ae";
 const RED = "#ff4d5e";
-let LISTEN_COOL = "#35e0ff";
+const LISTEN_COOL = "#35e0ff";
 const SPEAK_COLS = ["#35e0ff", "#9d7bff", "#ff4d9d", "#5fa8ff", "#46e28a", "#e7c368"];
-let LISTEN_COLS = ["#35e0ff", "#5fa8ff"];
-let BOARD_BG_CENTER = "#07160e";
-let BOARD_BG_MID = "#04100a";
-let BOARD_BG_EDGE = "#020705";
-let BOARD_WEAVE = "rgba(190,255,220,.10)";
-let BOARD_TINT = "rgba(61,220,132,.045)";
-
-function cssThemeValue(name: string, fallback: string) {
-  if (typeof document === "undefined") {
-    return fallback;
-  }
-
-  const value = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue(name).trim();
-
-  return value || fallback;
-}
-
-function refreshBoardThemePalette() {
-  GREEN = cssThemeValue("--jace-core-primary", "#3ddc84");
-  GREEN_HOT = cssThemeValue("--jace-core-hot", "#a6ffd0");
-  LISTEN_COOL = cssThemeValue("--jace-core-cool", "#35e0ff");
-  LISTEN_COLS = [
-    LISTEN_COOL,
-    cssThemeValue("--jace-secondary", "#5fa8ff"),
-  ];
-  BOARD_BG_CENTER = cssThemeValue(
-    "--jace-core-bg-center",
-    "#07160e",
-  );
-  BOARD_BG_MID = cssThemeValue(
-    "--jace-core-bg-mid",
-    "#04100a",
-  );
-  BOARD_BG_EDGE = cssThemeValue(
-    "--jace-core-bg-edge",
-    "#020705",
-  );
-  BOARD_WEAVE = cssThemeValue(
-    "--jace-core-weave",
-    "rgba(190,255,220,.10)",
-  );
-  BOARD_TINT = cssThemeValue(
-    "--jace-core-tint",
-    "rgba(61,220,132,.045)",
-  );
-}
+const LISTEN_COLS = ["#35e0ff", "#5fa8ff"];
 const SCRAM = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&@<>/*+=?";
 const DIRS: Point[] = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
 
@@ -236,7 +188,6 @@ export class JaceBoardEngine {
     this.getSnapshot = options.getSnapshot;
     this.seed = options.seed ?? 7;
     this.rnd = mulberry32(this.seed);
-    refreshBoardThemePalette();
   }
 
   start() {
@@ -256,25 +207,6 @@ export class JaceBoardEngine {
   toggleCinematic() {
     if (this.cine) this.endCine();
     else this.startCine();
-  }
-
-  refreshTheme() {
-    refreshBoardThemePalette();
-    this.glowSprites.clear();
-
-    [GREEN, AMBER, RED, ...SPEAK_COLS].forEach(
-      (hx) => this.glowSprites.set(
-        hx,
-        this.makeGlow(hx, 64),
-      ),
-    );
-
-    this.glowSprites.set(
-      "white",
-      this.makeGlow("rgb(220,255,235)", 64),
-    );
-
-    this.renderBG();
   }
 
   private loop = (ts: number) => {
@@ -531,16 +463,16 @@ export class JaceBoardEngine {
     const hit = (x0: number, y0: number, x1: number, y1: number) => x1 >= vx0 && x0 <= vx1 && y1 >= vy0 && y0 <= vy1;
 
     const grd = g.createRadialGradient(this.W / 2, this.H / 2, 0, this.W / 2, this.H / 2, Math.max(this.W, this.H) * 0.72);
-    grd.addColorStop(0, BOARD_BG_CENTER);
-    grd.addColorStop(0.55, BOARD_BG_MID);
-    grd.addColorStop(1, BOARD_BG_EDGE);
+    grd.addColorStop(0, "#07160e");
+    grd.addColorStop(0.55, "#04100a");
+    grd.addColorStop(1, "#020705");
     g.fillStyle = grd;
     g.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
 
     g.save();
     g.globalCompositeOperation = "soft-light";
     const weave = Math.max(5, Math.round(this.cell * 0.3));
-    g.strokeStyle = BOARD_WEAVE;
+    g.strokeStyle = "rgba(190,255,220,.10)";
     g.lineWidth = 1;
     g.beginPath();
     for (let x = Math.floor(vx0 / weave) * weave; x <= vx1; x += weave) { g.moveTo(x, vy0); g.lineTo(x, vy1); }
@@ -548,7 +480,7 @@ export class JaceBoardEngine {
     g.stroke();
     g.restore();
 
-    g.fillStyle = BOARD_TINT;
+    g.fillStyle = "rgba(61,220,132,.045)";
     const d0 = this.cell * 2;
     const ds = this.cell * 4;
     for (let xi = Math.max(0, Math.ceil((vx0 - d0) / ds)); d0 + xi * ds < Math.min(this.W, vx1 + 2); xi++) {

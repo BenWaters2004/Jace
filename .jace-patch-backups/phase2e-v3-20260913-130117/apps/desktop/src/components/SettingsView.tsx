@@ -15,7 +15,6 @@ import type {
   VoiceStatus,
 } from "../types";
 
-import { AppearanceSettings } from "./AppearanceSettings";
 import { DesktopWindowModeSettings } from "./DesktopWindowModeSettings";
 import { WindowLayoutSettings } from "./WindowLayoutSettings";
 interface SettingsViewProps {
@@ -437,8 +436,6 @@ function SettingsViewContent(props: SettingsViewProps) {
 
       <div className="settings-grid">
         {/* JACE_DESKTOP_WINDOWS_PHASE_2C */}
-        {/* JACE_DESKTOP_WINDOWS_PHASE_2E */}
-        <AppearanceSettings />
         <DesktopWindowModeSettings />
         {/* JACE_DESKTOP_WINDOWS_PHASE_2D */}
         <WindowLayoutSettings />

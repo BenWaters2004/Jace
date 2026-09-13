@@ -8,7 +8,6 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { JaceRuntimeState } from "./runtime";
-import { JACE_APPEARANCE_EVENT } from "./appearanceTheme";
 import {
   JaceBoardEngine,
   type BoardVisualState,
@@ -148,25 +147,6 @@ export function JaceCore(props: {
     return () => {
       engine.destroy();
       engineRef.current = null;
-    };
-  }, []);
-
-  // JACE_DESKTOP_WINDOWS_PHASE_2E
-  useEffect(() => {
-    const refreshTheme = () => {
-      engineRef.current?.refreshTheme();
-    };
-
-    window.addEventListener(
-      JACE_APPEARANCE_EVENT,
-      refreshTheme,
-    );
-
-    return () => {
-      window.removeEventListener(
-        JACE_APPEARANCE_EVENT,
-        refreshTheme,
-      );
     };
   }, []);
 

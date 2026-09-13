@@ -149,7 +149,7 @@ export function JaceCore(props: {
       engine.destroy();
       engineRef.current = null;
     };
-  }, []);
+  }, []);'
 
   // JACE_DESKTOP_WINDOWS_PHASE_2E
   useEffect(() => {
