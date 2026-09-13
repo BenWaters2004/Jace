@@ -19,9 +19,6 @@ import { AgentOffice } from "./AgentOffice";
 import { AttentionPanel } from "./AttentionPanel";
 import { PanelControls } from "./PanelControls";
 import { usePanelManager, type JacePanelId } from "./usePanelManager";
-import { useDesktopWindowMode } from "./desktopWindowMode";
-import { WindowChromeControls } from "./WindowChromeControls";
-import { WindowResizeHandles } from "./WindowResizeHandles";
 
 const TABS: Array<{ screen: Screen; label: string }> = [
   { screen: "chat", label: "Chat" },
@@ -68,8 +65,6 @@ export function CommandCenter(props: {
   // JACE_DESKTOP_WINDOWS_PHASE_2A
   // JACE_DESKTOP_WINDOWS_PHASE_2B
   const panels = usePanelManager();
-  // JACE_DESKTOP_WINDOWS_PHASE_2C
-  const desktopWindow = useDesktopWindowMode();
   const restoreLabels: Record<JacePanelId, string> = {
     core: "Core",
     office: "Office",
@@ -98,7 +93,6 @@ export function CommandCenter(props: {
 
   const shellClassName = [
     "command-center-shell",
-    `window-mode-${desktopWindow.mode}`,
     panels.focused ? `focus-${panels.focused}` : "focus-none",
     ...panels.minimized.map((panel) => `min-${panel}`),
     panels.fullscreenPanel ? "panel-fullscreen-active" : "",
@@ -124,13 +118,6 @@ export function CommandCenter(props: {
           <span className="status-chip private">◆ PRIVATE</span>
         </div>
 
-        {desktopWindow.isFrameless && (
-          <div
-            className="command-window-drag-zone"
-            onMouseDown={desktopWindow.handleDragMouseDown}
-            title="Drag Jace window · double-click to maximize"
-          />
-        )}
         <div className="command-actions">
           {panels.minimized.length > 0 && (
             <div className="panel-restore-strip" aria-label="Restore minimized panels">
@@ -159,10 +146,7 @@ export function CommandCenter(props: {
           )}
           <button onClick={() => setDrawerOpen((open) => !open)}>Chats</button>
           <button onClick={() => props.onScreenChange("settings")}>⚙</button>
-                  {desktopWindow.isFrameless && (
-            <WindowChromeControls />
-          )}
-</div>
+        </div>
       </header>
 
       <div className="command-grid">
@@ -377,12 +361,6 @@ export function CommandCenter(props: {
           ■ STOP CONTROL
         </button>
       )}
-      <WindowResizeHandles
-        enabled={
-          desktopWindow.isFrameless &&
-          !panels.fullscreenPanel
-        }
-      />
     </main>
   );
 }

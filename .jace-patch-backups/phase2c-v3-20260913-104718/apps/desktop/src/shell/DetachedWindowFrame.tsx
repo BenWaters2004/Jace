@@ -1,15 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useDesktopWindowMode } from "./desktopWindowMode";
-import { WindowChromeControls } from "./WindowChromeControls";
-import { WindowResizeHandles } from "./WindowResizeHandles";
 
 export function DetachedWindowFrame(props: {
   title: string;
   subtitle?: string;
   children: ReactNode;
 }) {
-  const desktopWindow = useDesktopWindowMode();
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
@@ -21,7 +17,9 @@ export function DetachedWindowFrame(props: {
       try {
         const next = await current.isFullscreen();
         if (!disposed) setFullscreen(next);
-      } catch {}
+      } catch {
+        // Browser/Vite preview.
+      }
     };
 
     void refresh();
@@ -47,7 +45,9 @@ export function DetachedWindowFrame(props: {
       await current.setFullscreen(next);
       setFullscreen(next);
       return;
-    } catch {}
+    } catch {
+      // Browser fallback below.
+    }
 
     if (!document.fullscreenElement) {
       await document.documentElement.requestFullscreen();
@@ -67,30 +67,14 @@ export function DetachedWindowFrame(props: {
   };
 
   return (
-    <main
-      className={`detached-window-shell window-mode-${desktopWindow.mode}`}
-    >
+    <main className="detached-window-shell">
       <header className="detached-window-header">
-        <div
-          className={`detached-window-drag-zone ${
-            desktopWindow.isFrameless ? "active" : ""
-          }`}
-          onMouseDown={desktopWindow.handleDragMouseDown}
-          title={
-            desktopWindow.isFrameless
-              ? `${props.title} · drag window`
-              : props.title
-          }
+        <span
+          className="detached-window-badge"
+          title={`${props.title}${props.subtitle ? ` · ${props.subtitle}` : ""}`}
         >
-          <span
-            className="detached-window-badge"
-            title={`${props.title}${
-              props.subtitle ? ` · ${props.subtitle}` : ""
-            }`}
-          >
-            ↗ Detached
-          </span>
-        </div>
+          ↗ Detached
+        </span>
 
         <div className="detached-window-actions">
           <button
@@ -113,18 +97,10 @@ export function DetachedWindowFrame(props: {
             <span aria-hidden="true">↙</span>
             <span>Attach</span>
           </button>
-
-          {desktopWindow.isFrameless && (
-            <WindowChromeControls compact />
-          )}
         </div>
       </header>
 
       <div className="detached-window-content">{props.children}</div>
-
-      <WindowResizeHandles
-        enabled={desktopWindow.isFrameless && !fullscreen}
-      />
     </main>
   );
 }
