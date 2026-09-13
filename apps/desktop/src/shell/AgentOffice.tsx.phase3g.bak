@@ -1041,42 +1041,6 @@ function ExecutorStrip(props: {
   );
 }
 
-
-
-// JACE_PHASE3G_WORKSPACE_CONSOLIDATION
-function AgentSystemOverview(props: {
-  managerRunning: boolean;
-  realtimeConnected: boolean;
-  workerCount: number;
-  busyCount: number;
-  taskCount: number;
-}) {
-  return (
-    <div className="agent-system-view">
-      <div className="agent-system-summary">
-        <article><span>Manager</span><strong>{props.managerRunning ? "Running" : "Offline"}</strong></article>
-        <article><span>Event stream</span><strong>{props.realtimeConnected ? "Live" : "Sync"}</strong></article>
-        <article><span>Workers</span><strong>{props.workerCount}</strong></article>
-        <article><span>Active jobs</span><strong>{props.busyCount}</strong></article>
-      </div>
-      <div className="agent-system-future-heading">
-        <strong>System telemetry</strong>
-        <span>{props.taskCount} stored agent task{props.taskCount === 1 ? "" : "s"}</span>
-      </div>
-      <div className="agent-system-future-grid">
-        <article><span>CPU</span><strong>Collector planned</strong></article>
-        <article><span>GPU / VRAM</span><strong>Collector planned</strong></article>
-        <article><span>RAM</span><strong>Collector planned</strong></article>
-        <article><span>Disk</span><strong>Collector planned</strong></article>
-        <article><span>Network</span><strong>Collector planned</strong></article>
-        <article><span>Temperatures</span><strong>Collector planned</strong></article>
-        <article><span>Ollama</span><strong>Collector planned</strong></article>
-        <article><span>Context / tokens</span><strong>Collector planned</strong></article>
-      </div>
-    </div>
-  );
-}
-
 export function AgentOffice(props: {
   activities: ToolActivity[];
   onExpand: () => void;
@@ -1085,7 +1049,6 @@ export function AgentOffice(props: {
   void props.activities;
 
   const office = useAgentOffice();
-  const [officeView, setOfficeView] = useState<"office" | "system">("office");
   const readiness = useAgentReadiness();
   const diagnostics = useAgentDiagnostics();
   const workerCount = office.status?.workers ?? 0;
@@ -1095,7 +1058,7 @@ export function AgentOffice(props: {
   const queuedCount = office.status?.queued_tasks ?? 0;
 
   return (
-    <section className="cc-panel agent-office-panel phase11-agent-office" data-office-view={officeView}>
+    <section className="cc-panel agent-office-panel phase11-agent-office">
       <div className="cc-panel-topline agent-office-topline">
         <div>
           <span className="cc-kicker">Jace office</span>
@@ -1111,10 +1074,6 @@ export function AgentOffice(props: {
         </div>
 
         <div className="agent-office-actions">
-          <div className="agent-office-view-switch" role="tablist" aria-label="Agent office view">
-            <button type="button" role="tab" aria-selected={officeView === "office"} className={officeView === "office" ? "active" : ""} onClick={() => setOfficeView("office")}>OFFICE</button>
-            <button type="button" role="tab" aria-selected={officeView === "system"} className={officeView === "system" ? "active" : ""} onClick={() => setOfficeView("system")}>SYSTEM</button>
-          </div>
           <button
             type="button"
             className="agent-diagnostic-run-all"
@@ -1231,15 +1190,6 @@ export function AgentOffice(props: {
             </button>
           )}
         </div>
-      )}
-      {officeView === "system" && (
-        <AgentSystemOverview
-          managerRunning={Boolean(office.status?.manager_running)}
-          realtimeConnected={office.realtimeConnected}
-          workerCount={workerCount}
-          busyCount={busyCount}
-          taskCount={office.tasks.length}
-        />
       )}
     </section>
   );

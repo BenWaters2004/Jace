@@ -64,9 +64,12 @@ import {
 } from "./api";
 import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
-import { ComputerHub } from "./components/ComputerHub";
-import { SettingsHub, type SettingsSection } from "./components/SettingsHub";
+import { ComputerView } from "./components/ComputerView";
+import { ControlView } from "./components/ControlView";
 import { MemoryView } from "./components/MemoryView";
+import { OutputView } from "./components/OutputView";
+import { WebWorkspaceView } from "./components/WebWorkspaceView";
+import { SettingsView } from "./components/SettingsView";
 import { SettingsOverlay } from "./components/SettingsOverlay";
 import { CommandCenter } from "./shell/CommandCenter";
 import { DetachedWorkspaceShell } from "./shell/DetachedWorkspaceShell";
@@ -79,6 +82,7 @@ import { useRuntimeEvents, type JaceRuntimeState } from "./shell/runtime";
 import { useVoiceController } from "./voice/useVoiceController";
 import { classifySpokenApproval } from "./voice/approval";
 import { ToolApprovalModal } from "./components/ToolApprovalModal";
+import { ToolsView } from "./components/ToolsView";
 import type {
   ApiGenerationStats,
   AutomationCreateRequest,
@@ -183,8 +187,6 @@ export default function App(
   );
   // JACE_SETTINGS_FULLPAGE_V2
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus | null>(null);
@@ -577,13 +579,13 @@ export default function App(
 
   useEffect(() => {
     if (connectionState === "backend-offline") return;
-    if (!(settingsOpen && settingsSection === "permissions") && !controlStatus?.active_session) return;
+    if (screen !== "control" && !controlStatus?.active_session) return;
 
     const timer = window.setInterval(() => {
       void refreshControl();
     }, 2500);
     return () => window.clearInterval(timer);
-  }, [connectionState, settingsOpen, settingsSection, controlStatus?.active_session?.id, refreshControl]);
+  }, [connectionState, screen, controlStatus?.active_session?.id, refreshControl]);
 
   // Phase 1D: approvals are global runtime work, not just chat-stream events.
   // Poll the shared queue so background Agent Office workers can surface the
@@ -1558,12 +1560,24 @@ export default function App(
         />
       )}
 
+      {screen === "output" && (
+        <OutputView diagnostics={performanceDiagnostics} activities={toolActivity} />
+      )}
+
+      {screen === "web" && (
+        <WebWorkspaceView audit={toolAudit} />
+      )}
+
       {screen === "memory" && (
         <MemoryView memories={memories} enabled={settings.memory_enabled} onRefresh={() => void refreshMemories()} onCreate={addMemory} onUpdate={patchMemory} onDelete={removeMemory} onOpenSource={openMemorySource} />
       )}
 
+      {screen === "tools" && (
+        <ToolsView enabled={toolsEnabled} tools={tools} audit={toolAudit} onRefresh={() => void refreshTools()} onPermissionChange={changeToolPermission} onClearAudit={removeToolAudit} />
+      )}
+
       {screen === "computer" && (
-        <ComputerHub
+        <ComputerView
           status={computerStatus}
           workspaces={computerWorkspaces}
           onRefresh={() => void refreshComputer()}
@@ -1575,6 +1589,26 @@ export default function App(
           onDeleteCommand={removeComputerCommand}
         />
       )}
+
+      {screen === "control" && (
+        <ControlView
+          status={controlStatus}
+          windows={controlWindows}
+          policies={controlPolicies}
+          sessions={controlSessions}
+          actions={controlActions}
+          activeConversationId={activeConversationId}
+          onRefresh={async () => { await refreshControl(); }}
+          onCreatePolicy={addControlPolicy}
+          onUpdatePolicy={patchControlPolicy}
+          onDeletePolicy={removeControlPolicy}
+          onStartSession={startDesktopControl}
+          onStopSession={stopDesktopControl}
+          onAuthorizeSensitive={authorizeSensitiveDesktopControl}
+          onEmergencyStop={emergencyStopDesktopControl}
+        />
+      )}
+
       {screen === "automations" && (
         <AutomationsView
           status={automationStatus}
@@ -1643,53 +1677,25 @@ export default function App(
         onOpenSettings={() => setSettingsOpen(true)}
         onNewChat={newChat}
         onLoadConversation={(id) => void loadConversation(id)}
-        onOpenApproval={() => { setSettingsSection("capabilities"); setSettingsOpen(true); }}
+        onOpenApproval={() => setScreen("tools")}
         onEmergencyStop={() => void emergencyStopDesktopControl()}
       />
       <SettingsOverlay
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       >
-        <SettingsHub
-          section={settingsSection}
-          onSectionChange={setSettingsSection}
-          general={{
-            settings,
-            voiceSettings,
-            voiceStatus,
-            models,
-            hasActiveConversation: activeConversationId !== null,
-            onSave: saveSettings,
-            onSaveVoice: saveVoiceProfile,
-            onReset: resetProfile,
-            onResetVoice: resetVoiceProfile,
-            onTestVoice: testVoiceProfile,
-            onApplyToCurrentConversation: applySettingsToCurrent,
-          }}
-          tools={{
-            enabled: toolsEnabled,
-            tools,
-            audit: toolAudit,
-            onRefresh: () => void refreshTools(),
-            onPermissionChange: changeToolPermission,
-            onClearAudit: removeToolAudit,
-          }}
-          control={{
-            status: controlStatus,
-            windows: controlWindows,
-            policies: controlPolicies,
-            sessions: controlSessions,
-            actions: controlActions,
-            activeConversationId,
-            onRefresh: async () => { await refreshControl(); },
-            onCreatePolicy: addControlPolicy,
-            onUpdatePolicy: patchControlPolicy,
-            onDeletePolicy: removeControlPolicy,
-            onStartSession: startDesktopControl,
-            onStopSession: stopDesktopControl,
-            onAuthorizeSensitive: authorizeSensitiveDesktopControl,
-            onEmergencyStop: emergencyStopDesktopControl,
-          }}
+        <SettingsView
+          settings={settings}
+          voiceSettings={voiceSettings}
+          voiceStatus={voiceStatus}
+          models={models}
+          hasActiveConversation={activeConversationId !== null}
+          onSave={saveSettings}
+          onSaveVoice={saveVoiceProfile}
+          onReset={resetProfile}
+          onResetVoice={resetVoiceProfile}
+          onTestVoice={testVoiceProfile}
+          onApplyToCurrentConversation={applySettingsToCurrent}
         />
       </SettingsOverlay>
       <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />

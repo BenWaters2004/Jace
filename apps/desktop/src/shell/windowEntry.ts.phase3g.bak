@@ -4,12 +4,15 @@ import type { JacePanelId } from "./usePanelManager";
 export const DETACHED_WORKSPACE_SCREEN_KEY =
   "jace.desktop.detached-workspace-screen.v1";
 
-// JACE_PHASE3G_WORKSPACE_CONSOLIDATION
 const SCREEN_VALUES: Screen[] = [
   "chat",
+  "output",
   "computer",
+  "web",
   "automations",
   "memory",
+  "control",
+  "tools",
 ];
 
 export type JaceWindowEntry = {

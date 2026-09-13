@@ -23,12 +23,15 @@ import { useDesktopWindowMode } from "./desktopWindowMode";
 import { WindowChromeControls } from "./WindowChromeControls";
 import { WindowResizeHandles } from "./WindowResizeHandles";
 
-// JACE_PHASE3G_WORKSPACE_CONSOLIDATION
 const TABS: Array<{ screen: Screen; label: string }> = [
   { screen: "chat", label: "Chat" },
-  { screen: "computer", label: "Computer" },
-  { screen: "automations", label: "Automations" },
+  { screen: "output", label: "Output" },
+  { screen: "computer", label: "Files" },
+  { screen: "web", label: "Web" },
+  { screen: "automations", label: "Tasks" },
   { screen: "memory", label: "Memory" },
+  { screen: "control", label: "Control" },
+  { screen: "tools", label: "Tools" },
 ];
 
 export function CommandCenter(props: {

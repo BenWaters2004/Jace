@@ -1,6 +1,5 @@
 export type ChatRole = "user" | "assistant";
-// JACE_PHASE3G_WORKSPACE_CONSOLIDATION
-export type Screen = "chat" | "computer" | "automations" | "memory";
+export type Screen = "chat" | "output" | "web" | "memory" | "tools" | "computer" | "control" | "automations";
 export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal" | "temporary" | "other";
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";
