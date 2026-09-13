@@ -16,7 +16,6 @@ import type {
 } from "../types";
 
 import { DesktopWindowModeSettings } from "./DesktopWindowModeSettings";
-import { WindowLayoutSettings } from "./WindowLayoutSettings";
 interface SettingsViewProps {
   settings: AssistantSettings;
   voiceSettings: VoiceSettings;
@@ -437,8 +436,6 @@ function SettingsViewContent(props: SettingsViewProps) {
       <div className="settings-grid">
         {/* JACE_DESKTOP_WINDOWS_PHASE_2C */}
         <DesktopWindowModeSettings />
-        {/* JACE_DESKTOP_WINDOWS_PHASE_2D */}
-        <WindowLayoutSettings />
         <section className="settings-card">
           <div className="settings-card-heading">
             <div>

@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  forgetDetachedPanelRestore,
-  readDetachedRestorePlan,
-  readWindowLayoutPreferences,
-  rememberDetachedPanelRestore,
-} from "./windowLayout";
 
 export type JacePanelId = "core" | "office" | "workspace";
 
@@ -110,8 +104,6 @@ export function usePanelManager() {
     useState<JacePanelId | null>(null);
   const [detached, setDetached] = useState<JacePanelId[]>([]);
   const focusBeforeFullscreenRef = useRef<JacePanelId | null>(null);
-  // JACE_DESKTOP_WINDOWS_PHASE_2D
-  const detachedRestoreAttemptedRef = useRef(false);
 
   useEffect(() => {
     if (fullscreenPanel !== null) return;
@@ -215,11 +207,6 @@ export function usePanelManager() {
         await exitFullscreen();
       }
 
-      rememberDetachedPanelRestore(
-        panel,
-        context,
-      );
-
       try {
         const label = DETACHED_LABELS[panel];
         const existing = await WebviewWindow.getByLabel(label);
@@ -262,39 +249,12 @@ export function usePanelManager() {
         setFocused((current) => (current === panel ? null : current));
         return true;
       } catch (error) {
-        forgetDetachedPanelRestore(panel);
         console.error(`Could not detach ${panel} panel.`, error);
         return false;
       }
     },
     [exitFullscreen, fullscreenPanel],
   );
-
-  useEffect(() => {
-    if (detachedRestoreAttemptedRef.current) {
-      return;
-    }
-
-    detachedRestoreAttemptedRef.current = true;
-
-    const preferences =
-      readWindowLayoutPreferences();
-
-    if (!preferences.restoreDetachedWindows) {
-      return;
-    }
-
-    const restorePlan =
-      readDetachedRestorePlan();
-
-    void (async () => {
-      for (const panel of PANEL_IDS) {
-        const context = restorePlan[panel];
-        if (!context) continue;
-        await detach(panel, context);
-      }
-    })();
-  }, [detach]);
 
   useEffect(() => {
     if (detached.length === 0) return;
@@ -305,7 +265,6 @@ export function usePanelManager() {
         try {
           const current = await WebviewWindow.getByLabel(DETACHED_LABELS[panel]);
           if (!current && !disposed) {
-            forgetDetachedPanelRestore(panel);
             setDetached((items) => items.filter((item) => item !== panel));
             setMinimized((items) => items.filter((item) => item !== panel));
             window.dispatchEvent(
