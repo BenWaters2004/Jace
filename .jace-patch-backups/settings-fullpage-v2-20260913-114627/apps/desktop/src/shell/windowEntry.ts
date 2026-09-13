@@ -13,6 +13,7 @@ const SCREEN_VALUES: Screen[] = [
   "memory",
   "control",
   "tools",
+  "settings",
 ];
 
 export type JaceWindowEntry = {

@@ -32,6 +32,7 @@ const TABS: Array<{ screen: Screen; label: string }> = [
   { screen: "memory", label: "Memory" },
   { screen: "control", label: "Control" },
   { screen: "tools", label: "Tools" },
+  { screen: "settings", label: "Settings" },
 ];
 
 export function CommandCenter(props: {
@@ -58,7 +59,6 @@ export function CommandCenter(props: {
   onVoiceStart: () => void | Promise<void>;
   onVoiceStop: () => void | Promise<void>;
   onScreenChange: (screen: Screen) => void;
-  onOpenSettings: () => void;
   onNewChat: () => void;
   onLoadConversation: (id: string) => void;
   onOpenApproval: () => void;
@@ -67,7 +67,6 @@ export function CommandCenter(props: {
   const [drawerOpen, setDrawerOpen] = useState(false);
   // JACE_DESKTOP_WINDOWS_PHASE_2A
   // JACE_DESKTOP_WINDOWS_PHASE_2B
-  // JACE_SETTINGS_FULLPAGE_V2
   const panels = usePanelManager();
   // JACE_DESKTOP_WINDOWS_PHASE_2C
   const desktopWindow = useDesktopWindowMode();
@@ -159,14 +158,7 @@ export function CommandCenter(props: {
             </div>
           )}
           <button onClick={() => setDrawerOpen((open) => !open)}>Chats</button>
-          <button
-            type="button"
-            onClick={props.onOpenSettings}
-            title="Open Settings"
-            aria-label="Open Settings"
-          >
-            ⚙
-          </button>
+          <button onClick={() => props.onScreenChange("settings")}>⚙</button>
                   {desktopWindow.isFrameless && (
             <WindowChromeControls />
           )}

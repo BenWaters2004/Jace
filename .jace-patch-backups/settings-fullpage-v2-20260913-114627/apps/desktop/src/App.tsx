@@ -70,7 +70,6 @@ import { MemoryView } from "./components/MemoryView";
 import { OutputView } from "./components/OutputView";
 import { WebWorkspaceView } from "./components/WebWorkspaceView";
 import { SettingsView } from "./components/SettingsView";
-import { SettingsOverlay } from "./components/SettingsOverlay";
 import { CommandCenter } from "./shell/CommandCenter";
 import { DetachedWorkspaceShell } from "./shell/DetachedWorkspaceShell";
 import {
@@ -185,8 +184,6 @@ export default function App(
       ? detachedEntry.screen
       : "chat",
   );
-  // JACE_SETTINGS_FULLPAGE_V2
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus | null>(null);
@@ -1473,6 +1470,21 @@ export default function App(
         />
       )}
 
+      {screen === "settings" && (
+        <SettingsView
+          settings={settings}
+          voiceSettings={voiceSettings}
+          voiceStatus={voiceStatus}
+          models={models}
+          hasActiveConversation={activeConversationId !== null}
+          onSave={saveSettings}
+          onSaveVoice={saveVoiceProfile}
+          onReset={resetProfile}
+          onResetVoice={resetVoiceProfile}
+          onTestVoice={testVoiceProfile}
+          onApplyToCurrentConversation={applySettingsToCurrent}
+        />
+      )}
     </>
   );
 
@@ -1519,30 +1531,11 @@ export default function App(
         online={connectionState === "online"}
         controlActive={Boolean(controlStatus?.active_session)}
         onScreenChange={setScreen}
-        onOpenSettings={() => setSettingsOpen(true)}
         onNewChat={newChat}
         onLoadConversation={(id) => void loadConversation(id)}
         onOpenApproval={() => setScreen("tools")}
         onEmergencyStop={() => void emergencyStopDesktopControl()}
       />
-      <SettingsOverlay
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      >
-        <SettingsView
-          settings={settings}
-          voiceSettings={voiceSettings}
-          voiceStatus={voiceStatus}
-          models={models}
-          hasActiveConversation={activeConversationId !== null}
-          onSave={saveSettings}
-          onSaveVoice={saveVoiceProfile}
-          onReset={resetProfile}
-          onResetVoice={resetVoiceProfile}
-          onTestVoice={testVoiceProfile}
-          onApplyToCurrentConversation={applySettingsToCurrent}
-        />
-      </SettingsOverlay>
       <ToolApprovalModal approval={pendingApproval} onDecision={decideToolApproval} />
     </>
   );

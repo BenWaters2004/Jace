@@ -575,7 +575,7 @@ function SettingsViewContent(props: SettingsViewProps) {
 
             <label className="full">
               <span>
-                Temperature · {Number.isFinite(Number(draft.temperature)) ? Number(draft.temperature).toFixed(2) : "0.40"}
+                Temperature · {draft.temperature.toFixed(2)}
               </span>
               <input
                 type="range"
@@ -761,7 +761,7 @@ function SettingsViewContent(props: SettingsViewProps) {
 
             <label className="full">
               <span>
-                Speaking speed · {Number.isFinite(Number(voiceDraft.tts_speed)) ? Number(voiceDraft.tts_speed).toFixed(2) : "1.06"}×
+                Speaking speed · {voiceDraft.tts_speed.toFixed(2)}×
               </span>
               <input
                 type="range"
@@ -895,7 +895,7 @@ function SettingsViewContent(props: SettingsViewProps) {
             <label>
               <span>
                 Minimum similarity ·{" "}
-                {Number.isFinite(Number(draft.memory_min_similarity)) ? Number(draft.memory_min_similarity).toFixed(2) : "0.50"}
+                {draft.memory_min_similarity.toFixed(2)}
               </span>
               <input
                 type="range"

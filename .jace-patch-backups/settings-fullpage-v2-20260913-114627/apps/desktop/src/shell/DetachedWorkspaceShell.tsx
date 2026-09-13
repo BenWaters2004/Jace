@@ -12,6 +12,7 @@ const TABS: Array<{ screen: Screen; label: string }> = [
   { screen: "memory", label: "Memory" },
   { screen: "control", label: "Control" },
   { screen: "tools", label: "Tools" },
+  { screen: "settings", label: "Settings" },
 ];
 
 export function DetachedWorkspaceShell(props: {
