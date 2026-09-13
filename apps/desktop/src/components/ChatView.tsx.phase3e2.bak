@@ -56,7 +56,6 @@ interface ChatViewProps {
   onRemovePendingAttachment: (id: string) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
-  onRetry: (assistantMessageId: string) => void;
   onStop: () => void;
   onDismissError: () => void;
   onModelChange: (model: string) => void;
@@ -142,7 +141,6 @@ function persistedAgentMessages(
 // JACE_STEP3_RICH_CHAT_PHASE3A_V2_SYNTAX_FIX
 // JACE_STEP3_RICH_CHAT_PHASE3E
 // JACE_STEP3_RICH_CHAT_PHASE3E1
-// JACE_STEP3_RICH_CHAT_PHASE3E2
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -558,16 +556,7 @@ export function ChatView(props: ChatViewProps) {
                       streaming={Boolean(message.isStreaming)}
                       stopped={Boolean(message.stopped)}
                       agentHandoff={Boolean(message.model?.startsWith("agent:"))}
-                    
-                      workDurationMs={message.stats?.timeToFirstTokenMs ?? message.stats?.totalDurationMs ?? null}
-                      onRetry={
-                        message.role === "assistant" &&
-                        !message.model?.startsWith("agent:") &&
-                        !message.isStreaming &&
-                        displayedMessages[displayedMessages.length - 1]?.id === message.id
-                          ? () => props.onRetry(message.id)
-                          : undefined
-                      }>
+                    >
                       {message.attachments &&
                         message.attachments.length > 0 && (
                           <div className="message-attachments">

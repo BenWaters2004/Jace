@@ -9,8 +9,6 @@ interface MessageFrameProps {
   streaming?: boolean;
   stopped?: boolean;
   agentHandoff?: boolean;
-  workDurationMs?: number | null;
-  onRetry?: () => void;
   children: ReactNode;
 }
 
@@ -79,29 +77,6 @@ function modelLabel(model?: string | null, agentHandoff?: boolean) {
   return trimmed.length > 42 ? `${trimmed.slice(0, 39)}…` : trimmed;
 }
 
-function formatWorkDuration(ms?: number | null) {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
-  if (ms < 1000) return `${Math.max(1, Math.round(ms))} ms`;
-
-  const seconds = ms / 1000;
-  if (seconds < 60) {
-    return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
-  }
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.round(seconds % 60);
-  return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
-}
-
-function RetryIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M15.5 6.5V3.8M15.5 3.8h-2.7" />
-      <path d="M15.1 4.3A7 7 0 1 0 17 11" />
-    </svg>
-  );
-}
-
 function CopyIcon({ copied }: { copied: boolean }) {
   if (copied) {
     return (
@@ -148,14 +123,6 @@ export function MessageFrame(props: MessageFrameProps) {
         collapsed ? "message-frame-collapsed" : ""
       }`}
     >
-      {props.role === "assistant" &&
-        !props.streaming &&
-        formatWorkDuration(props.workDurationMs) && (
-          <div className="message-work-duration">
-            Worked for {formatWorkDuration(props.workDurationMs)}
-          </div>
-        )}
-
       <div
         className={`message-surface ${
           props.role === "user"
@@ -179,18 +146,6 @@ export function MessageFrame(props: MessageFrameProps) {
                 aria-label={copied ? "Message copied" : "Copy message"}
               >
                 <CopyIcon copied={copied} />
-              </button>
-            )}
-
-            {props.role === "assistant" && props.onRetry && hasActions && (
-              <button
-                type="button"
-                className="message-retry-control"
-                onClick={props.onRetry}
-                title="Try again"
-                aria-label="Try again"
-              >
-                <RetryIcon />
               </button>
             )}
 

@@ -80,52 +80,12 @@ async def send_streaming_chat(request: PersistentChatRequest):
         if not stored_user_text:
             stored_user_text = f"Attached {len(attachments)} file(s): {attachment_names}"
 
-        # JACE_STEP3_RICH_CHAT_PHASE3E2_RETRY
-        retry_assistant_message_id = request.retry_assistant_message_id
-        if retry_assistant_message_id:
-            conversation_messages = list(conversation.messages)
-            if len(conversation_messages) < 2:
-                raise HTTPException(status_code=409, detail="There is no completed response to retry.")
+        user_message = await store_user_message(session, conversation, stored_user_text)
+        user_message_id = user_message.id
+        if attachments:
+            await assign_attachments_to_message(session, attachments, user_message_id)
 
-            retry_assistant_message = conversation_messages[-1]
-            retry_user_message = conversation_messages[-2]
-            if (
-                retry_assistant_message.id != retry_assistant_message_id
-                or retry_assistant_message.role != "assistant"
-                or retry_user_message.role != "user"
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Try again is only available for the latest assistant response.",
-                )
-            if (
-                request.retry_user_message_id
-                and retry_user_message.id != request.retry_user_message_id
-            ):
-                raise HTTPException(status_code=409, detail="The retry source message no longer matches this response.")
-
-            expected_attachment_ids = [
-                item.id for item in getattr(retry_user_message, "attachments", [])
-            ]
-            if set(request.attachment_ids) != set(expected_attachment_ids):
-                raise HTTPException(
-                    status_code=400,
-                    detail="The retry must use the original message attachments.",
-                )
-
-            stored_user_text = retry_user_message.content
-            user_message_id = retry_user_message.id
-        else:
-            user_message = await store_user_message(session, conversation, stored_user_text)
-            user_message_id = user_message.id
-            if attachments:
-                await assign_attachments_to_message(session, attachments, user_message_id)
-
-        memory_command = (
-            None
-            if retry_assistant_message_id
-            else (detect_memory_command(request.message) if request.message.strip() else None)
-        )
+        memory_command = detect_memory_command(request.message) if request.message.strip() else None
         memory_command_handled = memory_command is not None
         memory_action_context = ""
 
@@ -169,13 +129,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
             max_messages=env_settings.history_max_messages,
             max_chars=env_settings.history_max_chars,
         )
-        if (
-            retry_assistant_message_id
-            and history
-            and history[-1].get("role") == "assistant"
-        ):
-            # Regenerate from the original user turn, not from the answer being replaced.
-            history = history[:-1]
         history_chars = sum(len(message.get("content", "")) for message in history)
         conversation_id = conversation.id
         conversation_system_prompt = conversation.system_prompt
@@ -210,36 +163,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
             current = await get_conversation(session, conversation_id)
             if current is None:
                 return None
-
-            if retry_assistant_message_id:
-                message = next(
-                    (
-                        item
-                        for item in current.messages
-                        if item.id == retry_assistant_message_id and item.role == "assistant"
-                    ),
-                    None,
-                )
-                if message is None:
-                    return None
-
-                metric_values = metrics or {}
-                message.content = content
-                message.status = status
-                message.model = model_name or conversation_model
-                message.time_to_first_token_ms = metric_values.get("time_to_first_token_ms")
-                message.total_duration_ms = metric_values.get("total_duration_ms")
-                message.load_duration_ms = metric_values.get("load_duration_ms")
-                message.prompt_eval_count = metric_values.get("prompt_eval_count")
-                message.prompt_eval_cached_count = metric_values.get("prompt_eval_cached_count")
-                message.prompt_eval_duration_ms = metric_values.get("prompt_eval_duration_ms")
-                message.eval_count = metric_values.get("eval_count")
-                message.eval_duration_ms = metric_values.get("eval_duration_ms")
-                message.tokens_per_second = metric_values.get("tokens_per_second")
-                # update_conversation commits the tracked message replacement too.
-                await update_conversation(session, current)
-                await session.refresh(message)
-                return message.id
 
             message = await add_message(
                 session,
@@ -462,11 +385,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         model_name=response_model,
                     )
                     saved = True
-                    if (
-                        not memory_command_handled
-                        and not retry_assistant_message_id
-                        and assistant_message_id
-                    ):
+                    if not memory_command_handled and assistant_message_id:
                         schedule_memory_extraction(
                             conversation_id=conversation_id,
                             source_message_id=user_message_id,

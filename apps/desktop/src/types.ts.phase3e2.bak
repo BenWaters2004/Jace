@@ -257,8 +257,6 @@ export interface ChatRequest {
   temperature?: number;
   attachment_ids?: string[];
   voice_mode?: boolean;
-  retry_assistant_message_id?: string;
-  retry_user_message_id?: string;
 }
 
 export interface StreamMetrics {

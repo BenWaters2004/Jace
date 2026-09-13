@@ -124,8 +124,6 @@ class PersistentChatRequest(BaseModel):
     reasoning_mode: ReasoningMode | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     voice_mode: bool = False
-    retry_assistant_message_id: str | None = None
-    retry_user_message_id: str | None = None
 
 
 class VoiceSettingsResponse(BaseModel):
