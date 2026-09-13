@@ -5,12 +5,11 @@ import {
 } from "react";
 
 export type JaceAppearanceTheme =
-  | "default"
+  | "jace"
   | "deep-black"
   | "graphite"
   | "cyber-green"
-  | "ice-blue"
-  | "red-black";
+  | "ice-blue";
 
 export type JaceThemeDefinition = {
   id: JaceAppearanceTheme;
@@ -37,8 +36,8 @@ const CHANNEL_NAME =
 export const JACE_THEME_DEFINITIONS:
   JaceThemeDefinition[] = [
     {
-      id: "default",
-      name: "Default",
+      id: "jace",
+      name: "Jace",
       description:
         "The current teal-and-cyan Command Center palette.",
       preview: {
@@ -101,47 +100,33 @@ export const JACE_THEME_DEFINITIONS:
         text: "#eefaff",
       },
     },
-    {
-      id: "red-black",
-      name: "Red / Black",
-      description:
-        "Black surfaces with aggressive crimson signal lighting.",
-      preview: {
-        background: "#090304",
-        panel: "#16070a",
-        accent: "#f04455",
-        secondary: "#ff7a86",
-        text: "#fff1f2",
-      },
-    },
   ];
 
 function isTheme(
   value: unknown,
 ): value is JaceAppearanceTheme {
   return (
-    value === "default" ||
+    value === "jace" ||
     value === "deep-black" ||
     value === "graphite" ||
     value === "cyber-green" ||
-    value === "ice-blue" ||
-    value === "red-black"
+    value === "ice-blue"
   );
 }
 
 export function readAppearanceTheme():
   JaceAppearanceTheme {
   if (typeof window === "undefined") {
-    return "default";
+    return "jace";
   }
 
   try {
     const stored = window.localStorage.getItem(
       JACE_THEME_STORAGE_KEY,
     );
-    return isTheme(stored) ? stored : "default";
+    return isTheme(stored) ? stored : "jace";
   } catch {
-    return "default";
+    return "jace";
   }
 }
 
