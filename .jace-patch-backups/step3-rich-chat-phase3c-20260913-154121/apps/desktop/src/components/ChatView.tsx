@@ -28,7 +28,6 @@ import {
   AGENT_TERMINAL_BROWSER_EVENT,
 } from "../agents/useAgentOffice";
 import "./ChatView.css";
-import { RichAttachmentPreview } from "./RichAttachmentPreview";
 import { ToolActivityPanel } from "./ToolActivityPanel";
 import { ChatRichContent } from "./ChatRichContent";
 
@@ -88,9 +87,56 @@ function toolStatusText(status: ToolActivity["status"]) {
   }
 }
 
-function MessageAttachment({ attachment }: { attachment: AttachmentRecord }) {
-  return <RichAttachmentPreview attachment={attachment} />;
+function attachmentGlyph(kind: string) {
+  if (kind === "image") return "▧";
+  if (kind === "pdf") return "PDF";
+  if (kind === "audio") return "♪";
+  return "≡";
 }
+
+function MessageAttachment({ attachment }: { attachment: AttachmentRecord }) {
+  const url = attachmentContentUrl(attachment.id);
+
+  if (attachment.media_kind === "image") {
+    return (
+      <a
+        className="message-image-link"
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        title={attachment.original_name}
+      >
+        <img
+          className="message-image"
+          src={url}
+          alt={attachment.original_name}
+          loading="lazy"
+        />
+        <span>{attachment.original_name}</span>
+      </a>
+    );
+  }
+
+  return (
+    <a
+      className="message-file-card"
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <span className={`file-glyph kind-${attachment.media_kind}`}>
+        {attachmentGlyph(attachment.media_kind)}
+      </span>
+      <span className="file-card-copy">
+        <strong>{attachment.original_name}</strong>
+        <small>
+          {attachment.media_kind} · {formatBytes(attachment.size_bytes)}
+        </small>
+      </span>
+    </a>
+  );
+}
+
 
 function agentHandoffContent(task: AgentTask): string {
   if (task.status === "completed") {

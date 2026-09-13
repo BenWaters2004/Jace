@@ -1,6 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { RichArtifactBlock, RichChartBlock, RichTableBlock } from "./RichVisualBlocks";
 
 interface ChatRichContentProps {
   content: string;
@@ -408,14 +407,6 @@ function CodeBlock({
   code: string;
   language: string;
 }) {
-  if (language === "chart") {
-    return <RichChartBlock code={code} />;
-  }
-
-  if (language === "artifact" || language === "preview") {
-    return <RichArtifactBlock code={code} />;
-  }
-
   const lineCount = code ? code.split("\n").length : 0;
   const isStructured =
     ["json", "yaml", "yml", "xml", "html"].includes(language) &&
@@ -526,14 +517,33 @@ function renderBlock(block: Block, key: string): ReactNode {
       );
     case "table":
       return (
-        <RichTableBlock
-          key={key}
-          header={block.header}
-          rows={block.rows}
-          renderCell={(value, cellKey) =>
-            renderInline(value, `${key}-${cellKey}`)
-          }
-        />
+        <div key={key} className="rich-table-wrap">
+          <table className="rich-table">
+            <thead>
+              <tr>
+                {block.header.map((cell, index) => (
+                  <th key={`${key}-head-${index}`}>
+                    {renderInline(cell, `${key}-head-${index}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={`${key}-row-${rowIndex}`}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={`${key}-row-${rowIndex}-${cellIndex}`}>
+                      {renderInline(
+                        cell,
+                        `${key}-row-${rowIndex}-${cellIndex}`,
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       );
     case "rule":
       return <hr key={key} className="rich-rule" />;
