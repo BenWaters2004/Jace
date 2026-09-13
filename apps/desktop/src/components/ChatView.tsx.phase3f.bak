@@ -143,7 +143,6 @@ function persistedAgentMessages(
 // JACE_STEP3_RICH_CHAT_PHASE3E
 // JACE_STEP3_RICH_CHAT_PHASE3E1
 // JACE_STEP3_RICH_CHAT_PHASE3E2
-// JACE_STEP3_RICH_CHAT_PHASE3F
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -562,7 +561,6 @@ export function ChatView(props: ChatViewProps) {
                     
                       workDurationMs={message.stats?.timeToFirstTokenMs ?? message.stats?.totalDurationMs ?? null}
                       onRetry={
-                        !props.isGenerating &&
                         message.role === "assistant" &&
                         !message.model?.startsWith("agent:") &&
                         !message.isStreaming &&
@@ -605,8 +603,7 @@ export function ChatView(props: ChatViewProps) {
             onClick={() => scrollToBottom("smooth")}
             title="Jump to latest message"
             aria-label="Jump to latest message"
-          
-            data-chat-scroll-control="true">
+          >
             ↓
           </button>
         )}
@@ -653,8 +650,7 @@ export function ChatView(props: ChatViewProps) {
                     props.onRemovePendingAttachment(attachment.id)
                   }
                   title="Remove attachment"
-                
-                  aria-label="Remove attachment">
+                >
                   <svg
                     className="pending-attachment-remove-icon"
                     viewBox="0 0 20 20"
@@ -669,14 +665,6 @@ export function ChatView(props: ChatViewProps) {
           </div>
         )}
 
-        <div
-          className="chat-sr-only chat-a11y-status"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {props.isGenerating ? `${props.assistantName} is responding.` : ""}
-        </div>
         <form
           className="composer multimodal-composer"
           onSubmit={props.onSubmit}
@@ -685,8 +673,7 @@ export function ChatView(props: ChatViewProps) {
           onDragLeave={dragLeaveFiles}
           onDrop={dropFiles}
           data-drag-active={composerDragActive ? "true" : undefined}
-        
-          aria-label="Message composer">
+        >
           {composerDragActive && (
             <div className="composer-drop-overlay" aria-hidden="true">
               <span>+</span>
@@ -717,8 +704,7 @@ export function ChatView(props: ChatViewProps) {
               props.pendingAttachments.length >= props.attachmentLimit
             }
             title="Attach image, PDF, document or audio"
-          
-            aria-label="Attach files"><span className="composer-plus-glyph" aria-hidden="true">
+          ><span className="composer-plus-glyph" aria-hidden="true">
             <svg
               className="composer-plus-icon"
               viewBox="0 0 20 20"
@@ -749,8 +735,7 @@ export function ChatView(props: ChatViewProps) {
               const target = event.currentTarget;
               target.style.height = "auto";
               target.style.height = `${Math.min(target.scrollHeight, 180)}px`;
-            }}
-            aria-describedby="chat-composer-hint"/>
+            }}/>
 
                     {props.isGenerating ? (
                       <button
@@ -850,8 +835,7 @@ export function ChatView(props: ChatViewProps) {
                     )}
         </form>
 
-        <div className="composer-hint"
-          id="chat-composer-hint">
+        <div className="composer-hint">
           <span>Enter to send · Shift + Enter for a new line</span>
           <span className="composer-hint-files">
             {props.pendingAttachments.length > 0

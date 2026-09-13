@@ -119,7 +119,6 @@ function CopyIcon({ copied }: { copied: boolean }) {
   );
 }
 
-// JACE_STEP3_RICH_CHAT_PHASE3F_ACCESSIBILITY
 export function MessageFrame(props: MessageFrameProps) {
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -134,7 +133,6 @@ export function MessageFrame(props: MessageFrameProps) {
     !props.streaming &&
     isLongMessage(props.content);
   const hasActions = Boolean(props.content) && !props.streaming;
-  const workDuration = formatWorkDuration(props.workDurationMs);
 
   async function handleCopy() {
     const success = await copyText(props.content);
@@ -149,15 +147,12 @@ export function MessageFrame(props: MessageFrameProps) {
       className={`message-frame message-frame-${props.role} ${
         collapsed ? "message-frame-collapsed" : ""
       }`}
-    
-      role="article"
-      aria-label={props.role === "assistant" ? "Jace response" : "Your message"}
-      aria-busy={props.streaming || undefined}>
+    >
       {props.role === "assistant" &&
         !props.streaming &&
-        workDuration && (
+        formatWorkDuration(props.workDurationMs) && (
           <div className="message-work-duration">
-            Worked for {workDuration}
+            Worked for {formatWorkDuration(props.workDurationMs)}
           </div>
         )}
 
@@ -173,9 +168,7 @@ export function MessageFrame(props: MessageFrameProps) {
       </div>
 
       {(timestamp || displayModel || props.stopped || canCollapse || hasActions) && (
-        <div className="message-action-bar"
-          role="group"
-          aria-label="Message actions">
+        <div className="message-action-bar">
           <div className="message-action-leading">
             {hasActions && (
               <button
@@ -189,31 +182,20 @@ export function MessageFrame(props: MessageFrameProps) {
               </button>
             )}
 
-            <span
-              className="chat-sr-only message-copy-status"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {copied ? "Message copied." : ""}
-            </span>
-
             {props.role === "assistant" && props.onRetry && hasActions && (
               <button
                 type="button"
                 className="message-retry-control"
                 onClick={props.onRetry}
                 title="Try again"
-                aria-label="Generate this response again"
+                aria-label="Try again"
               >
                 <RetryIcon />
               </button>
             )}
 
             <div className="message-action-meta">
-              {timestamp && (
-                <time dateTime={props.createdAt ?? undefined}>{timestamp}</time>
-              )}
+              {timestamp && <span>{timestamp}</span>}
               {displayModel && <span title={props.model ?? undefined}>{displayModel}</span>}
               {props.stopped && <span className="message-action-stopped">Stopped</span>}
             </div>
@@ -225,7 +207,6 @@ export function MessageFrame(props: MessageFrameProps) {
                 type="button"
                 onClick={() => setCollapsed((value) => !value)}
                 aria-expanded={!collapsed}
-                aria-label={collapsed ? "Expand response" : "Collapse long response"}
                 title={collapsed ? "Expand response" : "Collapse long response"}
               >
                 {collapsed ? "Expand" : "Collapse"}
