@@ -183,9 +183,6 @@ function persistedAgentMessages(
 }
 
 // JACE_STEP3_RICH_CHAT_PHASE3A_V2
-// JACE_STEP3_PHASE3A_TRANSCRIPT_REBUILD_V3
-// JACE_STEP3_PHASE3A_GENERATED_JSX_REPAIR
-// JACE_STEP3_RICH_CHAT_PHASE3A_V2_SYNTAX_FIX
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -563,41 +560,20 @@ export function ChatView(props: ChatViewProps) {
                   }`}
                 >
                   <div className="message-body">
-                    {message.model?.startsWith("agent:") && (
-                      <div className="message-inline-label">
-                        {props.assistantName} · Agent Handoff
-                      </div>
-                    )}
+                    {message.model?.startsWith("agent:") && (\n                      <div className="message-inline-label">\n                        {props.assistantName} · Agent Handoff\n                      </div>\n                    )}\n
+                    <div\n                      className={`message-surface ${\n                        message.role === "user"\n                          ? "message-surface-user"\n                          : "message-surface-assistant"\n                      }`}\n                    >\n                    {message.attachments &&
+                      message.attachments.length > 0 && (
+                        <div className="message-attachments">
+                          {message.attachments.map((attachment) => (
+                            <MessageAttachment
+                              key={attachment.id}
+                              attachment={attachment}
+                            />
+                          ))}
+                        </div>
+                      )}
 
-                    <div
-                      className={`message-surface ${
-                        message.role === "user"
-                          ? "message-surface-user"
-                          : "message-surface-assistant"
-                      }`}
-                    >
-                      {message.attachments &&
-                        message.attachments.length > 0 && (
-                          <div className="message-attachments">
-                            {message.attachments.map((attachment) => (
-                              <MessageAttachment
-                                key={attachment.id}
-                                attachment={attachment}
-                              />
-                            ))}
-                          </div>
-                        )}
-
-                      <ChatRichContent
-                        messageId={String(message.id)}
-                        content={
-                          message.content ||
-                          (message.stopped ? "Generation stopped." : "")
-                        }
-                        streaming={Boolean(message.isStreaming)}
-                      />
-                    </div>
-
+                      <ChatRichContent\n                        messageId={String(message.id)}\n                        content={\n                          message.content ||\n                          (message.stopped ? "Generation stopped." : "")\n                        }\n                        streaming={Boolean(message.isStreaming)}\n                      />\n                    </div>\n
                     {message.stopped && (
                       <div className="generation-stats">
                         <span className="stopped">■ Stopped</span>
@@ -611,20 +587,24 @@ export function ChatView(props: ChatViewProps) {
                             {message.stats.tokensPerSecond.toFixed(1)} tok/s
                           </span>
                         )}
+
                         {message.stats.timeToFirstTokenMs != null && (
                           <span>
                             First token{" "}
                             {formatDuration(message.stats.timeToFirstTokenMs)}
                           </span>
                         )}
+
                         {message.stats.evalCount != null && (
                           <span>{message.stats.evalCount} output tokens</span>
                         )}
+
                         {message.stats.promptEvalCount != null && (
                           <span>
                             {message.stats.promptEvalCount} prompt tokens
                           </span>
                         )}
+
                         {message.stats.totalDurationMs != null && (
                           <span>
                             Model{" "}
@@ -639,6 +619,7 @@ export function ChatView(props: ChatViewProps) {
             </div>
           )}
         </div>
+
         {showScrollToBottom && (
           <button
             type="button"

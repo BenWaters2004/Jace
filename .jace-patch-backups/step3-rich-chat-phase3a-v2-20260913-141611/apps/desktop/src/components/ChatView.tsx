@@ -28,7 +28,6 @@ import {
   AGENT_TERMINAL_BROWSER_EVENT,
 } from "../agents/useAgentOffice";
 import "./ChatView.css";
-import { ChatRichContent } from "./ChatRichContent";
 
 interface ChatViewProps {
   title: string;
@@ -69,6 +68,10 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function initial(value: string, fallback: string) {
+  return value.trim().charAt(0).toUpperCase() || fallback;
 }
 
 function toolStatusText(status: ToolActivity["status"]) {
@@ -182,10 +185,6 @@ function persistedAgentMessages(
     }));
 }
 
-// JACE_STEP3_RICH_CHAT_PHASE3A_V2
-// JACE_STEP3_PHASE3A_TRANSCRIPT_REBUILD_V3
-// JACE_STEP3_PHASE3A_GENERATED_JSX_REPAIR
-// JACE_STEP3_RICH_CHAT_PHASE3A_V2_SYNTAX_FIX
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -562,40 +561,36 @@ export function ChatView(props: ChatViewProps) {
                       : ""
                   }`}
                 >
+                  <div className="message-avatar">
+                    {message.role === "user"
+                      ? initial(props.userName, "U")
+                      : initial(props.assistantName, "J")}
+                  </div>
+
                   <div className="message-body">
-                    {message.model?.startsWith("agent:") && (
-                      <div className="message-inline-label">
-                        {props.assistantName} · Agent Handoff
-                      </div>
-                    )}
+                    <div className="message-author">
+                      {message.role === "user"
+                        ? props.userName
+                        : message.model?.startsWith("agent:")
+                          ? `${props.assistantName} · Agent Handoff`
+                          : props.assistantName}
+                    </div>
 
-                    <div
-                      className={`message-surface ${
-                        message.role === "user"
-                          ? "message-surface-user"
-                          : "message-surface-assistant"
-                      }`}
-                    >
-                      {message.attachments &&
-                        message.attachments.length > 0 && (
-                          <div className="message-attachments">
-                            {message.attachments.map((attachment) => (
-                              <MessageAttachment
-                                key={attachment.id}
-                                attachment={attachment}
-                              />
-                            ))}
-                          </div>
-                        )}
+                    {message.attachments &&
+                      message.attachments.length > 0 && (
+                        <div className="message-attachments">
+                          {message.attachments.map((attachment) => (
+                            <MessageAttachment
+                              key={attachment.id}
+                              attachment={attachment}
+                            />
+                          ))}
+                        </div>
+                      )}
 
-                      <ChatRichContent
-                        messageId={String(message.id)}
-                        content={
-                          message.content ||
-                          (message.stopped ? "Generation stopped." : "")
-                        }
-                        streaming={Boolean(message.isStreaming)}
-                      />
+                    <div className="message-content">
+                      {message.content ||
+                        (message.stopped ? "Generation stopped." : "")}
                     </div>
 
                     {message.stopped && (
@@ -611,20 +606,24 @@ export function ChatView(props: ChatViewProps) {
                             {message.stats.tokensPerSecond.toFixed(1)} tok/s
                           </span>
                         )}
+
                         {message.stats.timeToFirstTokenMs != null && (
                           <span>
                             First token{" "}
                             {formatDuration(message.stats.timeToFirstTokenMs)}
                           </span>
                         )}
+
                         {message.stats.evalCount != null && (
                           <span>{message.stats.evalCount} output tokens</span>
                         )}
+
                         {message.stats.promptEvalCount != null && (
                           <span>
                             {message.stats.promptEvalCount} prompt tokens
                           </span>
                         )}
+
                         {message.stats.totalDurationMs != null && (
                           <span>
                             Model{" "}
@@ -639,6 +638,7 @@ export function ChatView(props: ChatViewProps) {
             </div>
           )}
         </div>
+
         {showScrollToBottom && (
           <button
             type="button"

@@ -183,8 +183,6 @@ function persistedAgentMessages(
 }
 
 // JACE_STEP3_RICH_CHAT_PHASE3A_V2
-// JACE_STEP3_PHASE3A_TRANSCRIPT_REBUILD_V3
-// JACE_STEP3_PHASE3A_GENERATED_JSX_REPAIR
 // JACE_STEP3_RICH_CHAT_PHASE3A_V2_SYNTAX_FIX
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -568,7 +566,6 @@ export function ChatView(props: ChatViewProps) {
                         {props.assistantName} · Agent Handoff
                       </div>
                     )}
-
                     <div
                       className={`message-surface ${
                         message.role === "user"
@@ -576,7 +573,7 @@ export function ChatView(props: ChatViewProps) {
                           : "message-surface-assistant"
                       }`}
                     >
-                      {message.attachments &&
+                      <div\n                      className={`message-surface ${\n                        message.role === "user"\n                          ? "message-surface-user"\n                          : "message-surface-assistant"\n                      }`}\n                    >\n                    {message.attachments &&
                         message.attachments.length > 0 && (
                           <div className="message-attachments">
                             {message.attachments.map((attachment) => (
@@ -587,7 +584,6 @@ export function ChatView(props: ChatViewProps) {
                             ))}
                           </div>
                         )}
-
                       <ChatRichContent
                         messageId={String(message.id)}
                         content={
@@ -611,20 +607,24 @@ export function ChatView(props: ChatViewProps) {
                             {message.stats.tokensPerSecond.toFixed(1)} tok/s
                           </span>
                         )}
+
                         {message.stats.timeToFirstTokenMs != null && (
                           <span>
                             First token{" "}
                             {formatDuration(message.stats.timeToFirstTokenMs)}
                           </span>
                         )}
+
                         {message.stats.evalCount != null && (
                           <span>{message.stats.evalCount} output tokens</span>
                         )}
+
                         {message.stats.promptEvalCount != null && (
                           <span>
                             {message.stats.promptEvalCount} prompt tokens
                           </span>
                         )}
+
                         {message.stats.totalDurationMs != null && (
                           <span>
                             Model{" "}
@@ -639,6 +639,7 @@ export function ChatView(props: ChatViewProps) {
             </div>
           )}
         </div>
+
         {showScrollToBottom && (
           <button
             type="button"
