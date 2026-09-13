@@ -15,7 +15,6 @@ import type {
   VoiceStatus,
 } from "../types";
 
-import { DesktopWindowModeSettings } from "./DesktopWindowModeSettings";
 interface SettingsViewProps {
   settings: AssistantSettings;
   voiceSettings: VoiceSettings;
@@ -434,8 +433,6 @@ function SettingsViewContent(props: SettingsViewProps) {
       )}
 
       <div className="settings-grid">
-        {/* JACE_DESKTOP_WINDOWS_PHASE_2C */}
-        <DesktopWindowModeSettings />
         <section className="settings-card">
           <div className="settings-card-heading">
             <div>
