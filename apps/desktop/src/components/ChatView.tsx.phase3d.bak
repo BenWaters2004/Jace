@@ -27,7 +27,6 @@ import type { AgentTask } from "../agents/types";
 import {
   AGENT_TERMINAL_BROWSER_EVENT,
 } from "../agents/useAgentOffice";
-import { MessageFrame } from "./MessageFrame";
 import "./ChatView.css";
 import { RichAttachmentPreview } from "./RichAttachmentPreview";
 import { ToolActivityPanel } from "./ToolActivityPanel";
@@ -525,17 +524,12 @@ export function ChatView(props: ChatViewProps) {
                       </div>
                     )}
 
-                    <MessageFrame
-                      role={message.role === "user" ? "user" : "assistant"}
-                      content={
-                        message.content ||
-                        (message.stopped ? "Generation stopped." : "")
-                      }
-                      createdAt={message.created_at}
-                      model={message.model}
-                      streaming={Boolean(message.isStreaming)}
-                      stopped={Boolean(message.stopped)}
-                      agentHandoff={Boolean(message.model?.startsWith("agent:"))}
+                    <div
+                      className={`message-surface ${
+                        message.role === "user"
+                          ? "message-surface-user"
+                          : "message-surface-assistant"
+                      }`}
                     >
                       {message.attachments &&
                         message.attachments.length > 0 && (
@@ -557,7 +551,13 @@ export function ChatView(props: ChatViewProps) {
                         }
                         streaming={Boolean(message.isStreaming)}
                       />
-                    </MessageFrame>
+                    </div>
+
+                    {message.stopped && (
+                      <div className="generation-stats">
+                        <span className="stopped">■ Stopped</span>
+                      </div>
+                    )}
 
                     {message.stats && (
                       <div className="generation-stats">
