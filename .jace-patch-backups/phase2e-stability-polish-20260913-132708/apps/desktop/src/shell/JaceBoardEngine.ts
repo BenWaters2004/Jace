@@ -260,7 +260,20 @@ export class JaceBoardEngine {
 
   refreshTheme() {
     refreshBoardThemePalette();
-    this.rebuildGlowSprites();
+    this.glowSprites.clear();
+
+    [GREEN, AMBER, RED, ...SPEAK_COLS].forEach(
+      (hx) => this.glowSprites.set(
+        hx,
+        this.makeGlow(hx, 64),
+      ),
+    );
+
+    this.glowSprites.set(
+      "white",
+      this.makeGlow("rgb(220,255,235)", 64),
+    );
+
     this.renderBG();
   }
 
@@ -293,31 +306,6 @@ export class JaceBoardEngine {
     g.fillStyle = grd;
     g.fillRect(0, 0, size, size);
     return c;
-  }
-
-  private rebuildGlowSprites() {
-    this.glowSprites.clear();
-
-    const colours = new Set<string>([
-      GREEN,
-      AMBER,
-      RED,
-      LISTEN_COOL,
-      ...LISTEN_COLS,
-      ...SPEAK_COLS,
-    ]);
-
-    colours.forEach((colour) => {
-      this.glowSprites.set(
-        colour,
-        this.makeGlow(colour, 64),
-      );
-    });
-
-    this.glowSprites.set(
-      "white",
-      this.makeGlow("rgb(220,255,235)", 64),
-    );
   }
 
   private route(sx: number, sy: number, dir: number, maxLen?: number): Trace | null {
@@ -524,7 +512,9 @@ export class JaceBoardEngine {
       t.bb = [x0 - 8, y0 - 8, x1 + 8, y1 + 8];
     });
 
-    this.rebuildGlowSprites();
+    this.glowSprites.clear();
+    [GREEN, AMBER, RED, ...SPEAK_COLS].forEach((hx) => this.glowSprites.set(hx, this.makeGlow(hx, 64)));
+    this.glowSprites.set("white", this.makeGlow("rgb(220,255,235)", 64));
     this.renderBG();
   }
 
@@ -569,8 +559,8 @@ export class JaceBoardEngine {
 
     this.deco.zones.forEach((z) => {
       if (!hit(z.x, z.y, z.x + z.w, z.y + z.h)) return;
-      g.fillStyle = rgba(GREEN, 0.03);
-      g.strokeStyle = rgba(GREEN, 0.06);
+      g.fillStyle = "rgba(61,220,132,.03)";
+      g.strokeStyle = "rgba(61,220,132,.06)";
       g.lineWidth = 1;
       g.beginPath(); g.roundRect(z.x, z.y, z.w, z.h, 12); g.fill(); g.stroke();
     });
@@ -579,11 +569,11 @@ export class JaceBoardEngine {
     this.deco.labels.forEach((label) => {
       if (!hit(label.x - 80, label.y - 80, label.x + 80, label.y + 80)) return;
       g.save(); g.translate(label.x, label.y); if (label.rot) g.rotate(-Math.PI / 2);
-      g.fillStyle = rgba(GREEN_HOT, 0.10);
+      g.fillStyle = "rgba(120,220,170,.10)";
       g.fillText(label.t, 0, 0); g.restore();
     });
 
-    g.strokeStyle = rgba(GREEN_HOT, 0.08);
+    g.strokeStyle = "rgba(120,220,170,.08)";
     g.lineWidth = 1;
     this.deco.crosses.forEach((cross) => {
       const s = this.cell * 0.6;
@@ -603,14 +593,14 @@ export class JaceBoardEngine {
         for (let i = 1; i < t.pts.length; i++) g.lineTo(t.pts[i][0], t.pts[i][1]);
       };
       g.save(); g.translate(1.1, 1.4); path(); g.strokeStyle = "rgba(0,0,0,.30)"; g.lineWidth = traceW + 0.6; g.stroke(); g.restore();
-      path(); g.strokeStyle = t.amber ? rgba(AMBER, 0.15) : rgba(GREEN, 0.17); g.lineWidth = traceW; g.stroke();
-      g.save(); g.translate(-0.7, -0.9); path(); g.strokeStyle = t.amber ? rgba(AMBER_HOT, 0.05) : rgba(GREEN_HOT, 0.055); g.lineWidth = Math.max(1, traceW * 0.45); g.stroke(); g.restore();
+      path(); g.strokeStyle = t.amber ? "rgba(231,195,104,.15)" : "rgba(61,220,132,.17)"; g.lineWidth = traceW; g.stroke();
+      g.save(); g.translate(-0.7, -0.9); path(); g.strokeStyle = t.amber ? "rgba(255,236,180,.05)" : "rgba(190,255,220,.055)"; g.lineWidth = Math.max(1, traceW * 0.45); g.stroke(); g.restore();
 
       [t.pts[0], t.pts[t.pts.length - 1]].forEach((p) => {
         const vr = Math.max(2.6, this.cell * 0.14);
         g.beginPath(); g.arc(p[0] + 0.8, p[1] + 1, vr, 0, Math.PI * 2); g.strokeStyle = "rgba(0,0,0,.32)"; g.lineWidth = 1.6; g.stroke();
-        g.beginPath(); g.arc(p[0], p[1], vr, 0, Math.PI * 2); g.strokeStyle = rgba(GREEN_HOT, 0.22); g.lineWidth = 1.4; g.stroke();
-        g.beginPath(); g.arc(p[0], p[1], vr, Math.PI * 0.75, Math.PI * 1.45); g.strokeStyle = rgba(GREEN_HOT, 0.30); g.lineWidth = 1.1; g.stroke();
+        g.beginPath(); g.arc(p[0], p[1], vr, 0, Math.PI * 2); g.strokeStyle = "rgba(120,220,170,.22)"; g.lineWidth = 1.4; g.stroke();
+        g.beginPath(); g.arc(p[0], p[1], vr, Math.PI * 0.75, Math.PI * 1.45); g.strokeStyle = "rgba(210,255,230,.30)"; g.lineWidth = 1.1; g.stroke();
         g.fillStyle = "rgba(1,4,3,.95)"; g.beginPath(); g.arc(p[0], p[1], Math.max(1.2, this.cell * 0.06), 0, Math.PI * 2); g.fill();
       });
     });
@@ -635,10 +625,10 @@ export class JaceBoardEngine {
       for (let i = 0; i < np; i++) {
         const px = c.x + this.cell * 0.5 + (c.w - this.cell) * (i / Math.max(1, np - 1));
         let pg = g.createLinearGradient(0, c.y, 0, c.y + this.cell * 0.3);
-        pg.addColorStop(0, rgba(GREEN_HOT, 0.32)); pg.addColorStop(1, rgba(GREEN, 0.12));
+        pg.addColorStop(0, "rgba(200,235,215,.32)"); pg.addColorStop(1, "rgba(70,110,90,.20)");
         g.fillStyle = pg; g.fillRect(px - 1.5, c.y + this.cell * 0.02, 3, this.cell * 0.26);
         pg = g.createLinearGradient(0, c.y + c.h - this.cell * 0.28, 0, c.y + c.h);
-        pg.addColorStop(0, rgba(GREEN, 0.12)); pg.addColorStop(1, rgba(GREEN_HOT, 0.24));
+        pg.addColorStop(0, "rgba(70,110,90,.20)"); pg.addColorStop(1, "rgba(150,200,175,.24)");
         g.fillStyle = pg; g.fillRect(px - 1.5, c.y + c.h - this.cell * 0.28, 3, this.cell * 0.26);
       }
       g.save(); g.shadowColor = "rgba(0,0,0,.55)"; g.shadowBlur = shb * sf; g.shadowOffsetX = shx * sf; g.shadowOffsetY = shy * sf;
@@ -646,9 +636,9 @@ export class JaceBoardEngine {
       const bg = g.createLinearGradient(bx, by, bx + bw, by + bh);
       bg.addColorStop(0, "rgba(14,26,19,.94)"); bg.addColorStop(0.45, "rgba(5,12,8,.94)"); bg.addColorStop(1, "rgba(2,6,4,.94)");
       g.fillStyle = bg; g.beginPath(); g.roundRect(bx, by, bw, bh, 3); g.fill();
-      g.strokeStyle = rgba(GREEN_HOT, 0.18); g.lineWidth = 1.2; g.beginPath(); g.moveTo(bx + 2, by + bh - 2); g.lineTo(bx + 2, by + 2); g.lineTo(bx + bw - 2, by + 2); g.stroke();
+      g.strokeStyle = "rgba(190,255,220,.18)"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(bx + 2, by + bh - 2); g.lineTo(bx + 2, by + 2); g.lineTo(bx + bw - 2, by + 2); g.stroke();
       g.strokeStyle = rgba(col, 0.24); g.lineWidth = 1; g.beginPath(); g.roundRect(bx, by, bw, bh, 3); g.stroke();
-      g.fillStyle = rgba(GREEN_HOT, 0.14); g.beginPath(); g.arc(c.x + this.cell * 0.62, c.y + this.cell * 0.62, this.cell * 0.09, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "rgba(120,220,170,.14)"; g.beginPath(); g.arc(c.x + this.cell * 0.62, c.y + this.cell * 0.62, this.cell * 0.09, 0, Math.PI * 2); g.fill();
       return;
     }
 
@@ -661,7 +651,7 @@ export class JaceBoardEngine {
         g.save(); g.shadowColor = "rgba(0,0,0,.35)"; g.shadowBlur = 5 * sf; g.shadowOffsetX = 2 * sf; g.shadowOffsetY = 3 * sf;
         g.fillStyle = "#06100a"; g.beginPath(); g.roundRect(rx, ry, rw, rh, 2); g.fill(); g.restore();
         const rg = g.createLinearGradient(rx, ry, rx + rw, ry + rh);
-        rg.addColorStop(0, rgba(GREEN, 0.16)); rg.addColorStop(0.5, "rgba(8,17,11,.96)"); rg.addColorStop(1, "rgba(2,6,4,.97)");
+        rg.addColorStop(0, "rgba(36,61,45,.95)"); rg.addColorStop(0.5, "rgba(8,17,11,.96)"); rg.addColorStop(1, "rgba(2,6,4,.97)");
         g.fillStyle = rg; g.beginPath(); g.roundRect(rx, ry, rw, rh, 2); g.fill();
         g.strokeStyle = rgba(col, 0.22); g.lineWidth = 1; g.beginPath(); g.roundRect(rx, ry, rw, rh, 2); g.stroke();
       }
@@ -674,11 +664,11 @@ export class JaceBoardEngine {
     g.save(); g.shadowColor = "rgba(0,0,0,.5)"; g.shadowBlur = shb * sf; g.shadowOffsetX = shx * sf; g.shadowOffsetY = shy * sf;
     g.fillStyle = "#040a06"; g.beginPath(); g.arc(cx, cy, cr, 0, Math.PI * 2); g.fill(); g.restore();
     const dg = g.createRadialGradient(cx - cr * 0.4, cy - cr * 0.45, cr * 0.1, cx, cy, cr);
-    dg.addColorStop(0, rgba(GREEN, 0.18)); dg.addColorStop(0.45, "rgba(14,28,19,.95)"); dg.addColorStop(1, "rgba(2,6,4,.95)");
+    dg.addColorStop(0, "rgba(58,96,73,.95)"); dg.addColorStop(0.45, "rgba(14,28,19,.95)"); dg.addColorStop(1, "rgba(2,6,4,.95)");
     g.fillStyle = dg; g.beginPath(); g.arc(cx, cy, cr, 0, Math.PI * 2); g.fill();
     g.strokeStyle = rgba(col, 0.26); g.lineWidth = 1.4; g.beginPath(); g.arc(cx, cy, cr, 0, Math.PI * 2); g.stroke();
-    g.fillStyle = rgba(GREEN_HOT, 0.32); g.beginPath(); g.arc(cx - cr * 0.38, cy - cr * 0.42, Math.max(1, cr * 0.14), 0, Math.PI * 2); g.fill();
-    g.strokeStyle = rgba(GREEN_HOT, 0.18); g.lineWidth = 1.2; g.beginPath(); g.moveTo(cx, cy - cr * 0.5); g.lineTo(cx, cy + cr * 0.5); g.stroke();
+    g.fillStyle = "rgba(220,255,235,.32)"; g.beginPath(); g.arc(cx - cr * 0.38, cy - cr * 0.42, Math.max(1, cr * 0.14), 0, Math.PI * 2); g.fill();
+    g.strokeStyle = "rgba(190,255,220,.18)"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(cx, cy - cr * 0.5); g.lineTo(cx, cy + cr * 0.5); g.stroke();
   }
 
   private drawChipBase(g: CanvasRenderingContext2D) {
@@ -687,14 +677,14 @@ export class JaceBoardEngine {
     for (let i = 0; i < npx; i++) {
       const px = x + w * 0.08 + w * 0.84 * (i / (npx - 1));
       let pg = g.createLinearGradient(0, y - this.cell * 0.34, 0, y);
-      pg.addColorStop(0, rgba(GREEN_HOT, 0.40)); pg.addColorStop(1, rgba(GREEN, 0.16));
+      pg.addColorStop(0, "rgba(210,240,220,.40)"); pg.addColorStop(1, "rgba(90,130,108,.28)");
       g.fillStyle = pg; g.fillRect(px - 2, y - this.cell * 0.34, 4, this.cell * 0.30);
       pg = g.createLinearGradient(0, y + h, 0, y + h + this.cell * 0.34);
-      pg.addColorStop(0, rgba(GREEN, 0.16)); pg.addColorStop(1, rgba(GREEN_HOT, 0.34));
+      pg.addColorStop(0, "rgba(90,130,108,.28)"); pg.addColorStop(1, "rgba(170,210,190,.34)");
       g.fillStyle = pg; g.fillRect(px - 2, y + h + this.cell * 0.04, 4, this.cell * 0.30);
     }
     const npy = 5;
-    g.fillStyle = rgba(GREEN_HOT, 0.32);
+    g.fillStyle = "rgba(185,220,200,.32)";
     for (let i = 0; i < npy; i++) {
       const py = y + h * 0.14 + h * 0.72 * (i / (npy - 1));
       g.fillRect(x - this.cell * 0.34, py - 2, this.cell * 0.30, 4);
@@ -708,8 +698,8 @@ export class JaceBoardEngine {
     g.strokeStyle = "rgba(150,235,185,.28)"; g.lineWidth = 1.6; g.beginPath(); g.moveTo(x + 3, y + h - 4); g.lineTo(x + 3, y + 3); g.lineTo(x + w - 4, y + 3); g.stroke();
     g.strokeStyle = "rgba(0,0,0,.6)"; g.lineWidth = 2.2; g.beginPath(); g.moveTo(x + w - 2, y + 4); g.lineTo(x + w - 2, y + h - 2); g.lineTo(x + 4, y + h - 2); g.stroke();
     g.strokeStyle = "#1e3a2b"; g.lineWidth = 2; g.beginPath(); g.roundRect(x, y, w, h, 6); g.stroke();
-    g.strokeStyle = rgba(GREEN, 0.20); g.lineWidth = 1; g.beginPath(); g.roundRect(x + 5, y + 5, w - 10, h - 10, 4); g.stroke();
-    g.fillStyle = rgba(GREEN, 0.40); g.beginPath(); g.arc(x + 14, y + 14, 4, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = "rgba(61,220,132,.20)"; g.lineWidth = 1; g.beginPath(); g.roundRect(x + 5, y + 5, w - 10, h - 10, 4); g.stroke();
+    g.fillStyle = "rgba(61,220,132,.4)"; g.beginPath(); g.arc(x + 14, y + 14, 4, 0, Math.PI * 2); g.fill();
   }
 
   private revGeo(t: Trace): TraceGeometry {
@@ -772,18 +762,9 @@ export class JaceBoardEngine {
     ctx.save();
     ctx.translate(ccx, ccy); ctx.scale(scale, scale); ctx.translate(-ccx, -ccy);
     const breathe = 0.5 + 0.5 * Math.sin(this.now / 1100);
-    const fallbackGlow =
-      this.glowSprites.get(GREEN) ??
-      this.makeGlow(GREEN, 64);
-    const cool =
-      this.glowSprites.get(LISTEN_COOL) ??
-      fallbackGlow;
-    const amber =
-      this.glowSprites.get(AMBER) ??
-      fallbackGlow;
-    const alertGlow =
-      this.glowSprites.get(RED) ??
-      fallbackGlow;
+    const cool = this.glowSprites.get(LISTEN_COOL)!;
+    const amber = this.glowSprites.get(AMBER)!;
+    const alertGlow = this.glowSprites.get(RED)!;
 
     const cg = Math.min(1, 0.22 + 0.55 * E + 0.14 * breathe + 0.3 * talk + 0.3 * this.chip.glowIn);
     const s = w * (1.7 + 0.6 * E + 0.45 * talk + 0.2 * this.chip.glowIn);
@@ -879,7 +860,7 @@ export class JaceBoardEngine {
       ctx.save(); ctx.beginPath(); ctx.roundRect(x + 5, y + 5, w - 10, h - 10, 4); ctx.clip();
       const bx = x + ((this.now / 900) % 2) * w - w * 0.5;
       const band = ctx.createLinearGradient(bx, 0, bx + w * 0.4, 0);
-      band.addColorStop(0, rgba(GREEN, 0)); band.addColorStop(0.5, rgba(GREEN, 0.10 * (E - 0.45) / 0.55)); band.addColorStop(1, rgba(GREEN, 0));
+      band.addColorStop(0, "rgba(61,220,132,0)"); band.addColorStop(0.5, `rgba(61,220,132,${0.10 * (E - 0.45) / 0.55})`); band.addColorStop(1, "rgba(61,220,132,0)");
       ctx.fillStyle = band; ctx.fillRect(x, y, w, h); ctx.restore();
     }
 
@@ -1049,14 +1030,14 @@ export class JaceBoardEngine {
 
     const sweep = (this.now / 26000) % 1.3 - 0.15;
     const sheen = ctx.createLinearGradient(this.W * (sweep - 0.22), this.H * 0.1, this.W * (sweep + 0.22), this.H * 0.9);
-    sheen.addColorStop(0, rgba(GREEN_HOT, 0)); sheen.addColorStop(0.5, rgba(GREEN_HOT, 0.045)); sheen.addColorStop(1, rgba(GREEN_HOT, 0));
+    sheen.addColorStop(0, "rgba(180,255,215,0)"); sheen.addColorStop(0.5, "rgba(180,255,215,.045)"); sheen.addColorStop(1, "rgba(180,255,215,0)");
     ctx.fillStyle = sheen; ctx.fillRect(0, 0, this.W, this.H);
 
     this.drawGrain();
     if (this.cineFade < 0.4) {
       const chx = this.W * 0.80 + Math.sin(this.now / 5000) * 12;
       const chy = this.H * 0.30 + Math.cos(this.now / 4200) * 16;
-      ctx.strokeStyle = rgba(GREEN_HOT, 0.5 * (1 - this.cineFade / 0.4)); ctx.lineWidth = 1;
+      ctx.strokeStyle = `rgba(220,245,230,${0.5 * (1 - this.cineFade / 0.4)})`; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(chx - 7, chy); ctx.lineTo(chx + 7, chy); ctx.moveTo(chx, chy - 7); ctx.lineTo(chx, chy + 7); ctx.stroke();
     }
   }

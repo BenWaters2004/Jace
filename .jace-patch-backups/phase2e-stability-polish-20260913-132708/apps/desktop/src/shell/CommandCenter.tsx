@@ -68,7 +68,6 @@ export function CommandCenter(props: {
   // JACE_DESKTOP_WINDOWS_PHASE_2A
   // JACE_DESKTOP_WINDOWS_PHASE_2B
   // JACE_SETTINGS_FULLPAGE_V2
-  // JACE_PHASE2E_STABILITY_POLISH
   const panels = usePanelManager();
   // JACE_DESKTOP_WINDOWS_PHASE_2C
   const desktopWindow = useDesktopWindowMode();
@@ -118,6 +117,13 @@ export function CommandCenter(props: {
           </div>
         </div>
 
+        <div className="command-statuses">
+          <span className={`status-chip ${props.online ? "online" : "offline"}`}>
+            ● {props.online ? "LOCAL" : "OFFLINE"}
+          </span>
+          <span className="status-chip">{props.model || "No model"}</span>
+          <span className="status-chip private">◆ PRIVATE</span>
+        </div>
 
         {desktopWindow.isFrameless && (
           <div
