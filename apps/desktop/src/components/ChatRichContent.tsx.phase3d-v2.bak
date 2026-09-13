@@ -377,16 +377,7 @@ function CopyTextButton({
       aria-label={copied ? "Copied" : label}
       title={copied ? "Copied" : label}
     >
-      {copied ? (
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path d="M4.5 10.4 8.1 14l7.4-8" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="7" y="7" width="9" height="9" rx="2" />
-          <path d="M13 7V5.5A1.5 1.5 0 0 0 11.5 4h-7A1.5 1.5 0 0 0 3 5.5v7A1.5 1.5 0 0 0 4.5 14H7" />
-        </svg>
-      )}
+      {copied ? "Copied" : label}
     </button>
   );
 }

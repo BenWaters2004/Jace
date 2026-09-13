@@ -12,7 +12,6 @@ import type {
   FormEvent,
   KeyboardEvent,
   UIEvent,
-  ClipboardEvent,
 } from "react";
 import { attachmentContentUrl, getConversation } from "../api";
 import type {
@@ -139,11 +138,8 @@ function persistedAgentMessages(
 // JACE_STEP3_PHASE3A_TRANSCRIPT_REBUILD_V3
 // JACE_STEP3_PHASE3A_GENERATED_JSX_REPAIR
 // JACE_STEP3_RICH_CHAT_PHASE3A_V2_SYNTAX_FIX
-// JACE_STEP3_RICH_CHAT_PHASE3E
 export function ChatView(props: ChatViewProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const composerDragDepthRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   /*
@@ -154,7 +150,6 @@ export function ChatView(props: ChatViewProps) {
   const conversationKeyRef = useRef<string | null>(null);
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [composerDragActive, setComposerDragActive] = useState(false);
   const [liveAgentHandoffs, setLiveAgentHandoffs] = useState<ChatMessage[]>([]);
   const [persistedHandoffs, setPersistedHandoffs] = useState<ChatMessage[]>([]);
 
@@ -282,85 +277,26 @@ export function ChatView(props: ChatViewProps) {
     return output;
   }, [liveAgentHandoffs, persistedHandoffs, props.messages]);
 
-  function resizeComposerTextarea() {
-    const textarea = composerTextareaRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = "auto";
-    const nextHeight = Math.min(textarea.scrollHeight, 180);
-    textarea.style.height = `${Math.max(nextHeight, 40)}px`;
-    textarea.style.overflowY = textarea.scrollHeight > 180 ? "auto" : "hidden";
-  }
-
-  function addComposerFiles(files: File[]) {
-    if (!props.online || props.isGenerating || files.length === 0) return;
-
-    const remaining = Math.max(
-      0,
-      props.attachmentLimit - props.pendingAttachments.length,
-    );
-    if (remaining === 0) return;
-
-    props.onFilesAdded(files.slice(0, remaining));
-  }
-
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing
-    ) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (canSend) props.onSubmit();
+      props.onSubmit();
     }
   }
 
   function selectedFiles(event: ChangeEvent<HTMLInputElement>) {
-    addComposerFiles(Array.from(event.target.files ?? []));
+    const files = Array.from(event.target.files ?? []);
+    if (files.length) props.onFilesAdded(files);
     event.target.value = "";
-  }
-
-  function pasteFiles(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = Array.from(event.clipboardData.files ?? []);
-    if (files.length === 0) return;
-
-    event.preventDefault();
-    addComposerFiles(files);
-  }
-
-  function dragEnterFiles(event: DragEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-    if (!props.online || props.isGenerating) return;
-
-    composerDragDepthRef.current += 1;
-    setComposerDragActive(true);
-  }
-
-  function dragOverFiles(event: DragEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-    event.dataTransfer.dropEffect = "copy";
-  }
-
-  function dragLeaveFiles(event: DragEvent<HTMLFormElement>) {
-    event.preventDefault();
-    composerDragDepthRef.current = Math.max(0, composerDragDepthRef.current - 1);
-    if (composerDragDepthRef.current === 0) {
-      setComposerDragActive(false);
-    }
   }
 
   function dropFiles(event: DragEvent<HTMLFormElement>) {
     event.preventDefault();
-    composerDragDepthRef.current = 0;
-    setComposerDragActive(false);
-    addComposerFiles(Array.from(event.dataTransfer.files ?? []));
-  }
+    if (props.isGenerating || !props.online) return;
 
-  useLayoutEffect(() => {
-    resizeComposerTextarea();
-  }, [props.input]);
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length) props.onFilesAdded(files);
+  }
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const element = scrollRef.current;
@@ -649,18 +585,9 @@ export function ChatView(props: ChatViewProps) {
         <form
           className="composer multimodal-composer"
           onSubmit={props.onSubmit}
-          onDragEnter={dragEnterFiles}
-          onDragOver={dragOverFiles}
-          onDragLeave={dragLeaveFiles}
+          onDragOver={(event) => event.preventDefault()}
           onDrop={dropFiles}
-          data-drag-active={composerDragActive ? "true" : undefined}
         >
-          {composerDragActive && (
-            <div className="composer-drop-overlay" aria-hidden="true">
-              <span>+</span>
-              <strong>Drop files to attach</strong>
-            </div>
-          )}
           <input
             ref={fileInputRef}
             className="attachment-input"
@@ -677,20 +604,10 @@ export function ChatView(props: ChatViewProps) {
 
           <button
             type="button"
-            className="attach-button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={
-              !props.online ||
-              props.isGenerating ||
-              props.pendingAttachments.length >= props.attachmentLimit
-            }
-            title="Attach image, PDF, document or audio"
-          ><span className="composer-plus-glyph" aria-hidden="true">+</span></button>
+            className="attach-button composer-attachment-trigger"
+            onClick={() =><span className="composer-plus-glyph" aria-hidden="true">+</span></button>
 
           <textarea
-            ref={composerTextareaRef}
-            onPaste={pasteFiles}
-            aria-label={`Message ${props.assistantName}`}
             value={props.input}
             onChange={(event) => props.onInputChange(event.target.value)}
             onKeyDown={keyDown}
@@ -720,7 +637,7 @@ export function ChatView(props: ChatViewProps) {
                       >
                         <span />
                       </button>
-                    ) : (props.input.trim() || props.pendingAttachments.length > 0) ? (
+                    ) : props.input.trim() ? (
                       <button
                         className="send-button composer-round-action"
                         type="submit"
@@ -809,13 +726,8 @@ export function ChatView(props: ChatViewProps) {
         </form>
 
         <div className="composer-hint">
-          <span>Enter to send · Shift + Enter for a new line</span>
-          <span className="composer-hint-files">
-            {props.pendingAttachments.length > 0
-              ? `${props.pendingAttachments.length}/${props.attachmentLimit} attached · `
-              : ""}
-            Paste or drop files
-          </span>
+          Enter to send · Shift + Enter for a new line · Drag files here · Up
+          to {props.attachmentLimit} attachments
         </div>
       </div>
     </section>

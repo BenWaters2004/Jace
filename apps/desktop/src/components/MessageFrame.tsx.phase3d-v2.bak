@@ -77,23 +77,6 @@ function modelLabel(model?: string | null, agentHandoff?: boolean) {
   return trimmed.length > 42 ? `${trimmed.slice(0, 39)}…` : trimmed;
 }
 
-function CopyIcon({ copied }: { copied: boolean }) {
-  if (copied) {
-    return (
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M4.5 10.4 8.1 14l7.4-8" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <rect x="7" y="7" width="9" height="9" rx="2" />
-      <path d="M13 7V5.5A1.5 1.5 0 0 0 11.5 4h-7A1.5 1.5 0 0 0 3 5.5v7A1.5 1.5 0 0 0 4.5 14H7" />
-    </svg>
-  );
-}
-
 export function MessageFrame(props: MessageFrameProps) {
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -136,28 +119,14 @@ export function MessageFrame(props: MessageFrameProps) {
 
       {(timestamp || displayModel || props.stopped || canCollapse || hasActions) && (
         <div className="message-action-bar">
-          <div className="message-action-leading">
-            {hasActions && (
-              <button
-                type="button"
-                className="message-copy-control"
-                onClick={handleCopy}
-                title={copied ? "Copied" : "Copy message"}
-                aria-label={copied ? "Message copied" : "Copy message"}
-              >
-                <CopyIcon copied={copied} />
-              </button>
-            )}
-
-            <div className="message-action-meta">
-              {timestamp && <span>{timestamp}</span>}
-              {displayModel && <span title={props.model ?? undefined}>{displayModel}</span>}
-              {props.stopped && <span className="message-action-stopped">Stopped</span>}
-            </div>
+          <div className="message-action-meta">
+            {timestamp && <span>{timestamp}</span>}
+            {displayModel && <span title={props.model ?? undefined}>{displayModel}</span>}
+            {props.stopped && <span className="message-action-stopped">Stopped</span>}
           </div>
 
-          {canCollapse && (
-            <div className="message-action-secondary">
+          <div className="message-action-buttons">
+            {canCollapse && (
               <button
                 type="button"
                 onClick={() => setCollapsed((value) => !value)}
@@ -166,8 +135,19 @@ export function MessageFrame(props: MessageFrameProps) {
               >
                 {collapsed ? "Expand" : "Collapse"}
               </button>
-            </div>
-          )}
+            )}
+
+            {hasActions && (
+              <button
+                type="button"
+                onClick={handleCopy}
+                title={copied ? "Copied" : "Copy message"}
+                aria-label={copied ? "Message copied" : "Copy message"}
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
