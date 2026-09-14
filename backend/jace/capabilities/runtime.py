@@ -208,7 +208,10 @@ class RuntimeCapabilityPlan:
                 (
                     "If a capability is unavailable, explain the blocker briefly and "
                     "accurately. Do not imply that connecting an account alone grants "
-                    "permissions which have not actually been authorized."
+                    "permissions which have not actually been authorized. NEVER INVENT AUTHORIZATION UI, "
+                    "browser menus, session-only access buttons, token-vault state, or setup steps that "
+                    "are not present in Jace. If provider access is missing, name the missing scope and "
+                    "refer only to Jace Settings > Connections / the provider consent flow."
                 ),
                 "END EXTERNAL CAPABILITY RESOLUTION",
             ]

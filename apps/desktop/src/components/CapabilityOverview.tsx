@@ -49,6 +49,20 @@ function providerLabel(providerId: string | null): string {
 function statusLabel(capability: CapabilityRecord): string {
   if (
     capability.state === "blocked"
+    && capability.availability_reason === "external_services_disabled"
+  ) {
+    return "External access off";
+  }
+
+  if (
+    capability.state === "blocked"
+    && capability.availability_reason === "provider_disabled"
+  ) {
+    return "Provider disabled";
+  }
+
+  if (
+    capability.state === "blocked"
     && capability.availability_reason === "missing_scopes"
   ) {
     return "Needs access";
@@ -84,6 +98,17 @@ function statusLabel(capability: CapabilityRecord): string {
 
 function availabilityText(capability: CapabilityRecord): string | null {
   switch (capability.availability_reason) {
+    case "external_services_disabled":
+      return (
+        "External service access is disabled by the runtime master switch "
+        + "in Permissions / Security."
+      );
+
+    case "provider_disabled":
+      return (
+        "This provider is disabled by Jace's runtime security policy."
+      );
+
     case "missing_scopes":
       return (
         "The account is connected, but this capability needs additional "

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from jace.db.models import Base, new_id, utc_now
@@ -46,3 +46,30 @@ class CapabilityPermissionRecord(Base):
     capability_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
     permission: Mapped[str] = mapped_column(String(20), nullable=False, default="ask")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+class ExternalAccessPolicyRecord(Base):
+    """Runtime kill switches for connected external services."""
+
+    __tablename__ = "external_access_policy"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default="default",
+    )
+    external_services_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    provider_states_json: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="{}",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+

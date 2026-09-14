@@ -9,6 +9,7 @@ from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jace.capabilities.access import ExternalAccessPolicy, external_access_policy
 from jace.capabilities.permissions import permission_map as connection_permission_map
 from jace.config import settings
 from jace.connections.models import ConnectionRecord
@@ -139,6 +140,7 @@ def _provider_binding(
     capability: ProviderCapability,
     row: ConnectionRecord,
     permission: str,
+    access: ExternalAccessPolicy,
 ) -> CapabilityDescriptor:
     granted_scopes = _connection_scopes(row)
     missing_scopes = _missing_scopes(
@@ -158,6 +160,12 @@ def _provider_binding(
     elif row.status == "error":
         state = "blocked"
         reason = "connection_error"
+    elif not access.external_services_enabled:
+        state = "blocked"
+        reason = "external_services_disabled"
+    elif not access.providers.get(provider.id, True):
+        state = "blocked"
+        reason = "provider_disabled"
     elif missing_scopes:
         state = "blocked"
         reason = "missing_scopes"
@@ -221,6 +229,8 @@ async def snapshot(session: AsyncSession) -> dict:
 
     local_permissions = await permission_map(session)
     connection_permissions = await connection_permission_map(session)
+    # JACE_STEP4A6_EXTERNAL_ACCESS_POLICY
+    access = await external_access_policy(session)
 
     capabilities: list[CapabilityDescriptor] = []
 
@@ -299,6 +309,7 @@ async def snapshot(session: AsyncSession) -> dict:
                         capability=capability,
                         row=row,
                         permission=permission,
+                        access=access,
                     )
                 )
 
@@ -325,6 +336,13 @@ async def snapshot(session: AsyncSession) -> dict:
         ),
         "needs_access": sum(
             item.availability_reason == "missing_scopes"
+            for item in capabilities
+        ),
+        "external_disabled": sum(
+            item.availability_reason in {
+                "external_services_disabled",
+                "provider_disabled",
+            }
             for item in capabilities
         ),
     }

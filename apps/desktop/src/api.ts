@@ -68,6 +68,8 @@ import type {
   VoiceSettingsUpdate,
   VoiceStatus,
   VoiceTranscriptionResponse,
+  ExternalAccessPolicy,
+  ExternalAccessPolicyUpdate,
 } from "./types";
 
 async function getErrorMessage(response: Response): Promise<string> {
@@ -320,6 +322,25 @@ export const updateConnectionCapabilityPermission = (connectionId: string, capab
 
 export const getCapabilities = () =>
   request<CapabilitySnapshotResponse>("/capabilities");
+
+export const getExternalAccessPolicy = () =>
+  request<ExternalAccessPolicy>("/security/external-access");
+
+export const updateExternalAccessPolicy = (
+  payload: ExternalAccessPolicyUpdate,
+) =>
+  request<ExternalAccessPolicy>("/security/external-access", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+export const emergencyStopExternalAccess = () =>
+  request<ExternalAccessPolicy>(
+    "/security/external-access/emergency-stop",
+    {
+      method: "POST",
+    },
+  );
 
 export const getTools = () => request<ToolListResponse>("/tools");
 export const updateToolPermission = (name: string, permission: ToolPermissionMode) =>

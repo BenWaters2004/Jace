@@ -47,9 +47,14 @@ GOOGLE = ProviderDefinition(
     setup_state="available",
     connection_label="Google account",
     oauth_flow="authorization_code_pkce",
-    # 4A.2 intentionally requests identity only. 4C can add service scopes
-    # when the real Gmail / Calendar / Drive implementations arrive.
-    oauth_scopes=("openid", "email", "profile"),
+    # 4C.1 adds the narrowest Gmail scope that supports real message reads.
+    # Draft/send/modify scopes remain intentionally excluded.
+    oauth_scopes=(
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    ),
     oauth_client_secret_supported=True,
     capabilities=(
         ProviderCapability(
@@ -60,6 +65,7 @@ GOOGLE = ProviderDefinition(
             "read",
             required_scopes=("https://www.googleapis.com/auth/gmail.readonly",),
             default_permission="allow",
+            tool_name="gmail_read_email",
         ),
         ProviderCapability(
             "email.search",
@@ -69,6 +75,7 @@ GOOGLE = ProviderDefinition(
             "read",
             required_scopes=("https://www.googleapis.com/auth/gmail.readonly",),
             default_permission="allow",
+            tool_name="gmail_search_email",
         ),
         ProviderCapability(
             "email.draft",

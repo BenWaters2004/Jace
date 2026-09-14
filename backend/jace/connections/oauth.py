@@ -31,6 +31,7 @@ from jace.db.models import utc_now
 
 GOOGLE_AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
+GOOGLE_TOKENINFO = "https://oauth2.googleapis.com/tokeninfo"
 GOOGLE_USERINFO = "https://openidconnect.googleapis.com/v1/userinfo"
 GOOGLE_REDIRECT = "http://127.0.0.1:8000"
 
@@ -569,6 +570,75 @@ def _optional_string(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+# JACE_STEP4C1_ACTUAL_GRANTED_SCOPES
+def _normalise_scope_text(raw: object) -> tuple[str, ...]:
+    if not isinstance(raw, str):
+        return ()
+
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for value in raw.replace(",", " ").split():
+        scope = value.strip()
+        if not scope:
+            continue
+
+        key = scope.casefold()
+        if key in seen:
+            continue
+
+        seen.add(key)
+        result.append(scope)
+
+    return tuple(result)
+
+
+async def _actual_granted_scopes(
+    provider: ProviderDefinition,
+    token_payload: dict[str, Any],
+    access_token: str,
+) -> tuple[str, ...]:
+    # Prefer scopes the provider actually reports as granted.
+    direct = _normalise_scope_text(
+        token_payload.get("scope")
+    )
+    if direct:
+        return direct
+
+    # Google tokeninfo provides an authoritative fallback. If it cannot confirm
+    # scopes, fail closed instead of pretending gmail.readonly was granted.
+    if provider.id == "google":
+        try:
+            async with httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT_SECONDS,
+            ) as client:
+                response = await client.get(
+                    GOOGLE_TOKENINFO,
+                    params={
+                        "access_token": access_token,
+                    },
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": "Jace-Desktop",
+                    },
+                )
+
+            if response.status_code < 400:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    tokeninfo_scopes = _normalise_scope_text(
+                        payload.get("scope")
+                    )
+                    if tokeninfo_scopes:
+                        return tokeninfo_scopes
+        except Exception:
+            pass
+
+        return ()
+
+    return tuple(provider.oauth_scopes)
+
+
 async def _finalize_oauth_connection(
     session: AsyncSession,
     provider: ProviderDefinition,
@@ -586,13 +656,26 @@ async def _finalize_oauth_connection(
     login = _optional_string(identity.get("login"))
     display_name = _optional_string(identity.get("display_name"))
     account_hint = email or login or display_name or subject
+    granted_scopes = await _actual_granted_scopes(
+        provider,
+        token_payload,
+        access_token,
+    )
+
+    token_payload = dict(token_payload)
+
+    if granted_scopes:
+        token_payload["scope"] = " ".join(
+            granted_scopes
+        )
+
     config = {
         "oauth_subject": subject,
         "display_name": display_name,
         "email": email,
         "login": login,
         "avatar_url": _optional_string(identity.get("avatar_url")),
-        "scopes": list(provider.oauth_scopes),
+        "scopes": list(granted_scopes),
     }
     config = {key: value for key, value in config.items() if value is not None}
 
@@ -692,6 +775,19 @@ async def verify_oauth_connection(session: AsyncSession, row: ConnectionRecord) 
         raise RuntimeError(row.last_error) from exc
 
     config = _loads_object(row.config_json)
+
+    token_bundle = _read_token_bundle(
+        row.id
+    )
+    bundle_scopes = _normalise_scope_text(
+        token_bundle.get("scope")
+    )
+
+    if bundle_scopes:
+        config["scopes"] = list(
+            bundle_scopes
+        )
+
     config.update(
         {
             "oauth_subject": str(identity["subject"]),

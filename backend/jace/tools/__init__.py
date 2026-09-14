@@ -14,6 +14,7 @@ def ensure_tools_registered() -> None:
     from jace.tools.automation import register_automation_tools
     from jace.tools.interactive import register_interactive_tools
     from jace.tools.agent_orchestration import register_agent_orchestration_tools
+    from jace.tools.gmail import register_gmail_tools
 
     register_builtin_tools()
     register_web_tools()
@@ -22,6 +23,7 @@ def ensure_tools_registered() -> None:
     register_automation_tools()
     register_interactive_tools()
     register_agent_orchestration_tools()
+    register_gmail_tools()
 
     # Extend Jace's existing smart tool router.
     from jace.tools import agent as primary_agent

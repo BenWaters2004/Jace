@@ -21,6 +21,7 @@ from jace.api.conversations import router as conversations_router
 from jace.api.memories import router as memories_router
 from jace.api.runtime import router as runtime_router
 from jace.api.settings import router as settings_router
+from jace.api.security import router as security_router
 from jace.api.system import router as system_router
 from jace.api.tools import router as tools_router
 from jace.api.voice import router as voice_router
@@ -112,6 +113,7 @@ app.include_router(attachments_router)
 app.include_router(automations_router)
 app.include_router(agents_router)
 app.include_router(settings_router)
+app.include_router(security_router)
 app.include_router(connections_router)
 app.include_router(connections_callback_router)
 app.include_router(capabilities_router)

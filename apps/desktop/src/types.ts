@@ -454,6 +454,17 @@ export interface ConnectionUpdateRequest {
   clear_secret?: boolean;
 }
 
+export interface ExternalAccessPolicy {
+  external_services_enabled: boolean;
+  providers: Record<string, boolean>;
+  provider_names: Record<string, string>;
+}
+
+export interface ExternalAccessPolicyUpdate {
+  external_services_enabled?: boolean;
+  providers?: Record<string, boolean>;
+}
+
 export interface CapabilityRecord {
   id: string;
   label: string;
