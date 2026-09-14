@@ -37,12 +37,3 @@ class OAuthClientConfigRecord(Base):
     config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-
-class CapabilityPermissionRecord(Base):
-    """Per-connection provider capability policy. Contains no provider secret."""
-    __tablename__ = "connection_capability_permissions"
-    id: Mapped[str] = mapped_column(String(500), primary_key=True)
-    connection_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    capability_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
-    permission: Mapped[str] = mapped_column(String(20), nullable=False, default="ask")
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)

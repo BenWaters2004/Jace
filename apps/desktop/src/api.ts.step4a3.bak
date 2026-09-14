@@ -1,6 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  CapabilityPermissionMode,
   OAuthSession,
   OAuthClientConfig,
   OAuthClientConfigUpdateRequest,
@@ -311,12 +310,6 @@ export const getOAuthSession = (sessionId: string) =>
   request<OAuthSession>(`/connections/oauth/session/${encodeURIComponent(sessionId)}`);
 export const verifyConnection = (id: string) =>
   request<ConnectionRecord>(`/connections/${encodeURIComponent(id)}/verify`, { method: "POST" });
-
-export const updateConnectionCapabilityPermission = (connectionId: string, capabilityId: string, permission: CapabilityPermissionMode) =>
-  request<CapabilitySnapshotResponse>(`/capabilities/connections/${encodeURIComponent(connectionId)}/${encodeURIComponent(capabilityId)}/permission`, {
-    method: "PATCH",
-    body: JSON.stringify({ permission }),
-  });
 
 export const getCapabilities = () =>
   request<CapabilitySnapshotResponse>("/capabilities");

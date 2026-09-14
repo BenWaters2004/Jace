@@ -5,7 +5,6 @@ export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal"
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";
 export type ToolPermissionMode = "allow" | "ask" | "deny";
-export type CapabilityPermissionMode = "allow" | "ask" | "deny";
 export type ToolRisk = "read" | "write" | "execute";
 export type ToolActivityStatus = "requested" | "awaiting_approval" | "completed" | "denied" | "failed";
 export type ToolApprovalDecision = "allow_once" | "allow_always" | "deny_once" | "deny_always";
@@ -441,7 +440,6 @@ export interface CapabilityRecord {
   state: CapabilityState;
   risk: string;
   provider_id: string | null;
-  provider_capability_id: string | null;
   connection_id: string | null;
   tool_name: string | null;
   permission: string | null;

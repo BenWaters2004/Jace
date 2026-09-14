@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jace.connections import secrets
-from jace.config import settings
 from jace.connections.models import ConnectionRecord, OAuthClientConfigRecord
 from jace.connections.providers import OAUTH_PROVIDERS, ProviderDefinition, get_provider
 from jace.connections.schemas import (
@@ -252,33 +251,14 @@ async def delete_oauth_client_config(session: AsyncSession, provider_id: str) ->
         await session.commit()
 
 
-# JACE_STEP4A22_ONE_CLICK_CONNECTIONS
-def developer_oauth_client_id(provider_id: str) -> str | None:
-    value = {"google": settings.google_client_id, "microsoft": settings.microsoft_client_id, "github": settings.github_client_id}.get(provider_id, "")
-    value = (value or "").strip()
-    return value or None
-
-def developer_oauth_tenant(provider_id: str) -> str | None:
-    if provider_id != "microsoft": return None
-    return (settings.microsoft_tenant or "common").strip() or "common"
-
 def oauth_client_secret(provider_id: str) -> str | None:
-    stored = secrets.read(oauth_client_target(provider_id), OAUTH_CLIENT_SECRET_KEY)
-    if stored: return stored
-    if provider_id == "google":
-        value = (settings.google_client_secret or "").strip()
-        return value or None
-    return None
+    return secrets.read(oauth_client_target(provider_id), OAUTH_CLIENT_SECRET_KEY)
 
 
 def oauth_config_response(provider: ProviderDefinition, row: OAuthClientConfigRecord | None) -> OAuthClientConfigResponse:
     if provider.oauth_flow is None:
         raise ValueError("Provider does not use OAuth.")
     config = _loads_object(row.config_json) if row else {}
-    developer_client_id = developer_oauth_client_id(provider.id)
-    effective_client_id = developer_client_id or (row.client_id if row else None)
-    if provider.id == "microsoft" and developer_client_id:
-        config["tenant"] = developer_oauth_tenant(provider.id) or "common"
     if provider.id == "google":
         redirect_uri = "http://127.0.0.1:8000"
     elif provider.id == "microsoft":
@@ -289,8 +269,8 @@ def oauth_config_response(provider: ProviderDefinition, row: OAuthClientConfigRe
     return OAuthClientConfigResponse(
         provider_id=provider.id,
         provider_name=provider.name,
-        configured=bool(effective_client_id),
-        client_id=effective_client_id,
+        configured=bool(row and row.client_id.strip()),
+        client_id=row.client_id if row else None,
         has_client_secret=has_secret,
         client_secret_supported=provider.oauth_client_secret_supported,
         tenant=(config.get("tenant") if isinstance(config.get("tenant"), str) else None),

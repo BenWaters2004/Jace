@@ -22,8 +22,6 @@ from jace.connections.service import (
     OAUTH_TOKEN_KEY,
     _loads_object,
     get_oauth_client_config,
-    developer_oauth_client_id,
-    developer_oauth_tenant,
     list_provider_connections,
     oauth_client_secret,
 )
@@ -135,20 +133,12 @@ def _oauth_config_dict(row) -> dict:
     return _loads_object(row.config_json) if row is not None else {}
 
 
-# JACE_STEP4A22_ONE_CLICK_CONNECTIONS
 async def _client_config(session: AsyncSession, provider: ProviderDefinition):
     row = await get_oauth_client_config(session, provider.id)
-    client_id = developer_oauth_client_id(provider.id) or (row.client_id.strip() if row and row.client_id.strip() else None)
-    if not client_id:
-        raise ValueError(f"{provider.name} is not configured for this Jace installation. Set JACE_{provider.id.upper()}_CLIENT_ID in backend/.env and restart Jace.")
-    config = _oauth_config_dict(row)
-    if provider.id == "microsoft" and developer_oauth_client_id(provider.id):
-        config["tenant"] = developer_oauth_tenant(provider.id) or "common"
-    class EffectiveOAuthConfig:
-        def __init__(self, client_id: str, config: dict):
-            self.client_id = client_id
-            self.config_json = json.dumps(config, separators=(",", ":"))
-    return EffectiveOAuthConfig(client_id, config)
+    if row is None or not row.client_id.strip():
+        raise ValueError(f"Configure the {provider.name} OAuth application before connecting an account.")
+    return row
+
 
 def _microsoft_tenant(config: dict) -> str:
     tenant = config.get("tenant")

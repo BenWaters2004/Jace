@@ -1,14 +1,16 @@
-// JACE_STEP4A22_ONE_CLICK_CONNECTIONS
+// JACE_STEP4A2_OAUTH_PROVIDER_ACCOUNTS
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createConnection,
   deleteConnection,
+  deleteOAuthClientConfig,
   disconnectConnection,
   getConnections,
   getConnectionProviders,
   getOAuthClientConfigs,
   getOAuthSession,
+  saveOAuthClientConfig,
   startOAuthConnection,
   verifyConnection,
 } from "../api";
@@ -21,7 +23,9 @@ import type {
 } from "../types";
 
 type Draft = { label: string; baseUrl: string; authMode: ConnectionAuthMode; headerName: string; secret: string };
+type OAuthConfigDraft = { clientId: string; clientSecret: string; tenant: string };
 const EMPTY_DRAFT: Draft = { label: "", baseUrl: "", authMode: "bearer", headerName: "X-API-Key", secret: "" };
+const EMPTY_OAUTH_DRAFT: OAuthConfigDraft = { clientId: "", clientSecret: "", tenant: "common" };
 
 function providerState(provider: ConnectionProvider, count: number, configured: boolean): string {
   if (count > 0) return `${count} connected`;
@@ -35,6 +39,7 @@ export function ConnectionsView() {
   const [oauthConfigs, setOAuthConfigs] = useState<OAuthClientConfig[]>([]);
   const [secretStore, setSecretStore] = useState<{ available: boolean; backend: string; reason: string | null } | null>(null);
   const [showCustomForm, setShowCustomForm] = useState(false);
+  const [oauthConfigProvider, setOAuthConfigProvider] = useState<string | null>(null);
   const [oauthDraft, setOAuthDraft] = useState<OAuthConfigDraft>(EMPTY_OAUTH_DRAFT);
   const [oauthFlow, setOAuthFlow] = useState<OAuthSession | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
@@ -79,6 +84,22 @@ export function ConnectionsView() {
     finally { setSaving(false); }
   }
 
+  function beginConfig(providerId: string) {
+    const current = configMap.get(providerId);
+    setOauthConfigProvider(providerId);
+    setOauthDraft({ clientId: current?.client_id ?? "", clientSecret: "", tenant: current?.tenant ?? "common" });
+  }
+
+  async function saveOAuthConfig(providerId: string) {
+    if (!oauthDraft.clientId.trim()) { setError("OAuth client ID is required."); return; }
+    setSaving(true); setError(null);
+    try {
+      await saveOAuthClientConfig(providerId, { client_id: oauthDraft.clientId.trim(), client_secret: oauthDraft.clientSecret.trim() || null, tenant: oauthDraft.tenant.trim() || null });
+      setOauthConfigProvider(null); setOauthDraft(EMPTY_OAUTH_DRAFT); await refresh();
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Could not save OAuth application settings."); }
+    finally { setSaving(false); }
+  }
+
   async function pollOAuth(sessionId: string, delaySeconds: number) {
     if (pollTimer.current !== null) window.clearTimeout(pollTimer.current);
     pollTimer.current = window.setTimeout(async () => {
@@ -92,8 +113,6 @@ export function ConnectionsView() {
   }
 
   async function connectOAuth(providerId: string) {
-    const oauthConfig = configMap.get(providerId);
-    if (!oauthConfig?.configured) { setError("This Jace installation is missing the provider OAuth client ID. Configure it once in backend/.env and restart Jace."); return; }
     if (!secretStore?.available) { setError(secretStore?.reason || "Secure credential storage is unavailable."); return; }
     setError(null);
     try {
@@ -118,26 +137,28 @@ export function ConnectionsView() {
   }
 
   if (loading) return <div className="connections-loading">Loading connection registry…</div>;
+  const activeConfig = oauthConfigProvider ? configMap.get(oauthConfigProvider) : undefined;
+  const activeProvider = providers.find((provider) => provider.id === oauthConfigProvider);
 
   return <div className="connections-view">
     <div className={`connections-vault-banner ${secretStore?.available ? "ready" : "warning"}`}><div><strong>{secretStore?.available ? "Secure credential vault ready" : "Credential vault unavailable"}</strong><span>{secretStore?.available ? "OAuth tokens, refresh tokens and API secrets stay in Windows Credential Manager. SQLite stores account metadata only." : secretStore?.reason || "Jace will not accept connection secrets until a secure vault is available."}</span></div><span className="connections-status-pill">{secretStore?.backend ?? "checking"}</span></div>
     {error && <div className="error-banner connections-error"><div><strong>Connections</strong><span>{error}</span></div></div>}
 
-    {oauthFlow && <div className="connection-modal-backdrop"><section className="connection-modal" role="dialog" aria-modal="true"><div className={`connection-modal-pulse ${oauthFlow.status}`}>{oauthFlow.status === "completed" ? "✓" : oauthFlow.status === "pending" ? "↗" : "!"}</div><span className="section-kicker">Secure authentication</span><h2>{oauthFlow.status === "pending" ? "Connecting account" : oauthFlow.status === "completed" ? "Account connected" : "Authorization did not complete"}</h2><p>{oauthFlow.status === "pending" ? "Jace opened the provider sign-in in your system browser. Complete authentication there; this window will update automatically." : oauthFlow.account_hint || oauthFlow.error || "Authorization finished."}</p>{oauthFlow.user_code && <div className="connection-device-code"><span>Verification code</span><code>{oauthFlow.user_code}</code></div>}<button type="button" className="secondary-button" onClick={() => setOAuthFlow(null)}>{oauthFlow.status === "pending" ? "Cancel" : "Close"}</button></section></div>}
+    {oauthFlow && <section className={`oauth-flow-banner ${oauthFlow.status}`}><div><strong>{oauthFlow.status === "pending" ? "Finish authorization in your browser" : oauthFlow.status === "completed" ? "Account connected" : "Authorization did not complete"}</strong><span>{oauthFlow.user_code ? `GitHub code: ${oauthFlow.user_code}` : oauthFlow.account_hint || oauthFlow.error || "Jace is waiting for the provider callback."}</span></div>{oauthFlow.user_code && <code>{oauthFlow.user_code}</code>}<button type="button" className="secondary-button" onClick={() => setOAuthFlow(null)}>Dismiss</button></section>}
 
     <div className="connection-provider-grid">{providers.map((provider) => {
       const oauthConfig = configMap.get(provider.id); const count = counts.get(provider.id) ?? 0;
       return <article className="connection-provider-card" key={provider.id}>
         <div className="connection-provider-head"><div><span className="section-kicker">{provider.auth_kind}</span><h3>{provider.name}</h3></div><span className={`connections-status-pill ${count ? "configured" : oauthConfig?.configured ? "ready" : provider.setup_state}`}>{providerState(provider, count, Boolean(oauthConfig?.configured))}</span></div>
         <p>{provider.description}</p><div className="connection-capability-chips">{provider.capabilities.slice(0,6).map((capability)=><span key={capability.id}>{capability.id}</span>)}</div>
-        {provider.id === "custom_api" ? <button type="button" className="primary-button" onClick={() => setShowCustomForm((value)=>!value)}>{showCustomForm ? "Cancel" : "Add API connection"}</button> : <div className="oauth-provider-actions"><button type="button" className="primary-button" disabled={!oauthConfig?.configured || !secretStore?.available} onClick={() => void connectOAuth(provider.id)}>{count > 0 ? "Connect another account" : "Connect"}</button>{!oauthConfig?.configured && <span className="connection-developer-note">Developer setup required once in backend/.env.</span>}</div>}
+        {provider.id === "custom_api" ? <button type="button" className="primary-button" onClick={() => setShowCustomForm((value)=>!value)}>{showCustomForm ? "Cancel" : "Add API connection"}</button> : <div className="oauth-provider-actions"><button type="button" className="secondary-button" onClick={() => beginConfig(provider.id)}>{oauthConfig?.configured ? "OAuth app settings" : "Configure OAuth app"}</button><button type="button" className="primary-button" disabled={!oauthConfig?.configured || !secretStore?.available} onClick={() => void connectOAuth(provider.id)}>Connect account</button></div>}
       </article>;
     })}</div>
 
-
+    {oauthConfigProvider && activeProvider && <section className="connection-form-card oauth-config-card"><div className="settings-card-heading"><div><span className="section-kicker">{activeProvider.name}</span><h2>OAuth application</h2></div><span className="settings-icon">↗</span></div><p className="settings-muted">Jace is self-hosted, so you provide the OAuth application's client ID. Tokens obtained for your account are stored locally in Windows Credential Manager.</p><div className="form-grid connection-form-grid"><label><span>Client ID</span><input value={oauthDraft.clientId} onChange={(event)=>setOauthDraft({...oauthDraft,clientId:event.target.value})} /></label>{activeConfig?.tenant_supported && <label><span>Tenant</span><input value={oauthDraft.tenant} onChange={(event)=>setOauthDraft({...oauthDraft,tenant:event.target.value})} placeholder="common" /></label>}{activeConfig?.client_secret_supported && <label className="full"><span>Client secret <small>(optional for desktop client)</small></span><input type="password" autoComplete="new-password" value={oauthDraft.clientSecret} onChange={(event)=>setOauthDraft({...oauthDraft,clientSecret:event.target.value})} placeholder={activeConfig?.has_client_secret ? "Stored securely — leave blank to keep" : "Optional"} /></label>}<label className="full"><span>Redirect URI</span><input readOnly value={activeConfig?.redirect_uri ?? "Device flow — no redirect URI"} /></label></div><div className="connection-capability-chips">{activeConfig?.scopes.map((scope)=><span key={scope}>{scope}</span>)}</div><div className="connection-form-actions">{activeConfig?.configured && <button type="button" className="danger-button" onClick={async()=>{if(window.confirm(`Remove ${activeProvider.name} OAuth app configuration?`)){await deleteOAuthClientConfig(activeProvider.id);setOauthConfigProvider(null);await refresh();}}}>Remove config</button>}<button type="button" className="secondary-button" onClick={()=>setOauthConfigProvider(null)}>Cancel</button><button type="button" className="primary-button" disabled={saving} onClick={()=>void saveOAuthConfig(activeProvider.id)}>{saving?"Saving…":"Save OAuth app"}</button></div></section>}
 
     {showCustomForm && <section className="connection-form-card"><div className="settings-card-heading"><div><span className="section-kicker">Custom API</span><h2>Configure endpoint</h2></div><span className="settings-icon">↗</span></div><div className="form-grid connection-form-grid"><label><span>Name</span><input value={draft.label} onChange={(event)=>setDraft({...draft,label:event.target.value})} placeholder="e.g. Company API" /></label><label><span>Base URL</span><input value={draft.baseUrl} onChange={(event)=>setDraft({...draft,baseUrl:event.target.value})} placeholder="https://api.example.com" /></label><label><span>Authentication</span><select value={draft.authMode} onChange={(event)=>setDraft({...draft,authMode:event.target.value as ConnectionAuthMode})}><option value="none">None</option><option value="bearer">Bearer token</option><option value="header">Custom header</option></select></label>{draft.authMode === "header" && <label><span>Header name</span><input value={draft.headerName} onChange={(event)=>setDraft({...draft,headerName:event.target.value})} /></label>}{draft.authMode !== "none" && <label className="full"><span>API secret</span><input type="password" autoComplete="new-password" value={draft.secret} onChange={(event)=>setDraft({...draft,secret:event.target.value})} /></label>}</div><div className="info-box"><strong>Configuration only</strong><span>Custom endpoints are not exposed as arbitrary model HTTP tools yet.</span></div><div className="connection-form-actions"><button type="button" className="primary-button" disabled={saving} onClick={()=>void addCustomConnection()}>{saving?"Saving…":"Save connection"}</button></div></section>}
 
-    <section className="connections-saved-section"><div className="connections-section-heading"><div><span className="section-kicker">Connected</span><h2>Accounts & APIs</h2></div><button type="button" className="secondary-button" onClick={()=>void refresh()}>Refresh</button></div>{connections.length===0?<div className="settings-hub-empty">No accounts or APIs are connected yet.</div>:<div className="connections-saved-list">{connections.map((connection)=><article className="connection-saved-row" key={connection.id}><div className="connection-saved-main"><div><strong>{connection.label}</strong><span>{connection.provider_name} · {connection.account_hint || "local configuration"}</span></div><span className={`connections-status-pill ${connection.status}`}>{connection.status}</span></div><div className="connection-saved-meta"><span>{connection.auth_type === "oauth2" ? "OAuth token stored securely" : connection.auth_type === "none" ? "No authentication" : connection.has_secret ? "Credential stored securely" : "Credential not stored"}</span><span>{connection.last_verified_at ? `Verified ${new Date(connection.last_verified_at).toLocaleString()}` : "Not verified yet"}</span></div>{connection.last_error && <div className="connection-inline-error">{connection.last_error}</div>}<div className="connection-saved-actions">{connection.auth_type === "oauth2" && connection.status !== "disconnected" && <button type="button" className="secondary-button" onClick={()=>void verify(connection)}>Verify</button>}{connection.auth_type === "oauth2" && connection.status === "disconnected" && <button type="button" className="secondary-button" onClick={()=>void connectOAuth(connection.provider_id)}>Reconnect</button>}{connection.status !== "disconnected" && <button type="button" className="secondary-button" onClick={()=>void disconnect(connection)}>Disconnect</button>}<button type="button" className="danger-button" onClick={()=>void remove(connection)}>Delete</button></div></article>)}</div>}</section>
+    <section className="connections-saved-section"><div className="connections-section-heading"><div><span className="section-kicker">Connected</span><h2>Accounts & APIs</h2></div><button type="button" className="secondary-button" onClick={()=>void refresh()}>Refresh</button></div>{connections.length===0?<div className="settings-hub-empty">No accounts or APIs are connected yet.</div>:<div className="connections-saved-list">{connections.map((connection)=><article className="connection-saved-row" key={connection.id}><div className="connection-saved-main"><div><strong>{connection.label}</strong><span>{connection.provider_name} · {connection.account_hint || "local configuration"}</span></div><span className={`connections-status-pill ${connection.status}`}>{connection.status}</span></div><div className="connection-saved-meta"><span>{connection.auth_type === "oauth2" ? "OAuth token stored securely" : connection.auth_type === "none" ? "No authentication" : connection.has_secret ? "Credential stored securely" : "Credential not stored"}</span><span>{connection.last_verified_at ? `Verified ${new Date(connection.last_verified_at).toLocaleString()}` : "Not verified yet"}</span></div>{connection.last_error && <div className="connection-inline-error">{connection.last_error}</div>}<div className="connection-saved-actions">{connection.auth_type === "oauth2" && connection.status !== "disconnected" && <button type="button" className="secondary-button" onClick={()=>void verify(connection)}>Verify</button>}{connection.status !== "disconnected" && <button type="button" className="secondary-button" onClick={()=>void disconnect(connection)}>Disconnect</button>}<button type="button" className="danger-button" onClick={()=>void remove(connection)}>Delete</button></div></article>)}</div>}</section>
   </div>;
 }

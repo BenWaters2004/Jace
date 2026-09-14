@@ -1,5 +1,4 @@
 from __future__ import annotations
-# JACE_STEP4A3_PROVIDER_CAPABILITY_PERMISSIONS
 
 from dataclasses import asdict, dataclass
 from typing import Literal
@@ -7,7 +6,6 @@ from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jace.config import settings
-from jace.capabilities.permissions import DEFAULT_MODE, permission_map as connection_permission_map
 from jace.connections.providers import PROVIDERS
 from jace.connections.service import list_connections
 from jace.tools import ensure_tools_registered
@@ -28,7 +26,6 @@ class CapabilityDescriptor:
     state: CapabilityState
     risk: str
     provider_id: str | None = None
-    provider_capability_id: str | None = None
     connection_id: str | None = None
     tool_name: str | None = None
     permission: str | None = None
@@ -64,7 +61,6 @@ async def snapshot(session: AsyncSession) -> dict:
         )
 
     rows = await list_connections(session)
-    connection_permissions = await connection_permission_map(session)
     by_provider: dict[str, list] = {}
     for row in rows:
         by_provider.setdefault(row.provider_id, []).append(row)
@@ -75,17 +71,16 @@ async def snapshot(session: AsyncSession) -> dict:
         disconnected = next((row for row in provider_rows if row.status == "disconnected"), None)
         for capability in provider.capabilities:
             if active is not None:
+                # 4A.2 proves the provider account/credential binding. The model-callable
+                # connector actions themselves arrive in the following provider-capability steps.
+                state: CapabilityState = "configured"
                 connection_id = active.id
-                permission = connection_permissions.get((active.id, capability.id), DEFAULT_MODE)
-                state: CapabilityState = "blocked" if permission == "deny" else "configured"
             elif disconnected is not None:
                 state = "disconnected"
                 connection_id = disconnected.id
-                permission = connection_permissions.get((disconnected.id, capability.id), DEFAULT_MODE)
             else:
                 state = "planned"
                 connection_id = None
-                permission = None
             capabilities.append(
                 CapabilityDescriptor(
                     id=f"{provider.id}.{capability.id}",
@@ -96,9 +91,7 @@ async def snapshot(session: AsyncSession) -> dict:
                     state=state,
                     risk=capability.risk,
                     provider_id=provider.id,
-                    provider_capability_id=capability.id,
                     connection_id=connection_id,
-                    permission=permission,
                 )
             )
 
