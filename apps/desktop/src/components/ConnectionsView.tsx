@@ -33,9 +33,13 @@ export function ConnectionsView() {
   const [providers, setProviders] = useState<ConnectionProvider[]>([]);
   const [connections, setConnections] = useState<ConnectionRecord[]>([]);
   const [oauthConfigs, setOAuthConfigs] = useState<OAuthClientConfig[]>([]);
-  const [secretStore, setSecretStore] = useState<{ available: boolean; backend: string; reason: string | null } | null>(null);
+  const [secretStore, setSecretStore] = useState<{
+    available: boolean;
+    backend: string;
+    reason: string | null;
+  } | null>(null);
+
   const [showCustomForm, setShowCustomForm] = useState(false);
-  const [oauthDraft, setOAuthDraft] = useState<OAuthConfigDraft>(EMPTY_OAUTH_DRAFT);
   const [oauthFlow, setOAuthFlow] = useState<OAuthSession | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [loading, setLoading] = useState(true);

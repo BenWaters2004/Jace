@@ -371,7 +371,13 @@ export type ChatStreamEvent =
 // JACE_STEP4A1_CONNECTIONS_FOUNDATION
 export type ConnectionAuthMode = "none" | "bearer" | "header";
 export type ConnectionStatus = "configured" | "disconnected" | "error";
-export type CapabilityState = "ready" | "blocked" | "configured" | "planned" | "disconnected";
+export type CapabilityState =
+  | "ready"
+  | "blocked"
+  | "configured"
+  | "planned"
+  | "disconnected";
+
 export interface ConnectionProviderCapability {
   id: string;
   label: string;
@@ -379,6 +385,7 @@ export interface ConnectionProviderCapability {
   category: string;
   risk: ToolRisk;
 }
+
 export interface ConnectionProvider {
   id: string;
   name: string;
@@ -388,14 +395,17 @@ export interface ConnectionProvider {
   connection_label: string;
   capabilities: ConnectionProviderCapability[];
 }
+
 export interface ConnectionProviderListResponse {
   providers: ConnectionProvider[];
 }
+
 export interface ConnectionSecretStoreStatus {
   available: boolean;
   backend: string;
   reason: string | null;
 }
+
 export interface ConnectionRecord {
   id: string;
   provider_id: string;
@@ -412,10 +422,12 @@ export interface ConnectionRecord {
   last_verified_at: string | null;
   last_error: string | null;
 }
+
 export interface ConnectionListResponse {
   secret_store: ConnectionSecretStoreStatus;
   connections: ConnectionRecord[];
 }
+
 export interface ConnectionCreateRequest {
   provider_id: string;
   label: string;
@@ -424,6 +436,7 @@ export interface ConnectionCreateRequest {
   header_name?: string | null;
   secret?: string | null;
 }
+
 export interface ConnectionUpdateRequest {
   label?: string;
   base_url?: string | null;
@@ -432,6 +445,7 @@ export interface ConnectionUpdateRequest {
   secret?: string | null;
   clear_secret?: boolean;
 }
+
 export interface CapabilityRecord {
   id: string;
   label: string;
@@ -439,13 +453,25 @@ export interface CapabilityRecord {
   category: string;
   source: "local_tool" | "connection";
   state: CapabilityState;
-  risk: string;
+  risk: ToolRisk;
+
   provider_id: string | null;
   provider_capability_id: string | null;
+
   connection_id: string | null;
+  connection_status: string | null;
+  account_hint: string | null;
+
   tool_name: string | null;
-  permission: string | null;
+  permission: CapabilityPermissionMode | null;
+
+  required_scopes: string[];
+  granted_scopes: string[];
+  missing_scopes: string[];
+
+  availability_reason: string | null;
 }
+
 export interface CapabilitySnapshotResponse {
   capabilities: CapabilityRecord[];
   counts: Record<string, number>;

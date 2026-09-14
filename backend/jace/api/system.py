@@ -8,9 +8,19 @@ from jace.schemas import HealthResponse, ModelsResponse
 router = APIRouter(tags=["system"])
 
 
-@router.get("/")
+@router.get("/status")
 async def root():
-    return {"name": settings.app_name, "version": settings.app_version, "status": "running"}
+    """
+    Basic Jace backend identity/status endpoint.
+
+    The root path "/" is deliberately reserved for desktop OAuth
+    loopback callbacks (Google/Microsoft).
+    """
+    return {
+        "name": settings.app_name,
+        "version": settings.app_version,
+        "status": "running",
+    }
 
 
 @router.get("/health", response_model=HealthResponse)
