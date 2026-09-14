@@ -132,7 +132,8 @@ async def routed_tool_names(user_message: str) -> list[str]:
     allowed_names = {
         definition.name
         for definition in registry.all()
-        if permissions.get(definition.name, definition.default_permission) != "deny"
+        if definition.capability_id is None
+        and permissions.get(definition.name, definition.default_permission) != "deny"
     }
 
     if settings.smart_tool_routing:
@@ -157,7 +158,8 @@ async def available_tool_count(user_message: str | None = None) -> int:
     return sum(
         1
         for definition in registry.all()
-        if permissions.get(definition.name, definition.default_permission) != "deny"
+        if definition.capability_id is None
+        and permissions.get(definition.name, definition.default_permission) != "deny"
     )
 
 
@@ -168,11 +170,83 @@ def _tool_schemas_for_names(names: list[str]) -> list[dict[str, Any]]:
     return registry.schemas(set(names))
 
 
+# JACE_STEP4A4_AGENT_BINDING
+_PERMISSION_ORDER = {
+    "allow": 0,
+    "ask": 1,
+    "deny": 2,
+}
+
+
+def _effective_permission(
+    tool_permission: str,
+    capability_binding: dict[str, Any] | None,
+) -> str:
+    if not capability_binding:
+        return tool_permission
+
+    capability_permission = str(
+        capability_binding.get("permission") or "ask"
+    )
+
+    if capability_permission not in _PERMISSION_ORDER:
+        capability_permission = "ask"
+
+    tool_permission = (
+        tool_permission
+        if tool_permission in _PERMISSION_ORDER
+        else "ask"
+    )
+
+    return max(
+        (tool_permission, capability_permission),
+        key=lambda value: _PERMISSION_ORDER[value],
+    )
+
+
+def _capability_binding_error(
+    definition,
+    capability_binding: dict[str, Any] | None,
+) -> str | None:
+    if definition.capability_id is None:
+        return None
+
+    if not capability_binding:
+        return (
+            "External tool execution was blocked because the runtime did not "
+            "supply a connection capability binding."
+        )
+
+    if capability_binding.get("capability_id") != definition.capability_id:
+        return (
+            "External tool execution was blocked because its capability "
+            "binding did not match."
+        )
+
+    if (
+        definition.provider_id
+        and capability_binding.get("provider_id") != definition.provider_id
+    ):
+        return (
+            "External tool execution was blocked because its provider "
+            "binding did not match."
+        )
+
+    if not capability_binding.get("connection_id"):
+        return (
+            "External tool execution was blocked because no connection "
+            "was selected."
+        )
+
+    return None
+
+
 async def _execute_tool_call(
     *,
     call: dict[str, Any],
     conversation_id: str | None,
     user_message: str,
+    capability_bindings: dict[str, dict[str, Any]] | None = None,
 ):
     """
     Yield public tool events and finish with one private `_tool_message` event
@@ -202,8 +276,43 @@ async def _execute_tool_call(
         }
         return
 
+    capability_binding = (
+        capability_bindings or {}
+    ).get(tool_name)
+
+    binding_error = _capability_binding_error(
+        definition,
+        capability_binding,
+    )
+
+    if binding_error:
+        yield {
+            "type": "tool_result",
+            "call_id": "",
+            "tool_name": tool_name,
+            "label": definition.label,
+            "status": "denied",
+            "summary": binding_error,
+        }
+        yield {
+            "type": "_tool_message",
+            "message": {
+                "role": "tool",
+                "tool_name": tool_name,
+                "content": binding_error,
+            },
+        }
+        return
+
     async with SessionLocal() as session:
-        permission = await get_tool_permission(session, tool_name)
+        tool_permission = await get_tool_permission(
+            session,
+            tool_name,
+        )
+        permission = _effective_permission(
+            tool_permission,
+            capability_binding,
+        )
         audit = await create_tool_audit(
             session,
             conversation_id=conversation_id,
@@ -356,6 +465,7 @@ async def _execute_tool_call(
                 session=session,
                 conversation_id=conversation_id,
                 user_message=user_message,
+                capability_binding=capability_binding,
             )
             result = await definition.execute(arguments, context)
 
@@ -560,6 +670,7 @@ async def stream_agent(
     tool_names: list[str] | None = None,
     current_images: list[str] | None = None,
     attachment_context: str = "",
+    capability_bindings: dict[str, dict[str, Any]] | None = None,
 ):
     """Streaming multi-turn agent loop with guarded final-answer recovery.
 
@@ -803,6 +914,7 @@ async def stream_agent(
                 call=call,
                 conversation_id=conversation_id,
                 user_message=user_message,
+                capability_bindings=capability_bindings,
             ):
                 if event.get("type") == "_tool_message":
                     tool_message = event["message"]

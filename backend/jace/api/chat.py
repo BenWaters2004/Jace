@@ -12,6 +12,7 @@ from jace.ai.prompts import (
     build_tool_context,
 )
 from jace.attachments.processors import prepare_attachments
+from jace.capabilities.runtime import resolve_runtime_capabilities
 from jace.attachments.service import assign_attachments_to_message, get_attachments
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
 from jace.config import settings as env_settings
@@ -307,11 +308,37 @@ async def send_streaming_chat(request: PersistentChatRequest):
                         )
             memory_retrieval_ms = round((time.perf_counter() - memory_started) * 1000, 2)
 
+            # JACE_STEP4A4_CHAT_RESOLUTION
             tool_started = time.perf_counter()
-            routed_tools = await routed_tool_names(request.message)
+            capability_message = request.message or stored_user_text
+
+            routed_tools = await routed_tool_names(
+                capability_message
+            )
+
+            async with SessionLocal() as session:
+                capability_plan = await resolve_runtime_capabilities(
+                    session,
+                    capability_message,
+                )
+
+            for capability_tool_name in capability_plan.tool_names:
+                if capability_tool_name not in routed_tools:
+                    routed_tools.append(capability_tool_name)
+
+            routed_tools = sorted(set(routed_tools))
+
             if current_attachment_ids:
-                routed_tools = [name for name in routed_tools if name != "inspect_attachment"]
-            tool_routing_ms = round((time.perf_counter() - tool_started) * 1000, 2)
+                routed_tools = [
+                    name
+                    for name in routed_tools
+                    if name != "inspect_attachment"
+                ]
+
+            tool_routing_ms = round(
+                (time.perf_counter() - tool_started) * 1000,
+                2,
+            )
 
             multimodal_tool_names = {
                 "inspect_attachment",
@@ -341,6 +368,14 @@ async def send_streaming_chat(request: PersistentChatRequest):
                     "memory_retrieval_ms": memory_retrieval_ms,
                     "tool_count": len(routed_tools),
                     "tool_names": routed_tools,
+                    "capability_needs": [
+                        item.as_dict()
+                        for item in capability_plan.needs
+                    ],
+                    "capability_resolutions": [
+                        item.as_dict()
+                        for item in capability_plan.resolutions
+                    ],
                     "tool_routing_ms": tool_routing_ms,
                     "history_messages": len(history),
                     "history_chars": history_chars,
@@ -369,6 +404,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 profile_prompt,
                 memory_context,
                 memory_action_context,
+                capability_plan.prompt_context(),
                 tool_context,
                 VOICE_RESPONSE_STYLE if request.voice_mode else "",
                 # Always last: recency-weighted identity reminder.
@@ -390,6 +426,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 tool_names=routed_tools,
                 current_images=attachment_images,
                 attachment_context=attachment_context,
+                capability_bindings=capability_plan.tool_bindings,
             ):
                 event_type = event.get("type")
 
@@ -492,6 +529,10 @@ async def send_streaming_chat(request: PersistentChatRequest):
                                 "memory_count": len(memory_hits),
                                 "tool_routing_ms": tool_routing_ms,
                                 "tool_names": routed_tools,
+                                "capability_resolutions": [
+                                    item.as_dict()
+                                    for item in capability_plan.resolutions
+                                ],
                                 "history_messages": len(history),
                                 "history_chars": history_chars,
                                 "response_model": response_model,

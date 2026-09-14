@@ -79,7 +79,9 @@ def wrap_stream_agent(
         tool_names: list[str] | None = None,
         current_images: list[str] | None = None,
         attachment_context: str = "",
+        capability_bindings: dict[str, dict[str, Any]] | None = None,
     ):
+        # JACE_STEP4A4_BRIDGE_BINDING
         names = list(tool_names or [])
 
         forced_director = build_forced_director_call(
@@ -114,6 +116,7 @@ def wrap_stream_agent(
                 tool_names=tool_names,
                 current_images=current_images,
                 attachment_context=attachment_context,
+                capability_bindings=capability_bindings,
             ):
                 yield event
             return

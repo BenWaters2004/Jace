@@ -23,6 +23,7 @@ class ToolContext:
     session: AsyncSession
     conversation_id: str | None
     user_message: str
+    capability_binding: dict[str, Any] | None = None
 
 
 @dataclass
@@ -46,11 +47,12 @@ class ToolDefinition:
     default_permission: ToolPermissionMode
     input_model: type[BaseModel]
     handler: ToolHandler
+    provider_id: str | None = None
+    capability_id: str | None = None
 
     def ollama_schema(self) -> dict[str, Any]:
         schema = self.input_model.model_json_schema()
         schema.pop("title", None)
-
         return {
             "type": "function",
             "function": {
