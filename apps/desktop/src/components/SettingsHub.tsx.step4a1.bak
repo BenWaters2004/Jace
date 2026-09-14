@@ -1,9 +1,6 @@
 // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
 import type { ComponentProps } from "react";
 import { ControlView } from "./ControlView";
-// JACE_STEP4A1_CONNECTIONS_FOUNDATION
-import { CapabilityOverview } from "./CapabilityOverview";
-import { ConnectionsView } from "./ConnectionsView";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { DesktopWindowModeSettings } from "./DesktopWindowModeSettings";
 import { SettingsView } from "./SettingsView";
@@ -74,9 +71,14 @@ function ConnectionsSection() {
       <SectionHeader
         kicker="Connections"
         title="Accounts & APIs"
-        description="Connect external accounts and API endpoints without turning providers into permanent workspace tabs. Credentials remain outside Jace's SQLite database."
+        description="This is the home for provider authentication and API connections. Phase 4A will add the connector runtime without turning providers into workspace tabs."
       />
-      <ConnectionsView />
+      <div className="settings-hub-card-grid">
+        <ConnectionCard name="Google" detail="Personal Gmail, Google Calendar and future Drive access." capability="email · calendar · files" />
+        <ConnectionCard name="Microsoft" detail="Work Outlook / Microsoft 365, calendar and future OneDrive access." capability="email · calendar · files" />
+        <ConnectionCard name="GitHub" detail="Repository context, issues, pull requests and development workflows." capability="code · repositories" />
+        <ConnectionCard name="Custom API" detail="Register an API connection without adding another permanent workspace tab." capability="custom capabilities" />
+      </div>
     </section>
   );
 }
@@ -106,10 +108,9 @@ function CapabilitiesSection(props: { tools: ToolsProps }) {
     <section className="settings-hub-section settings-hub-embedded-section">
       <SectionHeader
         kicker="Capabilities"
-        title="Capabilities & tools"
-        description="A unified registry shows what Jace can use now, what is configured, and what still needs a provider implementation. Existing tool permissions remain authoritative."
+        title="Tools"
+        description="Configure the capabilities Jace can invoke. This is the existing Tools workspace, moved under Settings rather than removed."
       />
-      <CapabilityOverview />
       <ToolsView {...props.tools} />
     </section>
   );

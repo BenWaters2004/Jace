@@ -47,12 +47,6 @@ import type {
   StreamDoneEvent,
   StreamToolCallEvent,
   StreamToolResultEvent,
-  CapabilitySnapshotResponse,
-  ConnectionCreateRequest,
-  ConnectionListResponse,
-  ConnectionProviderListResponse,
-  ConnectionRecord,
-  ConnectionUpdateRequest,
   ToolApprovalDecision,
   ToolApprovalDecisionResponse,
   ToolAuditListResponse,
@@ -264,32 +258,6 @@ export async function markAutomationNotificationRead(id: string): Promise<void> 
 export async function markAllAutomationNotificationsRead(): Promise<void> {
   await request("/automations/notifications/read-all", { method: "POST" });
 }
-
-
-// JACE_STEP4A1_CONNECTIONS_FOUNDATION
-export const getConnectionProviders = () =>
-  request<ConnectionProviderListResponse>("/connections/providers");
-export const getConnections = () =>
-  request<ConnectionListResponse>("/connections");
-export const createConnection = (payload: ConnectionCreateRequest) =>
-  request<ConnectionRecord>("/connections", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-export const updateConnection = (id: string, payload: ConnectionUpdateRequest) =>
-  request<ConnectionRecord>(`/connections/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
-export const disconnectConnection = (id: string) =>
-  request<ConnectionRecord>(`/connections/${encodeURIComponent(id)}/disconnect`, {
-    method: "POST",
-  });
-export async function deleteConnection(id: string): Promise<void> {
-  await request(`/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
-}
-export const getCapabilities = () =>
-  request<CapabilitySnapshotResponse>("/capabilities");
 
 export const getTools = () => request<ToolListResponse>("/tools");
 export const updateToolPermission = (name: string, permission: ToolPermissionMode) =>

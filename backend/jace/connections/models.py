@@ -1,0 +1,27 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import DateTime, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from jace.db.models import Base, new_id, utc_now
+
+
+class ConnectionRecord(Base):
+    """Non-secret connection metadata. Credentials are kept in the OS credential vault."""
+
+    __tablename__ = "connections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    provider_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="configured", index=True)
+    auth_type: Mapped[str] = mapped_column(String(40), nullable=False, default="none")
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    capabilities_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    account_hint: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
