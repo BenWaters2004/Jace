@@ -325,6 +325,10 @@ class ToolAuditResponse(BaseModel):
     result_preview: str | None
     error: str | None
     approval_id: str | None
+    provider_id: str | None = None
+    connection_id: str | None = None
+    capability_id: str | None = None
+    account_hint: str | None = None
     created_at: datetime
     completed_at: datetime | None
 
@@ -342,6 +346,10 @@ class ToolApprovalDecisionResponse(BaseModel):
     resolved: bool
     decision: str
     tool_name: str
+    provider_id: str | None = None
+    connection_id: str | None = None
+    capability_id: str | None = None
+    account_hint: str | None = None
 
 
 class PendingToolApprovalResponse(BaseModel):
@@ -356,6 +364,10 @@ class PendingToolApprovalResponse(BaseModel):
     source: str = "chat"
     task_id: str | None = None
     agent_id: str | None = None
+    provider_id: str | None = None
+    connection_id: str | None = None
+    capability_id: str | None = None
+    account_hint: str | None = None
 
 
 class PendingToolApprovalsResponse(BaseModel):

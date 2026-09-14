@@ -322,6 +322,10 @@ export interface StreamToolCallEvent {
   risk: ToolRisk;
   permission: ToolPermissionMode;
   arguments: Record<string, unknown>;
+  provider_id?: string | null;
+  connection_id?: string | null;
+  capability_id?: string | null;
+  account_hint?: string | null;
 }
 
 export interface StreamApprovalRequiredEvent {
@@ -333,6 +337,10 @@ export interface StreamApprovalRequiredEvent {
   description: string;
   risk: ToolRisk;
   arguments: Record<string, unknown>;
+  provider_id?: string | null;
+  connection_id?: string | null;
+  capability_id?: string | null;
+  account_hint?: string | null;
 }
 
 export interface StreamToolResultEvent {
@@ -503,6 +511,10 @@ export interface ToolAuditRecord {
   result_preview: string | null;
   error: string | null;
   approval_id: string | null;
+  provider_id: string | null;
+  connection_id: string | null;
+  capability_id: string | null;
+  account_hint: string | null;
   created_at: string;
   completed_at: string | null;
 }
@@ -524,6 +536,10 @@ export interface PendingToolApproval {
   source?: string;
   task_id?: string | null;
   agent_id?: string | null;
+  provider_id?: string | null;
+  connection_id?: string | null;
+  capability_id?: string | null;
+  account_hint?: string | null;
 }
 
 export interface PendingToolApprovalsResponse {
@@ -547,6 +563,10 @@ export interface ToolActivity {
   risk?: ToolRisk;
   permission?: ToolPermissionMode;
   summary?: string;
+  provider_id?: string | null;
+  connection_id?: string | null;
+  capability_id?: string | null;
+  account_hint?: string | null;
 }
 
 

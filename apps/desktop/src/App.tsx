@@ -656,6 +656,10 @@ export default function App(
         description: event.description,
         risk: event.risk,
         permission: event.permission,
+        provider_id: event.provider_id,
+        connection_id: event.connection_id,
+        capability_id: event.capability_id,
+        account_hint: event.account_hint,
       };
       return [...current.filter((item) => item.callId !== event.call_id), next];
     });
@@ -671,6 +675,10 @@ export default function App(
       description: event.description,
       risk: event.risk,
       arguments: event.arguments,
+      provider_id: event.provider_id,
+      connection_id: event.connection_id,
+      capability_id: event.capability_id,
+      account_hint: event.account_hint,
     });
 
     setToolActivity((current) => current.map((item) =>

@@ -24,6 +24,10 @@ class PendingApproval:
     source: str = "chat"
     task_id: str | None = None
     agent_id: str | None = None
+    provider_id: str | None = None
+    connection_id: str | None = None
+    capability_id: str | None = None
+    account_hint: str | None = None
 
 
 class ApprovalManager:
@@ -42,6 +46,10 @@ class ApprovalManager:
         source: str = "chat",
         task_id: str | None = None,
         agent_id: str | None = None,
+        provider_id: str | None = None,
+        connection_id: str | None = None,
+        capability_id: str | None = None,
+        account_hint: str | None = None,
     ) -> PendingApproval:
         loop = asyncio.get_running_loop()
         approval = PendingApproval(
@@ -57,6 +65,10 @@ class ApprovalManager:
             source=source,
             task_id=task_id,
             agent_id=agent_id,
+            provider_id=provider_id,
+            connection_id=connection_id,
+            capability_id=capability_id,
+            account_hint=account_hint,
         )
         self._pending[approval.approval_id] = approval
         return approval

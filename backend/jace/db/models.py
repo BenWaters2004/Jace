@@ -185,6 +185,13 @@ class ToolAuditLog(Base):
     result_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     approval_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    # JACE_STEP4A5_CONNECTION_AUDIT
+    provider_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    connection_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    capability_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    account_hint: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from jace.ai.engine import OllamaRequestError, stream_chat
 from jace.config import settings
+from jace.capabilities.security import validate_external_tool_binding
 from jace.database import SessionLocal
 from jace.tools import ensure_tools_registered
 from jace.tools.approvals import approval_manager
@@ -185,23 +186,20 @@ def _effective_permission(
     if not capability_binding:
         return tool_permission
 
+    # JACE_STEP4A5_EXTERNAL_BINDING_REVALIDATION
+    # Connection capability policy controls normal external access.
+    # A global tool Deny remains an emergency kill switch.
+    if tool_permission == "deny":
+        return "deny"
+
     capability_permission = str(
         capability_binding.get("permission") or "ask"
     )
 
     if capability_permission not in _PERMISSION_ORDER:
-        capability_permission = "ask"
+        return "ask"
 
-    tool_permission = (
-        tool_permission
-        if tool_permission in _PERMISSION_ORDER
-        else "ask"
-    )
-
-    return max(
-        (tool_permission, capability_permission),
-        key=lambda value: _PERMISSION_ORDER[value],
-    )
+    return capability_permission
 
 
 def _capability_binding_error(
@@ -305,6 +303,32 @@ async def _execute_tool_call(
         return
 
     async with SessionLocal() as session:
+        capability_binding, runtime_binding_error = await validate_external_tool_binding(
+            session,
+            definition,
+            capability_binding,
+        )
+
+    if runtime_binding_error:
+        yield {
+            "type": "tool_result",
+            "call_id": "",
+            "tool_name": tool_name,
+            "label": definition.label,
+            "status": "denied",
+            "summary": runtime_binding_error,
+        }
+        yield {
+            "type": "_tool_message",
+            "message": {
+                "role": "tool",
+                "tool_name": tool_name,
+                "content": runtime_binding_error,
+            },
+        }
+        return
+
+    async with SessionLocal() as session:
         tool_permission = await get_tool_permission(
             session,
             tool_name,
@@ -319,6 +343,10 @@ async def _execute_tool_call(
             tool_name=tool_name,
             permission_mode=permission,
             arguments=arguments,
+            provider_id=(capability_binding or {}).get("provider_id"),
+            connection_id=(capability_binding or {}).get("connection_id"),
+            capability_id=(capability_binding or {}).get("capability_id"),
+            account_hint=(capability_binding or {}).get("account_hint"),
         )
 
     call_id = audit.id
@@ -332,6 +360,10 @@ async def _execute_tool_call(
         "risk": definition.risk,
         "permission": permission,
         "arguments": arguments,
+        "provider_id": (capability_binding or {}).get("provider_id"),
+        "connection_id": (capability_binding or {}).get("connection_id"),
+        "capability_id": (capability_binding or {}).get("capability_id"),
+        "account_hint": (capability_binding or {}).get("account_hint"),
     }
 
     if permission == "deny":
@@ -370,6 +402,10 @@ async def _execute_tool_call(
             description=definition.description,
             risk=definition.risk,
             arguments=arguments,
+            provider_id=(capability_binding or {}).get("provider_id"),
+            connection_id=(capability_binding or {}).get("connection_id"),
+            capability_id=(capability_binding or {}).get("capability_id"),
+            account_hint=(capability_binding or {}).get("account_hint"),
         )
 
         async with SessionLocal() as session:
@@ -389,6 +425,10 @@ async def _execute_tool_call(
             "description": definition.description,
             "risk": definition.risk,
             "arguments": arguments,
+            "provider_id": (capability_binding or {}).get("provider_id"),
+            "connection_id": (capability_binding or {}).get("connection_id"),
+            "capability_id": (capability_binding or {}).get("capability_id"),
+            "account_hint": (capability_binding or {}).get("account_hint"),
         }
 
         try:
@@ -458,6 +498,43 @@ async def _execute_tool_call(
                 audit.id,
                 status="approved",
             )
+
+    # Revalidate after any approval wait. A disconnect or policy change while
+    # the modal is open must invalidate the pending external action.
+    async with SessionLocal() as session:
+        capability_binding, runtime_binding_error = await validate_external_tool_binding(
+            session,
+            definition,
+            capability_binding,
+        )
+
+    if runtime_binding_error:
+        async with SessionLocal() as session:
+            await update_tool_audit(
+                session,
+                audit.id,
+                status="denied",
+                error=runtime_binding_error,
+                completed=True,
+            )
+
+        yield {
+            "type": "tool_result",
+            "call_id": call_id,
+            "tool_name": tool_name,
+            "label": definition.label,
+            "status": "denied",
+            "summary": runtime_binding_error,
+        }
+        yield {
+            "type": "_tool_message",
+            "message": {
+                "role": "tool",
+                "tool_name": tool_name,
+                "content": runtime_binding_error,
+            },
+        }
+        return
 
     try:
         async with SessionLocal() as session:

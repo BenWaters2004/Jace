@@ -2,6 +2,9 @@ import json
 
 from fastapi import APIRouter, HTTPException, Query
 
+from jace.capabilities.permissions import (
+    set_permission as set_capability_permission,
+)
 from jace.config import settings
 from jace.database import SessionLocal
 from jace.schemas import (
@@ -68,12 +71,18 @@ async def list_tools():
 
 
 @router.patch("/{tool_name}/permission", response_model=ToolResponse)
-async def patch_tool_permission(tool_name: str, request: ToolPermissionUpdate):
+async def patch_tool_permission(
+    tool_name: str,
+    request: ToolPermissionUpdate,
+):
     ensure_tools_registered()
     definition = registry.get(tool_name)
 
     if definition is None:
-        raise HTTPException(status_code=404, detail="Tool not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Tool not found.",
+        )
 
     async with SessionLocal() as session:
         try:
@@ -83,7 +92,10 @@ async def patch_tool_permission(tool_name: str, request: ToolPermissionUpdate):
                 request.permission,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
 
     return ToolResponse(
         name=definition.name,
@@ -121,6 +133,10 @@ async def tool_audit(
                 result_preview=entry.result_preview,
                 error=entry.error,
                 approval_id=entry.approval_id,
+                provider_id=entry.provider_id,
+                connection_id=entry.connection_id,
+                capability_id=entry.capability_id,
+                account_hint=entry.account_hint,
                 created_at=entry.created_at,
                 completed_at=entry.completed_at,
             )
@@ -133,7 +149,11 @@ async def tool_audit(
 async def clear_audit():
     async with SessionLocal() as session:
         count = await clear_tool_audit(session)
-    return {"success": True, "deleted": count}
+
+    return {
+        "success": True,
+        "deleted": count,
+    }
 
 
 @router.get("/approvals", response_model=PendingToolApprovalsResponse)
@@ -152,6 +172,10 @@ async def pending_approvals():
                 source=approval.source,
                 task_id=approval.task_id,
                 agent_id=approval.agent_id,
+                provider_id=approval.provider_id,
+                connection_id=approval.connection_id,
+                capability_id=approval.capability_id,
+                account_hint=approval.account_hint,
             )
             for approval in approval_manager.list()
         ]
@@ -167,22 +191,42 @@ async def resolve_approval(
     request: ToolApprovalDecisionRequest,
 ):
     approval = approval_manager.get(approval_id)
+
     if approval is None:
         raise HTTPException(
             status_code=404,
             detail="This tool approval is no longer pending.",
         )
 
-    approved = request.decision in {"allow_once", "allow_always"}
+    approved = request.decision in {
+        "allow_once",
+        "allow_always",
+    }
 
-    if request.decision in {"allow_always", "deny_always"}:
-        new_permission = "allow" if request.decision == "allow_always" else "deny"
+    if request.decision in {
+        "allow_always",
+        "deny_always",
+    }:
+        new_permission = (
+            "allow"
+            if request.decision == "allow_always"
+            else "deny"
+        )
+
         async with SessionLocal() as session:
-            await set_tool_permission(
-                session,
-                approval.tool_name,
-                new_permission,
-            )
+            if approval.connection_id and approval.capability_id:
+                await set_capability_permission(
+                    session,
+                    approval.connection_id,
+                    approval.capability_id,
+                    new_permission,
+                )
+            else:
+                await set_tool_permission(
+                    session,
+                    approval.tool_name,
+                    new_permission,
+                )
 
     resolved = approval_manager.resolve(
         approval_id,
@@ -194,4 +238,8 @@ async def resolve_approval(
         resolved=resolved is not None,
         decision=request.decision,
         tool_name=approval.tool_name,
+        provider_id=approval.provider_id,
+        connection_id=approval.connection_id,
+        capability_id=approval.capability_id,
+        account_hint=approval.account_hint,
     )
