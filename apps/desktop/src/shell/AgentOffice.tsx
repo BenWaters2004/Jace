@@ -1,4 +1,5 @@
 import {
+  Component,
   useEffect,
   useState,
   type FormEvent,
@@ -1044,6 +1045,36 @@ function ExecutorStrip(props: {
 
 
 // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
+
+
+// JACE_PHASE3G1_WORKSPACE_HOTFIX_V6
+class AgentSystemErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: string | null }
+> {
+  state: { error: string | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="agent-system-error-fallback" role="alert">
+          <strong>System dashboard could not render</strong>
+          <span>{this.state.error}</span>
+          <small>The Agent Office is still running underneath this panel.</small>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function AgentSystemOverview(props: {
   managerRunning: boolean;
   realtimeConnected: boolean;
@@ -1051,17 +1082,27 @@ function AgentSystemOverview(props: {
   busyCount: number;
   taskCount: number;
 }) {
+  const safeWorkerCount = Number.isFinite(Number(props.workerCount))
+    ? Math.max(0, Number(props.workerCount))
+    : 0;
+  const safeBusyCount = Number.isFinite(Number(props.busyCount))
+    ? Math.max(0, Number(props.busyCount))
+    : 0;
+  const safeTaskCount = Number.isFinite(Number(props.taskCount))
+    ? Math.max(0, Number(props.taskCount))
+    : 0;
+
   return (
     <div className="agent-system-view">
       <div className="agent-system-summary">
         <article><span>Manager</span><strong>{props.managerRunning ? "Running" : "Offline"}</strong></article>
         <article><span>Event stream</span><strong>{props.realtimeConnected ? "Live" : "Sync"}</strong></article>
-        <article><span>Workers</span><strong>{props.workerCount}</strong></article>
-        <article><span>Active jobs</span><strong>{props.busyCount}</strong></article>
+        <article><span>Workers</span><strong>{safeWorkerCount}</strong></article>
+        <article><span>Active jobs</span><strong>{safeBusyCount}</strong></article>
       </div>
       <div className="agent-system-future-heading">
         <strong>System telemetry</strong>
-        <span>{props.taskCount} stored agent task{props.taskCount === 1 ? "" : "s"}</span>
+        <span>{safeTaskCount} stored agent task{safeTaskCount === 1 ? "" : "s"}</span>
       </div>
       <div className="agent-system-future-grid">
         <article><span>CPU</span><strong>Collector planned</strong></article>
@@ -1085,6 +1126,8 @@ export function AgentOffice(props: {
   void props.activities;
 
   const office = useAgentOffice();
+  // JACE_PHASE3G1_WORKSPACE_HOTFIX_V4
+  // JACE_PHASE3G1_WORKSPACE_HOTFIX_V5
   const [officeView, setOfficeView] = useState<"office" | "system">("office");
   const readiness = useAgentReadiness();
   const diagnostics = useAgentDiagnostics();
@@ -1097,150 +1140,85 @@ export function AgentOffice(props: {
   return (
     <section className="cc-panel agent-office-panel phase11-agent-office" data-office-view={officeView}>
       <div className="cc-panel-topline agent-office-topline">
-        <div>
-          <span className="cc-kicker">Jace office</span>
-          <strong>
-            {office.error
-              ? "Agent office unavailable"
-              : busyExecutors > 0
-                ? `${busyExecutors} job${busyExecutors === 1 ? "" : "s"} running${queuedCount > 0 ? ` · ${queuedCount} queued` : ""}`
-                : queuedCount > 0
-                  ? `${queuedCount} job${queuedCount === 1 ? "" : "s"} queued`
-                  : "Agents standing by"}
-          </strong>
+        <div className="agent-office-title">
+          <strong>Agent Office</strong>
         </div>
-
         <div className="agent-office-actions">
           <div className="agent-office-view-switch" role="tablist" aria-label="Agent office view">
             <button type="button" role="tab" aria-selected={officeView === "office"} className={officeView === "office" ? "active" : ""} onClick={() => setOfficeView("office")}>OFFICE</button>
             <button type="button" role="tab" aria-selected={officeView === "system"} className={officeView === "system" ? "active" : ""} onClick={() => setOfficeView("system")}>SYSTEM</button>
           </div>
-          <button
-            type="button"
-            className="agent-diagnostic-run-all"
-            disabled={diagnostics.runningAll || (diagnostics.snapshot?.counts.running ?? 0) > 0}
-            onClick={() => void diagnostics.runAll()}
-            title="Run safe end-to-end tests for every testable specialist"
-          >
-            {diagnostics.runningAll ? "QUEUEING…" : "TEST AGENTS"}
-          </button>
-          {readiness.snapshot && (
-            <div className="agent-readiness-overview" title="Specialist runtime readiness">
-              {readiness.counts.unavailable > 0 && (
-                <span className="agent-readiness-overview-pill unavailable">
-                  {readiness.counts.unavailable} unavailable
-                </span>
-              )}
-              {readiness.counts.degraded > 0 && (
-                <span className="agent-readiness-overview-pill degraded">
-                  {readiness.counts.degraded} degraded
-                </span>
-              )}
-              {readiness.counts.unavailable === 0 && readiness.counts.degraded === 0 && (
-                <span className="agent-readiness-overview-pill ready">
-                  all ready
-                </span>
-              )}
-            </div>
-          )}
-          <span
-            className={`agent-realtime-pill ${
-              office.realtimeConnected ? "online" : "fallback"
-            }`}
-            title={
-              office.realtimeConnected
-                ? "Receiving live runtime events"
-                : "Runtime event stream disconnected"
-            }
-          >
-            {office.realtimeConnected ? "LIVE" : "SYNC"}
-          </span>
-
-          {office.status && (
-            <span
-              className={`agent-manager-pill ${
-                office.status.manager_running ? "online" : "offline"
-              }`}
-            >
-              {office.status.manager_running ? "●" : "○"} {busyExecutors}/{workerCount} worker
-{workerCount === 1 ? "" : "s"} busy
-            </span>
-          )}
-
-          {/* JACE_DESKTOP_WINDOWS_PHASE_2A */}
-          {props.controls ?? (
-            <button
-              className="cc-icon-button"
-              onClick={props.onExpand}
-              title="Focus agent office"
-            >
-              □
-            </button>
-          )}
+          {props.controls}
         </div>
       </div>
 
-      {office.error && office.tasks.length === 0 ? (
-        <div className="agent-office-error">
-          <strong>Could not connect to background agents</strong>
-          <span>{office.error}</span>
-          <button
-            type="button"
-            onClick={() => void office.refresh()}
-          >
-            Retry
-          </button>
+      <div className="agent-office-view-host">
+        <div className="agent-office-office-layer">
+          {office.error && office.tasks.length === 0 ? (
+                            <div className="agent-office-error">
+                              <strong>Could not connect to background agents</strong>
+                              <span>{office.error}</span>
+                              <button
+                                type="button"
+                                onClick={() => void office.refresh()}
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="agent-office-stage">
+                              <ExecutorStrip office={office} />
+                              <PixelAgentOffice
+                                workers={office.workers}
+                                selectedWorkerId={office.selectedWorkerId}
+                                onSelectWorker={office.selectWorker}
+                              />
+          
+                              <AgentInteractionPanel office={office} readiness={readiness} diagnostics={diagnostics} />
+          
+                              {office.notice && (
+                                <button
+                                  type="button"
+                                  className={`agent-office-notice ${office.notice.kind}`}
+                                  onClick={() => {
+                                    const primaryWorker = office.workers.find(
+                                      (worker) =>
+                                        worker.definition.id === office.notice!.task.agent_id &&
+                                        worker.overflowIndex === 0,
+                                    );
+          
+                                    if (primaryWorker) office.selectWorker(primaryWorker.id);
+                                    office.setSelectedTaskId(office.notice!.task.id);
+                                  }}
+                                >
+                                  <span>{office.notice.kind === "failed" ? "!" : "✓"}</span>
+                                  <div>
+                                    <strong>{office.notice.task.agent_name}</strong>
+                                    <small>
+                                      {office.notice.kind === "failed"
+                                        ? "Task failed"
+                                        : "Task complete"}
+                                      {": "}
+                                      {office.notice.task.title}
+                                    </small>
+                                  </div>
+                                </button>
+                              )}
+                            </div>
+                          )}
         </div>
-      ) : (
-        <div className="agent-office-stage">
-          <ExecutorStrip office={office} />
-          <PixelAgentOffice
-            workers={office.workers}
-            selectedWorkerId={office.selectedWorkerId}
-            onSelectWorker={office.selectWorker}
-          />
-
-          <AgentInteractionPanel office={office} readiness={readiness} diagnostics={diagnostics} />
-
-          {office.notice && (
-            <button
-              type="button"
-              className={`agent-office-notice ${office.notice.kind}`}
-              onClick={() => {
-                const primaryWorker = office.workers.find(
-                  (worker) =>
-                    worker.definition.id === office.notice!.task.agent_id &&
-                    worker.overflowIndex === 0,
-                );
-
-                if (primaryWorker) office.selectWorker(primaryWorker.id);
-                office.setSelectedTaskId(office.notice!.task.id);
-              }}
-            >
-              <span>{office.notice.kind === "failed" ? "!" : "✓"}</span>
-              <div>
-                <strong>{office.notice.task.agent_name}</strong>
-                <small>
-                  {office.notice.kind === "failed"
-                    ? "Task failed"
-                    : "Task complete"}
-                  {": "}
-                  {office.notice.task.title}
-                </small>
-              </div>
-            </button>
-          )}
-        </div>
-      )}
-      {officeView === "system" && (
-        <AgentSystemOverview
-          managerRunning={Boolean(office.status?.manager_running)}
-          realtimeConnected={office.realtimeConnected}
-          workerCount={workerCount}
-          busyCount={busyCount}
-          taskCount={office.tasks.length}
-        />
-      )}
+        {officeView === "system" && (
+          <AgentSystemErrorBoundary>
+            <AgentSystemOverview
+            managerRunning={Boolean(office.status?.manager_running)}
+            realtimeConnected={office.realtimeConnected}
+            workerCount={workerCount}
+            busyCount={busyCount}
+            taskCount={office.tasks.length}
+            />
+          </AgentSystemErrorBoundary>
+        )}
+      </div>
     </section>
   );
 }

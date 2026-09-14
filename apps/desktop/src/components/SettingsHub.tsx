@@ -1,6 +1,7 @@
 // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
 import type { ComponentProps } from "react";
 import { ControlView } from "./ControlView";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { DesktopWindowModeSettings } from "./DesktopWindowModeSettings";
 import { SettingsView } from "./SettingsView";
 import { ToolsView } from "./ToolsView";
@@ -82,25 +83,22 @@ function ConnectionsSection() {
   );
 }
 
+// JACE_PHASE3G1_WORKSPACE_HOTFIX_V4
 function AppearanceSection() {
   return (
     <section className="settings-hub-section">
       <SectionHeader
         kicker="Appearance"
-        title="Window & layout"
-        description="Desktop window behaviour now lives with visual settings. Colour themes are reserved here for the next appearance pass."
+        title="Appearance"
+        description="Theme, desktop window behaviour and workspace layout live together here."
       />
+      <div className="settings-hub-theme-panel">
+        <AppearanceSettings />
+      </div>
       <div className="settings-hub-embedded-grid">
         <DesktopWindowModeSettings />
         <WindowLayoutSettings />
       </div>
-      <article className="settings-hub-placeholder-card full">
-        <div className="settings-hub-placeholder-head">
-          <strong>Colour themes</strong>
-          <span className="settings-hub-status planned">PLACEHOLDER</span>
-        </div>
-        <p>Semantic theme variables will support Dark, Light, AMOLED, high-contrast and custom Jace themes without rebuilding individual components.</p>
-      </article>
     </section>
   );
 }

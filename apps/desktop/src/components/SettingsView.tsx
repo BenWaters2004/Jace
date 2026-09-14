@@ -15,7 +15,6 @@ import type {
   VoiceStatus,
 } from "../types";
 
-import { AppearanceSettings } from "./AppearanceSettings";
 interface SettingsViewProps {
   settings: AssistantSettings;
   voiceSettings: VoiceSettings;
@@ -299,6 +298,7 @@ function VoiceReadyPill(props: {
 }
 
 // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
+// JACE_PHASE3G1_WORKSPACE_HOTFIX_V4
 function SettingsViewContent(props: SettingsViewProps) {
   const normalizedSettings = useMemo(
     () => normalizeAssistantSettings(props.settings),
@@ -436,8 +436,6 @@ function SettingsViewContent(props: SettingsViewProps) {
 
       <div className="settings-grid">
         {/* JACE_DESKTOP_WINDOWS_PHASE_2C */}
-        {/* JACE_DESKTOP_WINDOWS_PHASE_2E */}
-        <AppearanceSettings />
         {/* JACE_DESKTOP_WINDOWS_PHASE_2D */}
         <section className="settings-card">
           <div className="settings-card-heading">

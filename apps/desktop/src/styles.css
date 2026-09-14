@@ -5579,11 +5579,6 @@ details.rich-attachment-card > .rich-attachment-heading {
   letter-spacing: .08em;
 }
 
-.phase11-agent-office[data-office-view="system"] > .agent-office-stage,
-.phase11-agent-office[data-office-view="system"] > .agent-office-error {
-  display: none !important;
-}
-
 .agent-system-view {
   display: flex;
   flex-direction: column;
@@ -5674,5 +5669,124 @@ details.rich-attachment-card > .rich-attachment-heading {
   .agent-office-view-switch * {
     scroll-behavior: auto !important;
   }
+}
+
+/* JACE_PHASE3G1_WORKSPACE_HOTFIX_V4 */
+.agent-office-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.agent-office-title strong {
+  overflow: hidden;
+  color: var(--jace-text, #e6e9ed);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-office-actions {
+  gap: 5px;
+}
+
+.settings-hub-theme-panel {
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.settings-hub-theme-panel > .settings-card,
+.settings-hub-theme-panel > .appearance-settings-card {
+  margin-top: 0;
+}
+
+/* JACE_PHASE3G1_WORKSPACE_HOTFIX_V5 */
+/*
+ * OFFICE and SYSTEM share the same grid cell. The pixel-office tree remains
+ * mounted and retains real dimensions while SYSTEM is visible, avoiding both
+ * display:none/0x0 canvas transitions and dispose/remount churn.
+ */
+.agent-office-view-host {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.agent-office-office-layer,
+.agent-system-view {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.agent-office-office-layer {
+  display: flex;
+  flex-direction: column;
+  z-index: 1;
+}
+
+.agent-system-view {
+  position: relative;
+  z-index: 2;
+}
+
+.agent-office-actions > .jace-panel-controls {
+  flex: 0 0 auto;
+}
+
+/* JACE_PHASE3G1_WORKSPACE_HOTFIX_V6 */
+/*
+ * SYSTEM is now a pure opaque overlay. The Pixel Office below is not hidden,
+ * resized, unmounted, disposed or assigned visibility:hidden when the tab is
+ * selected. This keeps its live ResizeObserver/canvas engine lifecycle stable.
+ */
+.agent-office-view-host {
+  position: relative;
+  isolation: isolate;
+}
+
+.agent-office-office-layer {
+  position: relative;
+  z-index: 1;
+}
+
+.agent-system-view,
+.agent-system-error-fallback {
+  position: absolute !important;
+  inset: 0;
+  z-index: 30 !important;
+  box-sizing: border-box;
+  background: var(--jace-panel, #11161d);
+}
+
+.agent-system-view {
+  overflow: auto;
+}
+
+.agent-system-error-fallback {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.agent-system-error-fallback strong {
+  font-size: 13px;
+}
+
+.agent-system-error-fallback span {
+  max-width: 560px;
+  color: var(--jace-danger, #e78282);
+  overflow-wrap: anywhere;
+}
+
+.agent-system-error-fallback small {
+  color: var(--jace-text-muted, #7f8b96);
 }
 

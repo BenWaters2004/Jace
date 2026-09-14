@@ -2,6 +2,7 @@ import {
   useEffect,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import type { ToolActivity } from "../types";
 import {
@@ -15,12 +16,16 @@ import type {
 import {
   useAgentOffice,
 } from "../agents/useAgentOffice";
+import { useAgentReadiness } from "../agents/useAgentReadiness";
+import { useAgentDiagnostics } from "../agents/useAgentDiagnostics";
 import {
   PixelAgentOffice,
 } from "./PixelAgentOffice";
 import "./AgentOffice.css";
 import "./AgentOfficeVisuals.css";
 import "./AgentInteractions.css";
+import "./AgentReadiness.css";
+import "./AgentDiagnostics.css";
 
 function formatElapsed(
   start: string | null,
@@ -93,6 +98,9 @@ function taskActivityText(task: AgentTask): string {
 }
 
 type AgentOfficeState = ReturnType<typeof useAgentOffice>;
+type AgentReadinessState = ReturnType<typeof useAgentReadiness>;
+type AgentDiagnosticsState = ReturnType<typeof useAgentDiagnostics>;
+// Phase 1E: specialist runtime readiness
 
 function TaskTools(props: {
   task: AgentTask;
@@ -125,15 +133,20 @@ function TaskTools(props: {
 
 function AgentToolCapabilities(props: {
   office: AgentOfficeState;
+  readiness: AgentReadinessState;
 }) {
   const definition = props.office.selectedAgentDefinition;
   if (!definition) return null;
 
+  const agentReadiness = props.readiness.byAgentId.get(definition.id) ?? null;
+  const readinessByTool = new Map(
+    (agentReadiness?.tools ?? []).map((tool) => [tool.name, tool]),
+  );
   const tools = [
-    ...definition.default_tools.map((tool) => ({ tool, kind: "default" })),
+    ...definition.default_tools.map((tool) => ({ tool, kind: "default" as const })),
     ...definition.optional_tools
       .filter((tool) => !definition.default_tools.includes(tool))
-      .map((tool) => ({ tool, kind: "optional" })),
+      .map((tool) => ({ tool, kind: "optional" as const })),
   ];
 
   if (tools.length === 0) {
@@ -146,20 +159,186 @@ function AgentToolCapabilities(props: {
 
   return (
     <div className="agent-interaction-tool-grid capabilities">
-      {tools.map(({ tool, kind }) => (
-        <span key={`${kind}-${tool}`} className={kind}>
-          {tool}
-          <small>{kind}</small>
-        </span>
-      ))}
+      {tools.map(({ tool, kind }) => {
+        const state = readinessByTool.get(tool);
+        const permission = state?.permission ?? "unknown";
+        const className = [
+          kind,
+          "agent-tool-readiness",
+          permission,
+        ].join(" ");
+        return (
+          <span
+            key={`${kind}-${tool}`}
+            className={className}
+            title={
+              state
+                ? `${state.label} · ${state.permission}${state.requires_approval ? " · approval required" : ""}`
+                : "Readiness has not been checked yet"
+            }
+          >
+            {tool}
+            <small>
+              {kind} · {state?.registered === false ? "missing" : permission}
+            </small>
+          </span>
+        );
+      })}
     </div>
+  );
+}
+
+function AgentReadinessPanel(props: {
+  office: AgentOfficeState;
+  readiness: AgentReadinessState;
+}) {
+  const agent = props.office.selectedAgentDefinition;
+  if (!agent) return null;
+
+  const state = props.readiness.byAgentId.get(agent.id) ?? null;
+  if (!state) {
+    return (
+      <section className="agent-readiness-card">
+        <div className="agent-readiness-head">
+          <div>
+            <span>Runtime readiness</span>
+            <strong>{props.readiness.error ? "Readiness unavailable" : "Checking specialist…"}</strong>
+          </div>
+          <span className="agent-readiness-badge checking">CHECKING</span>
+        </div>
+        {props.readiness.error && <p>{props.readiness.error}</p>}
+      </section>
+    );
+  }
+
+  return (
+    <section className="agent-readiness-card">
+      <div className="agent-readiness-head">
+        <div>
+          <span>Runtime readiness</span>
+          <strong>{state.model}</strong>
+        </div>
+        <span className={`agent-readiness-badge ${state.status}`}>
+          {state.status}
+        </span>
+      </div>
+      <p>{state.summary}</p>
+      <div className="agent-readiness-facts">
+        <span>{state.model_available ? "Model available" : "Model missing"}</span>
+        <span>{state.readable_workspace_count} readable workspace{state.readable_workspace_count === 1 ? "" : "s"}</span>
+        <span>{state.writable_workspace_count} writable workspace{state.writable_workspace_count === 1 ? "" : "s"}</span>
+      </div>
+      {state.issues.length > 0 && (
+        <div className="agent-readiness-issues">
+          {state.issues.map((issue) => (
+            <div
+              key={`${issue.code}-${issue.message}`}
+              className={`agent-readiness-issue ${issue.severity}`}
+            >
+              <span>{issue.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// JACE_AGENT_DIAGNOSTICS_PHASE_1F
+function formatDiagnosticDuration(value: number | null): string {
+  if (value === null) return "—";
+  const seconds = Math.max(0, Math.round(value / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function AgentDiagnosticPanel(props: {
+  office: AgentOfficeState;
+  diagnostics: AgentDiagnosticsState;
+}) {
+  const agent = props.office.selectedAgentDefinition;
+  if (!agent) return null;
+  const state = props.diagnostics.byAgentId.get(agent.id) ?? null;
+  const submitting = props.diagnostics.submitting.has(agent.id);
+
+  if (!state) {
+    return (
+      <section className="agent-diagnostic-card">
+        <div className="agent-diagnostic-head">
+          <div>
+            <span>Functional self-test</span>
+            <strong>{props.diagnostics.error ? "Diagnostics unavailable" : "Loading test state…"}</strong>
+          </div>
+          <span className="agent-diagnostic-badge untested">CHECKING</span>
+        </div>
+        {props.diagnostics.error && <p className="agent-diagnostic-error">{props.diagnostics.error}</p>}
+      </section>
+    );
+  }
+
+  const used = new Set(state.used_tools);
+  const running = state.status === "running";
+  const disabled = submitting || running || !state.testable;
+
+  return (
+    <section className="agent-diagnostic-card">
+      <div className="agent-diagnostic-head">
+        <div>
+          <span>Functional self-test</span>
+          <strong>{state.test_label ?? "End-to-end specialist test"}</strong>
+        </div>
+        <span className={`agent-diagnostic-badge ${state.status}`}>{state.status}</span>
+      </div>
+      <p>{state.summary}</p>
+      <div className="agent-diagnostic-facts">
+        <span>Last run: {formatTimestamp(state.created_at)}</span>
+        <span>Duration: {formatDiagnosticDuration(state.duration_ms)}</span>
+        {state.task_status && <span>Task: {state.task_status.replace(/_/g, " ")}</span>}
+      </div>
+      {state.expected_tools.length > 0 && (
+        <div className="agent-diagnostic-tools" title="Required tool evidence for this test">
+          {state.expected_tools.map((tool) => (
+            <span key={tool} className={used.has(tool) ? "used" : ""}>
+              {used.has(tool) ? "●" : "○"} {tool}
+            </span>
+          ))}
+        </div>
+      )}
+      {state.blocked_reason && !state.testable && (
+        <small>Current self-test blocked: {state.blocked_reason}</small>
+      )}
+      {state.error && <div className="agent-diagnostic-error">{state.error}</div>}
+      <div className="agent-diagnostic-actions">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void props.diagnostics.run(agent.id)}
+          title={!state.testable ? state.blocked_reason ?? "Self-test is blocked" : "Run a real end-to-end specialist test"}
+        >
+          {submitting ? "Queueing…" : running ? "Test running…" : state.status === "passed" ? "Run again" : "Run self-test"}
+        </button>
+        {state.task_id && (
+          <button
+            type="button"
+            onClick={() => props.office.setSelectedTaskId(state.task_id!)}
+          >
+            Inspect test task
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
 function AgentAssignmentForm(props: {
   office: AgentOfficeState;
+  readiness: AgentReadinessState;
 }) {
   const agent = props.office.selectedAgentDefinition;
+  const agentReadiness = agent
+    ? props.readiness.byAgentId.get(agent.id) ?? null
+    : null;
+  const unavailable = agentReadiness?.status === "unavailable";
   const [title, setTitle] = useState("");
   const [instruction, setInstruction] = useState("");
   const [priority, setPriority] = useState(0);
@@ -182,7 +361,7 @@ function AgentAssignmentForm(props: {
     event.preventDefault();
 
     const cleanInstruction = instruction.trim();
-    if (!cleanInstruction || submitting) return;
+    if (!cleanInstruction || submitting || unavailable) return;
 
     const cleanTitle =
       title.trim() ||
@@ -228,9 +407,16 @@ function AgentAssignmentForm(props: {
           <span>Direct assignment</span>
           <strong>Give {agent.name} some work</strong>
         </div>
-        <span className="agent-idle-pill">IDLE</span>
+        <span className={`agent-readiness-badge ${agentReadiness?.status ?? "checking"}`}>
+          {agentReadiness?.status ?? (props.readiness.loading ? "checking" : "unknown")}
+        </span>
       </div>
 
+      {unavailable && (
+        <div className="agent-assignment-readiness-block">
+          {agentReadiness?.summary ?? "This specialist is currently unavailable."}
+        </div>
+      )}
       <label>
         <span>Task title <small>optional</small></span>
         <input
@@ -289,7 +475,7 @@ function AgentAssignmentForm(props: {
       <button
         type="submit"
         className="agent-primary-action"
-        disabled={submitting || !instruction.trim()}
+        disabled={submitting || !instruction.trim() || unavailable}
       >
         {submitting ? "Assigning…" : `Assign to ${agent.name}`}
       </button>
@@ -368,6 +554,12 @@ function TaskLifecycle(props: {
     eventTypes.has("worker_recovered") ||
     eventTypes.has("director_recovered");
   const toolUsed = props.task.used_tools.length > 0 || eventTypes.has("tool_started");
+  const approvalReached =
+    props.task.status === "waiting_permission" ||
+    eventTypes.has("approval_required") ||
+    eventTypes.has("approval_granted") ||
+    eventTypes.has("approval_denied") ||
+    eventTypes.has("approval_timed_out");
   const reachedRunning = Boolean(props.task.started_at) || eventTypes.has("started");
   const reachedThinking = reachedRunning && (
     props.task.status !== "running" ||
@@ -380,9 +572,9 @@ function TaskLifecycle(props: {
     { key: "running", label: "Executor", reached: reachedRunning, current: props.task.status === "running" },
     { key: "thinking", label: "Reasoning", reached: reachedThinking, current: props.task.status === "thinking" },
     { key: "tool", label: "Tools", reached: toolUsed, current: props.task.status === "using_tool" },
+    { key: "approval", label: "Approval", reached: approvalReached, current: props.task.status === "waiting_permission" },
     { key: "finish", label: terminal ? statusLabel(props.task) : "Finish", reached: terminal, current: terminal },
   ];
-
   return (
     <section className="agent-interaction-subsection agent-lifecycle-section">
       <div className="agent-subsection-title">
@@ -550,6 +742,9 @@ function AgentTaskHistory(props: {
               {task.metadata?.director_managed === true && (
                 <span className="director">DIRECTOR</span>
               )}
+              {task.metadata?.agent_self_test === true && (
+                <span className="current">SELF TEST</span>
+              )}
               {current && <span className="current">CURRENT</span>}
               <span className={`agent-task-status ${task.status}`}>
                 {statusLabel(task)}
@@ -706,6 +901,8 @@ function SelectedTaskDetails(props: {
 
 function AgentInteractionPanel(props: {
   office: AgentOfficeState;
+  readiness: AgentReadinessState;
+  diagnostics: AgentDiagnosticsState;
 }) {
   const agent = props.office.selectedAgentDefinition;
   const worker = props.office.selectedWorker;
@@ -746,7 +943,11 @@ function AgentInteractionPanel(props: {
       </div>
 
       <div className="agent-interaction-scroll">
-        {workerIsIdle && <AgentAssignmentForm office={props.office} />}
+        <AgentReadinessPanel office={props.office} readiness={props.readiness} />
+        <AgentDiagnosticPanel office={props.office} diagnostics={props.diagnostics} />
+        {workerIsIdle && (
+          <AgentAssignmentForm office={props.office} readiness={props.readiness} />
+        )}
 
         {detailTask ? (
           <SelectedTaskDetails office={props.office} task={detailTask} />
@@ -789,7 +990,7 @@ function AgentInteractionPanel(props: {
               <strong>Agent tools</strong>
             </div>
           </div>
-          <AgentToolCapabilities office={props.office} />
+          <AgentToolCapabilities office={props.office} readiness={props.readiness} />
         </section>
       </div>
     </aside>
@@ -808,8 +1009,11 @@ function ExecutorStrip(props: {
           ? props.office.tasks.find((candidate) => candidate.id === executor.task_id) ?? null
           : null;
         const running = executor.state === "running";
+        const waitingApproval = task?.status === "waiting_permission";
         const healthLabel = running
-          ? task?.agent_name ?? executor.agent_id ?? "BUSY"
+          ? waitingApproval
+            ? "WAITING APPROVAL"
+            : task?.agent_name ?? executor.agent_id ?? "BUSY"
           : executor.state === "recovering"
             ? "RECOVERING"
             : executor.state === "offline"
@@ -837,13 +1041,55 @@ function ExecutorStrip(props: {
   );
 }
 
+
+
+// JACE_PHASE3G_WORKSPACE_CONSOLIDATION
+function AgentSystemOverview(props: {
+  managerRunning: boolean;
+  realtimeConnected: boolean;
+  workerCount: number;
+  busyCount: number;
+  taskCount: number;
+}) {
+  return (
+    <div className="agent-system-view">
+      <div className="agent-system-summary">
+        <article><span>Manager</span><strong>{props.managerRunning ? "Running" : "Offline"}</strong></article>
+        <article><span>Event stream</span><strong>{props.realtimeConnected ? "Live" : "Sync"}</strong></article>
+        <article><span>Workers</span><strong>{props.workerCount}</strong></article>
+        <article><span>Active jobs</span><strong>{props.busyCount}</strong></article>
+      </div>
+      <div className="agent-system-future-heading">
+        <strong>System telemetry</strong>
+        <span>{props.taskCount} stored agent task{props.taskCount === 1 ? "" : "s"}</span>
+      </div>
+      <div className="agent-system-future-grid">
+        <article><span>CPU</span><strong>Collector planned</strong></article>
+        <article><span>GPU / VRAM</span><strong>Collector planned</strong></article>
+        <article><span>RAM</span><strong>Collector planned</strong></article>
+        <article><span>Disk</span><strong>Collector planned</strong></article>
+        <article><span>Network</span><strong>Collector planned</strong></article>
+        <article><span>Temperatures</span><strong>Collector planned</strong></article>
+        <article><span>Ollama</span><strong>Collector planned</strong></article>
+        <article><span>Context / tokens</span><strong>Collector planned</strong></article>
+      </div>
+    </div>
+  );
+}
+
 export function AgentOffice(props: {
   activities: ToolActivity[];
   onExpand: () => void;
+  controls?: ReactNode;
 }) {
   void props.activities;
 
   const office = useAgentOffice();
+  // JACE_PHASE3G1_WORKSPACE_HOTFIX_V4
+  // JACE_PHASE3G1_WORKSPACE_HOTFIX_V5
+  const [officeView, setOfficeView] = useState<"office" | "system">("office");
+  const readiness = useAgentReadiness();
+  const diagnostics = useAgentDiagnostics();
   const workerCount = office.status?.workers ?? 0;
   const busyExecutors = office.executors.filter(
     (executor) => executor.state === "running",
@@ -851,108 +1097,88 @@ export function AgentOffice(props: {
   const queuedCount = office.status?.queued_tasks ?? 0;
 
   return (
-    <section className="cc-panel agent-office-panel phase11-agent-office">
+    <section className="cc-panel agent-office-panel phase11-agent-office" data-office-view={officeView}>
       <div className="cc-panel-topline agent-office-topline">
-        <div>
-          <span className="cc-kicker">Jace office</span>
-          <strong>
-            {office.error
-              ? "Agent office unavailable"
-              : busyExecutors > 0
-                ? `${busyExecutors} job${busyExecutors === 1 ? "" : "s"} running${queuedCount > 0 ? ` · ${queuedCount} queued` : ""}`
-                : queuedCount > 0
-                  ? `${queuedCount} job${queuedCount === 1 ? "" : "s"} queued`
-                  : "Agents standing by"}
-          </strong>
+        <div className="agent-office-title">
+          <strong>Agent Office</strong>
         </div>
-
         <div className="agent-office-actions">
-          <span
-            className={`agent-realtime-pill ${
-              office.realtimeConnected ? "online" : "fallback"
-            }`}
-            title={
-              office.realtimeConnected
-                ? "Receiving live runtime events"
-                : "Runtime event stream disconnected"
-            }
-          >
-            {office.realtimeConnected ? "LIVE" : "SYNC"}
-          </span>
-
-          {office.status && (
-            <span
-              className={`agent-manager-pill ${
-                office.status.manager_running ? "online" : "offline"
-              }`}
-            >
-              {office.status.manager_running ? "●" : "○"} {busyExecutors}/{workerCount} worker
-{workerCount === 1 ? "" : "s"} busy
-            </span>
-          )}
-
-          <button
-            className="cc-icon-button"
-            onClick={props.onExpand}
-            title="Focus agent office"
-          >
-            □
-          </button>
+          <div className="agent-office-view-switch" role="tablist" aria-label="Agent office view">
+            <button type="button" role="tab" aria-selected={officeView === "office"} className={officeView === "office" ? "active" : ""} onClick={() => setOfficeView("office")}>OFFICE</button>
+            <button type="button" role="tab" aria-selected={officeView === "system"} className={officeView === "system" ? "active" : ""} onClick={() => setOfficeView("system")}>SYSTEM</button>
+          </div>
+          {props.controls}
         </div>
       </div>
 
-      {office.error && office.tasks.length === 0 ? (
-        <div className="agent-office-error">
-          <strong>Could not connect to background agents</strong>
-          <span>{office.error}</span>
-          <button
-            type="button"
-            onClick={() => void office.refresh()}
-          >
-            Retry
-          </button>
+      <div className="agent-office-view-host">
+        <div
+          className={`agent-office-office-layer ${officeView === "system" ? "inactive" : ""}`}
+          aria-hidden={officeView === "system"}
+        >
+          {office.error && office.tasks.length === 0 ? (
+                            <div className="agent-office-error">
+                              <strong>Could not connect to background agents</strong>
+                              <span>{office.error}</span>
+                              <button
+                                type="button"
+                                onClick={() => void office.refresh()}
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="agent-office-stage">
+                              <ExecutorStrip office={office} />
+                              <PixelAgentOffice
+                                workers={office.workers}
+                                selectedWorkerId={office.selectedWorkerId}
+                                onSelectWorker={office.selectWorker}
+                              />
+          
+                              <AgentInteractionPanel office={office} readiness={readiness} diagnostics={diagnostics} />
+          
+                              {office.notice && (
+                                <button
+                                  type="button"
+                                  className={`agent-office-notice ${office.notice.kind}`}
+                                  onClick={() => {
+                                    const primaryWorker = office.workers.find(
+                                      (worker) =>
+                                        worker.definition.id === office.notice!.task.agent_id &&
+                                        worker.overflowIndex === 0,
+                                    );
+          
+                                    if (primaryWorker) office.selectWorker(primaryWorker.id);
+                                    office.setSelectedTaskId(office.notice!.task.id);
+                                  }}
+                                >
+                                  <span>{office.notice.kind === "failed" ? "!" : "✓"}</span>
+                                  <div>
+                                    <strong>{office.notice.task.agent_name}</strong>
+                                    <small>
+                                      {office.notice.kind === "failed"
+                                        ? "Task failed"
+                                        : "Task complete"}
+                                      {": "}
+                                      {office.notice.task.title}
+                                    </small>
+                                  </div>
+                                </button>
+                              )}
+                            </div>
+                          )}
         </div>
-      ) : (
-        <div className="agent-office-stage">
-          <ExecutorStrip office={office} />
-          <PixelAgentOffice
-            workers={office.workers}
-            selectedWorkerId={office.selectedWorkerId}
-            onSelectWorker={office.selectWorker}
-          />
-
-          <AgentInteractionPanel office={office} />
-
-          {office.notice && (
-            <button
-              type="button"
-              className={`agent-office-notice ${office.notice.kind}`}
-              onClick={() => {
-                const primaryWorker = office.workers.find(
-                  (worker) =>
-                    worker.definition.id === office.notice!.task.agent_id &&
-                    worker.overflowIndex === 0,
-                );
-
-                if (primaryWorker) office.selectWorker(primaryWorker.id);
-                office.setSelectedTaskId(office.notice!.task.id);
-              }}
-            >
-              <span>{office.notice.kind === "failed" ? "!" : "✓"}</span>
-              <div>
-                <strong>{office.notice.task.agent_name}</strong>
-                <small>
-                  {office.notice.kind === "failed"
-                    ? "Task failed"
-                    : "Task complete"}
-                  {": "}
-                  {office.notice.task.title}
-                </small>
-              </div>
-            </button>
-          )}
-        </div>
-      )}
+        {officeView === "system" && (
+                <AgentSystemOverview
+                  managerRunning={Boolean(office.status?.manager_running)}
+                  realtimeConnected={office.realtimeConnected}
+                  workerCount={workerCount}
+                  busyCount={busyCount}
+                  taskCount={office.tasks.length}
+                />
+              )}
+      </div>
     </section>
   );
 }
