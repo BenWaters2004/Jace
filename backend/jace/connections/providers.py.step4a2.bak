@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 CapabilityRisk = Literal["read", "write", "execute"]
-ProviderSetupState = Literal["available"]
-OAuthFlowKind = Literal["authorization_code_pkce", "device_code"]
+ProviderSetupState = Literal["available", "oauth_pending"]
 
 
 @dataclass(frozen=True)
@@ -26,22 +25,15 @@ class ProviderDefinition:
     setup_state: ProviderSetupState
     connection_label: str
     capabilities: tuple[ProviderCapability, ...]
-    oauth_flow: OAuthFlowKind | None = None
-    oauth_scopes: tuple[str, ...] = ()
-    oauth_client_secret_supported: bool = False
-    oauth_tenant_supported: bool = False
 
 
 GOOGLE = ProviderDefinition(
     id="google",
     name="Google",
-    description="Google account identity now; Gmail, Calendar and Drive capabilities attach to this account in later 4A steps.",
+    description="Personal Gmail, Google Calendar and future Drive access.",
     auth_kind="oauth2",
-    setup_state="available",
+    setup_state="oauth_pending",
     connection_label="Google account",
-    oauth_flow="authorization_code_pkce",
-    oauth_scopes=("openid", "email", "profile"),
-    oauth_client_secret_supported=True,
     capabilities=(
         ProviderCapability("email.read", "Read email", "Read messages and threads.", "Email", "read"),
         ProviderCapability("email.search", "Search email", "Search mailbox content and metadata.", "Email", "read"),
@@ -57,13 +49,10 @@ GOOGLE = ProviderDefinition(
 MICROSOFT = ProviderDefinition(
     id="microsoft",
     name="Microsoft",
-    description="Microsoft account identity now; Outlook, Calendar and OneDrive capabilities attach to this account in later 4A steps.",
+    description="Outlook / Microsoft 365, Calendar and future OneDrive access.",
     auth_kind="oauth2",
-    setup_state="available",
+    setup_state="oauth_pending",
     connection_label="Microsoft account",
-    oauth_flow="authorization_code_pkce",
-    oauth_scopes=("openid", "profile", "email", "offline_access", "User.Read"),
-    oauth_tenant_supported=True,
     capabilities=(
         ProviderCapability("email.read", "Read email", "Read Outlook messages and threads.", "Email", "read"),
         ProviderCapability("email.search", "Search email", "Search Outlook mailbox content and metadata.", "Email", "read"),
@@ -71,7 +60,7 @@ MICROSOFT = ProviderDefinition(
         ProviderCapability("email.send", "Send email", "Send an approved Outlook message.", "Email", "write"),
         ProviderCapability("calendar.read", "Read calendar", "Inspect Microsoft calendar events and availability.", "Calendar", "read"),
         ProviderCapability("calendar.create", "Create event", "Create an approved Microsoft calendar event.", "Calendar", "write"),
-        ProviderCapability("calendar.modify", "Modify event", "Change an existing calendar event.", "Calendar", "write"),
+        ProviderCapability("calendar.modify", "Modify event", "Change an existing Microsoft calendar event.", "Calendar", "write"),
         ProviderCapability("files.read", "Read OneDrive files", "Read explicitly accessible OneDrive files.", "Files", "read"),
     ),
 )
@@ -79,12 +68,10 @@ MICROSOFT = ProviderDefinition(
 GITHUB = ProviderDefinition(
     id="github",
     name="GitHub",
-    description="GitHub account identity using device flow; repository/issue capabilities attach to this account in later 4A steps.",
+    description="Repository context, issues, pull requests and development workflows.",
     auth_kind="oauth2",
-    setup_state="available",
+    setup_state="oauth_pending",
     connection_label="GitHub account",
-    oauth_flow="device_code",
-    oauth_scopes=("read:user", "user:email"),
     capabilities=(
         ProviderCapability("repositories.read", "Read repositories", "Read repository metadata and content.", "Code", "read"),
         ProviderCapability("repositories.search", "Search repositories", "Search accessible repositories and code context.", "Code", "read"),
@@ -114,7 +101,6 @@ CUSTOM_API = ProviderDefinition(
 
 PROVIDERS: tuple[ProviderDefinition, ...] = (GOOGLE, MICROSOFT, GITHUB, CUSTOM_API)
 PROVIDER_MAP = {provider.id: provider for provider in PROVIDERS}
-OAUTH_PROVIDERS = tuple(provider for provider in PROVIDERS if provider.oauth_flow is not None)
 
 
 def get_provider(provider_id: str) -> ProviderDefinition | None:

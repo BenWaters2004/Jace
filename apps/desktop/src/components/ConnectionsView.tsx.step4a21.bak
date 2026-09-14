@@ -56,7 +56,7 @@ export function ConnectionsView() {
       ]);
       setProviders(providerResponse.providers);
       setConnections(connectionResponse.connections);
-      setOAuthConfigs(oauthResponse.configs);
+      setOauthConfigs(oauthResponse.configs);
       setSecretStore(connectionResponse.secret_store);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Could not load connections.");

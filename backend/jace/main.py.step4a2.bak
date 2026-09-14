@@ -14,7 +14,7 @@ from jace.api.automations import router as automations_router
 from jace.api.chat import router as chat_router
 # JACE_STEP4A1_CONNECTIONS_FOUNDATION
 from jace.api.capabilities import router as capabilities_router
-from jace.api.connections import callback_router as connections_callback_router, router as connections_router
+from jace.api.connections import router as connections_router
 from jace.api.computer import router as computer_router
 from jace.api.control import router as control_router
 from jace.api.conversations import router as conversations_router
@@ -113,7 +113,6 @@ app.include_router(automations_router)
 app.include_router(agents_router)
 app.include_router(settings_router)
 app.include_router(connections_router)
-app.include_router(connections_callback_router)
 app.include_router(capabilities_router)
 app.include_router(memories_router)
 app.include_router(runtime_router)

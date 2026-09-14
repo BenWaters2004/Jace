@@ -1,9 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  OAuthSession,
-  OAuthClientConfig,
-  OAuthClientConfigUpdateRequest,
-  OAuthClientConfigListResponse,
   AutomationCreateRequest,
   AutomationDraftRequest,
   AutomationDraftResponse,
@@ -292,25 +288,6 @@ export const disconnectConnection = (id: string) =>
 export async function deleteConnection(id: string): Promise<void> {
   await request(`/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
-
-// JACE_STEP4A2_OAUTH_PROVIDER_ACCOUNTS
-export const getOAuthClientConfigs = () =>
-  request<OAuthClientConfigListResponse>("/connections/oauth/config");
-export const saveOAuthClientConfig = (providerId: string, payload: OAuthClientConfigUpdateRequest) =>
-  request<OAuthClientConfig>(`/connections/oauth/config/${encodeURIComponent(providerId)}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-export async function deleteOAuthClientConfig(providerId: string): Promise<void> {
-  await request(`/connections/oauth/config/${encodeURIComponent(providerId)}`, { method: "DELETE" });
-}
-export const startOAuthConnection = (providerId: string) =>
-  request<OAuthSession>(`/connections/oauth/${encodeURIComponent(providerId)}/start`, { method: "POST" });
-export const getOAuthSession = (sessionId: string) =>
-  request<OAuthSession>(`/connections/oauth/session/${encodeURIComponent(sessionId)}`);
-export const verifyConnection = (id: string) =>
-  request<ConnectionRecord>(`/connections/${encodeURIComponent(id)}/verify`, { method: "POST" });
-
 export const getCapabilities = () =>
   request<CapabilitySnapshotResponse>("/capabilities");
 

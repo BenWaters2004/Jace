@@ -9,7 +9,7 @@ from jace.db.models import Base, new_id, utc_now
 
 
 class ConnectionRecord(Base):
-    """Non-secret account/API metadata. Credentials and OAuth tokens stay in the OS credential vault."""
+    """Non-secret connection metadata. Credentials are kept in the OS credential vault."""
 
     __tablename__ = "connections"
 
@@ -25,15 +25,3 @@ class ConnectionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class OAuthClientConfigRecord(Base):
-    """Non-secret OAuth application configuration. Provider client secrets remain in Credential Manager."""
-
-    __tablename__ = "oauth_client_configs"
-
-    provider_id: Mapped[str] = mapped_column(String(80), primary_key=True)
-    client_id: Mapped[str] = mapped_column(String(500), nullable=False)
-    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)

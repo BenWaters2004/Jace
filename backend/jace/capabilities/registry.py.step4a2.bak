@@ -70,10 +70,12 @@ async def snapshot(session: AsyncSession) -> dict:
         active = next((row for row in provider_rows if row.status == "configured"), None)
         disconnected = next((row for row in provider_rows if row.status == "disconnected"), None)
         for capability in provider.capabilities:
-            if active is not None:
-                # 4A.2 proves the provider account/credential binding. The model-callable
-                # connector actions themselves arrive in the following provider-capability steps.
-                state: CapabilityState = "configured"
+            if provider.setup_state == "oauth_pending":
+                state = "planned"
+                connection_id = None
+            elif active is not None:
+                # 4A.1 intentionally stops at configuration. A guarded request executor is not yet registered.
+                state = "configured"
                 connection_id = active.id
             elif disconnected is not None:
                 state = "disconnected"

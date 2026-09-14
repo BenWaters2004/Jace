@@ -7,8 +7,6 @@ from pydantic import AnyHttpUrl, BaseModel, Field, field_validator, model_valida
 
 ConnectionStatus = Literal["configured", "disconnected", "error"]
 AuthMode = Literal["none", "bearer", "header"]
-OAuthFlowKind = Literal["authorization_code_pkce", "device_code"]
-OAuthSessionStatus = Literal["pending", "completed", "failed", "expired"]
 
 
 class ProviderCapabilityResponse(BaseModel):
@@ -92,69 +90,3 @@ class ConnectionResponse(BaseModel):
 class ConnectionListResponse(BaseModel):
     secret_store: SecretStoreStatusResponse
     connections: list[ConnectionResponse]
-
-
-class OAuthClientConfigUpdate(BaseModel):
-    client_id: str = Field(min_length=3, max_length=500)
-    client_secret: str | None = Field(default=None, min_length=1, max_length=4000)
-    clear_client_secret: bool = False
-    tenant: str | None = Field(default=None, min_length=1, max_length=240)
-
-    @field_validator("client_id")
-    @classmethod
-    def clean_client_id(cls, value: str) -> str:
-        return value.strip()
-
-    @field_validator("tenant")
-    @classmethod
-    def clean_tenant(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for ch in value):
-            raise ValueError("Microsoft tenant must be common, organizations, consumers, a tenant ID, or a tenant domain.")
-        return value
-
-
-class OAuthClientConfigResponse(BaseModel):
-    provider_id: str
-    provider_name: str
-    configured: bool
-    client_id: str | None
-    has_client_secret: bool
-    client_secret_supported: bool
-    tenant: str | None
-    tenant_supported: bool
-    flow_kind: OAuthFlowKind
-    redirect_uri: str | None
-    scopes: list[str]
-
-
-class OAuthClientConfigListResponse(BaseModel):
-    configs: list[OAuthClientConfigResponse]
-
-
-class OAuthStartResponse(BaseModel):
-    session_id: str
-    provider_id: str
-    flow_kind: OAuthFlowKind
-    status: OAuthSessionStatus
-    authorization_url: str | None = None
-    verification_uri: str | None = None
-    user_code: str | None = None
-    expires_at: datetime
-    poll_interval_seconds: int
-
-
-class OAuthSessionResponse(BaseModel):
-    session_id: str
-    provider_id: str
-    flow_kind: OAuthFlowKind
-    status: OAuthSessionStatus
-    verification_uri: str | None = None
-    user_code: str | None = None
-    expires_at: datetime
-    poll_interval_seconds: int
-    connection_id: str | None = None
-    account_hint: str | None = None
-    error: str | None = None
