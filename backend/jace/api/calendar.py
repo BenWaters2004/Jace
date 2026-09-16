@@ -18,6 +18,17 @@ from jace.calendar.schemas import (
     CalendarSourceUpdate,
     CalendarStatusResponse,
 )
+from jace.calendar.email_enrichment import (
+    CalendarEmailEnrichmentError,
+    enrich_calendar_event_from_email,
+)
+from jace.calendar.preferences import (
+    CalendarPreferencesResponse,
+    CalendarPreferencesUpdate,
+    ensure_calendar_preferences,
+    preferences_payload,
+    update_calendar_preferences,
+)
 from jace.calendar.service import (
     DEFAULT_TIMEZONE,
     calendar_counts,
@@ -45,13 +56,67 @@ router = APIRouter(prefix="/calendar", tags=["calendar"])
 async def calendar_status():
     async with SessionLocal() as session:
         default_source = await ensure_default_jace_calendar(session)
+        preferences = await ensure_calendar_preferences(session)
         counts = await calendar_counts(session)
         await session.commit()
     return CalendarStatusResponse(
         default_calendar_id=default_source.id,
-        timezone=default_source.timezone,
+        timezone=preferences.timezone,
         **counts,
     )
+
+
+# JACE_STEP4C4E_CALENDAR_PREFERENCES_API
+@router.get(
+    "/preferences",
+    response_model=CalendarPreferencesResponse,
+)
+async def calendar_preferences():
+    async with SessionLocal() as session:
+        row = await ensure_calendar_preferences(session)
+        await session.commit()
+
+    return CalendarPreferencesResponse(
+        **preferences_payload(row)
+    )
+
+
+@router.patch(
+    "/preferences",
+    response_model=CalendarPreferencesResponse,
+)
+async def patch_calendar_preferences(
+    request: CalendarPreferencesUpdate,
+):
+    async with SessionLocal() as session:
+        try:
+            row = await update_calendar_preferences(
+                session,
+                request,
+            )
+            default_source = await ensure_default_jace_calendar(
+                session,
+                timezone_name=request.timezone,
+            )
+            default_source.timezone = request.timezone
+            await session.commit()
+        except ValueError as exc:
+            await session.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
+
+        response = CalendarPreferencesResponse(
+            **preferences_payload(row)
+        )
+
+    await runtime_events.publish(
+        "calendar.changed",
+        action="preferences_updated",
+        timezone=response.timezone,
+    )
+    return response
 
 
 @router.get("/sources", response_model=CalendarSourceListResponse)
@@ -277,6 +342,42 @@ async def sync_calendars():
         "errors": errors,
         "providers": provider_payloads,
     }
+
+# JACE_STEP4C4E_GMAIL_EVENT_ENRICHMENT_API
+@router.post(
+    "/events/{event_id}/enrich",
+)
+async def enrich_calendar_event(
+    event_id: str,
+    timezone: str = Query(
+        default=DEFAULT_TIMEZONE,
+        min_length=1,
+        max_length=100,
+    ),
+):
+    async with SessionLocal() as session:
+        row = await get_calendar_event(
+            session,
+            event_id,
+        )
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Calendar event not found.",
+            )
+
+        try:
+            return await enrich_calendar_event_from_email(
+                session,
+                row,
+                display_timezone=timezone,
+            )
+        except CalendarEmailEnrichmentError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=str(exc),
+            ) from exc
+
 
 @router.get("/events/{event_id}", response_model=CalendarEventResponse)
 async def calendar_event(event_id: str):

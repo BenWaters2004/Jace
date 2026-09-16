@@ -1130,9 +1130,8 @@ async def sync_microsoft_calendars(
                         raw_calendar.get("name")
                         or source.name
                     )
-                    source.color = _calendar_color(
-                        raw_calendar
-                    )
+                    # JACE_STEP4C4E_MICROSOFT_COLOR_PRESERVATION
+                    # Calendar service owns provider/user colour merging.
                     source.read_only = not bool(
                         raw_calendar.get(
                             "canEdit",

@@ -168,6 +168,8 @@ class CalendarEventResponse(BaseModel):
     sync_error: str | None
     can_edit: bool
     can_delete: bool
+    event_type: str | None = None
+    can_enrich_from_email: bool = False
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None

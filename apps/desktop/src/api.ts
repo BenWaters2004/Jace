@@ -79,6 +79,9 @@ import type {
   CalendarSourceUpdate,
   CalendarStatus,
   CalendarSyncResponse,
+  CalendarPreferences,
+  CalendarPreferencesUpdate,
+  CalendarEventEnrichment,
 } from "./types";
 
 async function getErrorMessage(response: Response): Promise<string> {
@@ -371,6 +374,33 @@ export const resolveToolApproval = (approvalId: string, decision: ToolApprovalDe
 // JACE_STEP4C4B_CALENDAR_WORKSPACE
 export const getCalendarStatus = () =>
   request<CalendarStatus>("/calendar/status");
+
+
+// JACE_STEP4C4E_CALENDAR_UX
+export const getCalendarPreferences = () =>
+  request<CalendarPreferences>("/calendar/preferences");
+
+export const updateCalendarPreferences = (
+  payload: CalendarPreferencesUpdate,
+) =>
+  request<CalendarPreferences>("/calendar/preferences", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+export const enrichCalendarEvent = (
+  id: string,
+  timezone: string,
+) => {
+  const query = new URLSearchParams({ timezone });
+
+  return request<CalendarEventEnrichment>(
+    `/calendar/events/${encodeURIComponent(id)}/enrich?${query.toString()}`,
+    {
+      method: "POST",
+    },
+  );
+};
 
 export const getCalendarSources = () =>
   request<CalendarSourceListResponse>("/calendar/sources");

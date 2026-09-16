@@ -3,6 +3,7 @@ from __future__ import annotations
 # JACE_STEP4C4A_UNIFIED_CALENDAR_SERVICE
 
 import json
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
@@ -152,6 +153,10 @@ async def update_calendar_source(
     if "name" in fields and update.name is not None:
         row.name = update.name.strip()
     if "color" in fields and update.color is not None:
+        # JACE_STEP4C4E_USER_CALENDAR_COLOR
+        metadata = _json_loads_object(row.metadata_json)
+        metadata["user_color"] = update.color
+        row.metadata_json = _json_dumps(metadata)
         row.color = update.color
     if "timezone" in fields and update.timezone is not None:
         validate_timezone(update.timezone)
@@ -211,13 +216,26 @@ async def upsert_provider_calendar_source(
         )
         session.add(row)
     else:
+        # JACE_STEP4C4E_PRESERVE_PROVIDER_COLOR
+        existing_metadata = _json_loads_object(row.metadata_json)
+        next_metadata = dict(metadata or {})
+        user_color = existing_metadata.get("user_color")
+
+        if (
+            isinstance(user_color, str)
+            and re.fullmatch(r"#[0-9A-Fa-f]{6}", user_color)
+        ):
+            row.color = user_color
+            next_metadata["user_color"] = user_color
+        else:
+            row.color = color
+
         row.name = name
         row.account_hint = account_hint
-        row.color = color
         row.timezone = timezone_name
         row.read_only = read_only
         row.is_primary = is_primary
-        row.metadata_json = _json_dumps(metadata or {})
+        row.metadata_json = _json_dumps(next_metadata)
         row.updated_at = utc_now()
 
     await session.flush()
@@ -622,6 +640,31 @@ def source_payload(row: CalendarSource) -> dict[str, Any]:
 def event_payload(row: CalendarEvent) -> dict[str, Any]:
     source = row.source
     editable = source.provider_id == "jace" and not source.read_only
+
+    # JACE_STEP4C4E_EVENT_ENRICHMENT_HINT
+    event_metadata = _json_loads_object(row.metadata_json)
+    provider_data = _json_loads_object(row.provider_data_json)
+    event_type_value = (
+        event_metadata.get("event_type")
+        or provider_data.get("eventType")
+    )
+    event_type = (
+        event_type_value
+        if isinstance(event_type_value, str)
+        else None
+    )
+    description_lower = (row.description or "").casefold()
+    can_enrich_from_email = (
+        source.provider_id == "google"
+        and (
+            event_type == "fromGmail"
+            or (
+                "created from an email" in description_lower
+                and "gmail" in description_lower
+            )
+        )
+    )
+
     return {
         "id": row.id,
         "source_id": row.source_id,
@@ -657,6 +700,8 @@ def event_payload(row: CalendarEvent) -> dict[str, Any]:
         "sync_error": row.sync_error,
         "can_edit": editable,
         "can_delete": editable,
+        "event_type": event_type,
+        "can_enrich_from_email": can_enrich_from_email,
         "created_at": _db_utc(row.created_at),
         "updated_at": _db_utc(row.updated_at),
         "deleted_at": _db_utc(row.deleted_at),

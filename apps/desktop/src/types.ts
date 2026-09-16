@@ -992,6 +992,8 @@ export interface CalendarEvent {
   sync_error: string | null;
   can_edit: boolean;
   can_delete: boolean;
+  event_type: string | null;
+  can_enrich_from_email: boolean;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -1041,6 +1043,41 @@ export interface CalendarEventCreateRequest {
 export type CalendarEventUpdateRequest = Partial<
   Omit<CalendarEventCreateRequest, "source_id" | "created_by">
 >;
+
+// JACE_STEP4C4E_CALENDAR_UX
+export interface CalendarPreferences {
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CalendarPreferencesUpdate {
+  timezone: string;
+}
+
+export interface CalendarEmailContext {
+  id: string | null;
+  thread_id: string | null;
+  from: string | null;
+  to: string | null;
+  subject: string | null;
+  received_at: string | null;
+  snippet: string | null;
+  body: string;
+}
+
+export interface CalendarEventEnrichment {
+  event_id: string;
+  status: "matched" | "no_match" | "not_applicable";
+  confidence: "high" | "medium" | "low" | "none";
+  display_timezone: string;
+  source_email: CalendarEmailContext | null;
+  details: Array<{
+    label: string;
+    value: string;
+  }>;
+  match_reasons: string[];
+}
 
 // JACE_STEP4C4C_GOOGLE_CALENDAR_SYNC
 export interface CalendarProviderSyncResult {

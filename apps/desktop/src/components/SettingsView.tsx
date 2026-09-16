@@ -6,6 +6,10 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from "react";
+import {
+  getCalendarPreferences,
+  updateCalendarPreferences,
+} from "../api";
 import type {
   AssistantSettings,
   ModelInfo,
@@ -56,6 +60,22 @@ const VOICE_DEFAULTS = {
   tts_speed: 1.06,
   tts_language: "en-gb",
 };
+
+
+const CALENDAR_TIMEZONE_OPTIONS = [
+  ["Europe/London", "United Kingdom · Europe/London"],
+  ["UTC", "UTC"],
+  ["Europe/Dublin", "Ireland · Europe/Dublin"],
+  ["Europe/Paris", "France · Europe/Paris"],
+  ["Europe/Berlin", "Germany · Europe/Berlin"],
+  ["America/New_York", "US Eastern · America/New_York"],
+  ["America/Chicago", "US Central · America/Chicago"],
+  ["America/Denver", "US Mountain · America/Denver"],
+  ["America/Los_Angeles", "US Pacific · America/Los_Angeles"],
+  ["Asia/Tokyo", "Japan · Asia/Tokyo"],
+  ["Asia/Singapore", "Singapore · Asia/Singapore"],
+  ["Australia/Sydney", "Australia · Australia/Sydney"],
+] as const;
 
 function finiteNumber(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -316,6 +336,10 @@ function SettingsViewContent(props: SettingsViewProps) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  // JACE_STEP4C4E_CALENDAR_SETTINGS
+  const [calendarTimezone, setCalendarTimezone] = useState("Europe/London");
+  const [calendarSettingsError, setCalendarSettingsError] = useState<string | null>(null);
+
   useEffect(
     () => setDraft(normalizedSettings),
     [normalizedSettings],
@@ -324,6 +348,29 @@ function SettingsViewContent(props: SettingsViewProps) {
     () => setVoiceDraft(normalizedVoiceSettings),
     [normalizedVoiceSettings],
   );
+
+  useEffect(() => {
+    let active = true;
+
+    void getCalendarPreferences()
+      .then((preferences) => {
+        if (!active) return;
+        setCalendarTimezone(preferences.timezone || "Europe/London");
+        setCalendarSettingsError(null);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setCalendarSettingsError(
+          error instanceof Error
+            ? error.message
+            : "Could not load calendar preferences.",
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const voices = Array.isArray(props.voiceStatus?.voices)
     ? props.voiceStatus.voices
@@ -340,6 +387,9 @@ function SettingsViewContent(props: SettingsViewProps) {
       await Promise.all([
         props.onSave(safeDraft),
         props.onSaveVoice(safeVoiceDraft),
+        updateCalendarPreferences({
+          timezone: calendarTimezone || "Europe/London",
+        }),
       ]);
 
       setDraft(safeDraft);
@@ -368,7 +418,11 @@ function SettingsViewContent(props: SettingsViewProps) {
       await Promise.all([
         props.onReset(),
         props.onResetVoice(),
+        updateCalendarPreferences({
+          timezone: "Europe/London",
+        }),
       ]);
+      setCalendarTimezone("Europe/London");
       setMessage("Settings reset to defaults.");
     } finally {
       setSaving(false);
@@ -606,6 +660,47 @@ function SettingsViewContent(props: SettingsViewProps) {
               much slower on your RTX 2060.
             </span>
           </div>
+        </section>
+
+        <section className="settings-card full-card calendar-settings-card">
+          <div className="settings-card-heading">
+            <div>
+              <span className="section-kicker">Calendar</span>
+              <h2>Calendar display</h2>
+            </div>
+            <span className="settings-icon">CAL</span>
+          </div>
+
+          <div className="form-grid">
+            <label className="full calendar-settings-timezone">
+              <span>Calendar timezone</span>
+              <select
+                value={calendarTimezone}
+                onChange={(event) => {
+                  setCalendarTimezone(event.target.value);
+                  setCalendarSettingsError(null);
+                }}
+              >
+                {CALENDAR_TIMEZONE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <small className="field-help">
+                Jace displays timed calendar events in this timezone.
+                The default is <code>Europe/London</code>, including
+                automatic UK daylight-saving changes.
+              </small>
+            </label>
+          </div>
+
+          {calendarSettingsError && (
+            <div className="info-box">
+              <strong>Calendar settings</strong>
+              <span>{calendarSettingsError}</span>
+            </div>
+          )}
         </section>
 
         <section className="settings-card full-card voice-settings-card">
