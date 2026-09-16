@@ -161,6 +161,7 @@ MICROSOFT = ProviderDefinition(
         "Mail.Read",
         "Mail.ReadWrite",
         "Mail.Send",
+        "Calendars.Read",
     ),
     oauth_tenant_supported=True,
     capabilities=(

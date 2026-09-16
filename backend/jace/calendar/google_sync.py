@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jace.calendar.models import (
@@ -107,6 +107,8 @@ class GoogleCalendarSyncSummary:
     duplicate_connections_ignored: int = 0
     duplicate_sources_removed: int = 0
     duplicate_events_removed: int = 0
+    stale_sources_removed: int = 0
+    stale_events_removed: int = 0
     errors: list[str] = field(
         default_factory=list,
     )
@@ -1254,6 +1256,114 @@ async def _source_event_count(
     )
 
 
+
+# JACE_STEP4C4C_GOOGLE_CALENDAR_IDENTITY_V3
+async def _reconcile_google_calendar_identity(
+    session: AsyncSession,
+    *,
+    canonical_connection: Any,
+    external_calendar_id: str,
+) -> tuple[int, int]:
+    """
+    Google `calendarId` is the logical identity of a Google calendar.
+
+    Historical Jace connection IDs must not create multiple local calendar
+    sources for the same Google calendar.
+    """
+    statement = (
+        select(
+            CalendarSource
+        )
+        .where(
+            CalendarSource.provider_id
+            == "google",
+            CalendarSource.external_calendar_id
+            == external_calendar_id,
+        )
+        .order_by(
+            CalendarSource.updated_at.desc()
+        )
+    )
+
+    rows = list(
+        (
+            await session.execute(
+                statement
+            )
+        ).scalars().all()
+    )
+
+    if not rows:
+        return (
+            0,
+            0,
+        )
+
+    canonical_source = next(
+        (
+            row
+            for row in rows
+            if row.connection_id
+            == canonical_connection.id
+        ),
+        rows[0],
+    )
+
+    duplicates = [
+        row
+        for row in rows
+        if row.id
+        != canonical_source.id
+    ]
+
+    removed_events = 0
+
+    for duplicate in duplicates:
+        removed_events += await _source_event_count(
+            session,
+            duplicate.id,
+        )
+        await session.delete(
+            duplicate
+        )
+
+    adopted = (
+        canonical_source.connection_id
+        != canonical_connection.id
+    )
+
+    canonical_source.connection_id = (
+        canonical_connection.id
+    )
+    canonical_source.account_hint = (
+        canonical_connection.account_hint
+    )
+    canonical_source.enabled = True
+    canonical_source.sync_enabled = True
+    canonical_source.updated_at = (
+        utc_now()
+    )
+
+    if duplicates or adopted:
+        state = await session.get(
+            CalendarSyncState,
+            canonical_source.id,
+        )
+
+        if state is not None:
+            state.sync_token = None
+            state.delta_url = None
+            state.last_error = None
+            state.updated_at = utc_now()
+
+    await session.flush()
+
+    return (
+        len(duplicates),
+        removed_events,
+    )
+
+
 async def _reconcile_google_sources_for_account(
     session: AsyncSession,
     *,
@@ -1273,6 +1383,30 @@ async def _reconcile_google_sources_for_account(
         for row in connection_rows
     ]
 
+    identity_conditions = [
+        CalendarSource.connection_id.in_(
+            connection_ids
+        )
+    ]
+
+    canonical_hint = (
+        canonical_connection.account_hint
+    )
+
+    if (
+        isinstance(
+            canonical_hint,
+            str,
+        )
+        and canonical_hint.strip()
+    ):
+        identity_conditions.append(
+            func.lower(
+                CalendarSource.account_hint
+            )
+            == canonical_hint.strip().casefold()
+        )
+
     statement = (
         select(
             CalendarSource
@@ -1280,8 +1414,8 @@ async def _reconcile_google_sources_for_account(
         .where(
             CalendarSource.provider_id
             == "google",
-            CalendarSource.connection_id.in_(
-                connection_ids
+            or_(
+                *identity_conditions
             ),
         )
         .order_by(
@@ -1575,6 +1709,22 @@ async def _sync_google_calendars_unlocked(
                 ):
                     color = "#4285f4"
 
+                (
+                    removed_sources,
+                    removed_events,
+                ) = await _reconcile_google_calendar_identity(
+                    session,
+                    canonical_connection=connection,
+                    external_calendar_id=calendar_id,
+                )
+
+                summary.duplicate_sources_removed += (
+                    removed_sources
+                )
+                summary.duplicate_events_removed += (
+                    removed_events
+                )
+
                 source = await upsert_provider_calendar_source(
                     session,
                     provider_id="google",
@@ -1680,8 +1830,10 @@ async def _sync_google_calendars_unlocked(
                         )
                     )
 
-            # If a calendar disappeared from Google's CalendarList, stop
-            # synchronizing it but retain its cached events for audit/history.
+            # CalendarList is requested with showHidden=true. If a source
+            # attached to this active Google connection is no longer returned,
+            # it is only stale local cache state. Remove it so the Calendar
+            # sidebar reflects Google's current calendar list exactly.
             existing_sources = await _existing_google_sources(
                 session,
                 connection.id,
@@ -1697,14 +1849,18 @@ async def _sync_google_calendars_unlocked(
                     and external_id
                     not in seen_ids
                 ):
-                    source.sync_enabled = False
-                    source.enabled = False
-                    source.sync_status = (
-                        "missing"
+                    summary.stale_events_removed += (
+                        await _source_event_count(
+                            session,
+                            source.id,
+                        )
                     )
-                    source.updated_at = (
-                        utc_now()
+                    await session.delete(
+                        source
                     )
+                    summary.stale_sources_removed += 1
+
+            await session.flush()
 
             connection_result.status = (
                 "ok"

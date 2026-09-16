@@ -1063,6 +1063,11 @@ export interface CalendarSyncResponse {
   calendars_synced: number;
   events_changed: number;
   events_deleted: number;
+  duplicate_connections_ignored?: number;
+  duplicate_sources_removed?: number;
+  duplicate_events_removed?: number;
+  stale_sources_removed?: number;
+  stale_events_removed?: number;
   errors: string[];
   providers: CalendarProviderSyncResult[];
 }
