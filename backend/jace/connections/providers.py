@@ -54,6 +54,8 @@ GOOGLE = ProviderDefinition(
         "email",
         "profile",
         "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.send",
     ),
     oauth_client_secret_supported=True,
     capabilities=(
@@ -85,6 +87,7 @@ GOOGLE = ProviderDefinition(
             "write",
             required_scopes=("https://www.googleapis.com/auth/gmail.compose",),
             default_permission="ask",
+            tool_name="gmail_create_draft",
         ),
         ProviderCapability(
             "email.send",
@@ -94,6 +97,7 @@ GOOGLE = ProviderDefinition(
             "write",
             required_scopes=("https://www.googleapis.com/auth/gmail.send",),
             default_permission="ask",
+            tool_name="gmail_send_email",
         ),
         ProviderCapability(
             "calendar.read",
@@ -154,6 +158,8 @@ MICROSOFT = ProviderDefinition(
         "offline_access",
         "User.Read",
         "Mail.Read",
+        "Mail.ReadWrite",
+        "Mail.Send",
     ),
     oauth_tenant_supported=True,
     capabilities=(
@@ -185,6 +191,7 @@ MICROSOFT = ProviderDefinition(
             "write",
             required_scopes=("Mail.ReadWrite",),
             default_permission="ask",
+            tool_name="outlook_create_draft",
         ),
         ProviderCapability(
             "email.send",
@@ -194,6 +201,7 @@ MICROSOFT = ProviderDefinition(
             "write",
             required_scopes=("Mail.Send",),
             default_permission="ask",
+            tool_name="outlook_send_email",
         ),
         ProviderCapability(
             "calendar.read",

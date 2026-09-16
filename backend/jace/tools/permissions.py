@@ -63,6 +63,18 @@ def _audit_arguments(
         text = safe["text"]
         safe["text"] = f"<redacted interactive text: {len(text)} characters>"
 
+    # JACE_STEP4C3_EMAIL_BODY_AUDIT_REDACTION
+    # The approval modal still shows the full body before execution.
+    # Persistent audit storage keeps metadata without duplicating it.
+    if tool_name in {
+        "gmail_create_draft",
+        "gmail_send_email",
+        "outlook_create_draft",
+        "outlook_send_email",
+    } and isinstance(safe.get("body"), str):
+        body = safe["body"]
+        safe["body"] = f"<redacted email body: {len(body)} characters>"
+
     return safe
 
 
