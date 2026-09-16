@@ -56,6 +56,7 @@ GOOGLE = ProviderDefinition(
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.compose",
         "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/calendar.readonly",
     ),
     oauth_client_secret_supported=True,
     capabilities=(

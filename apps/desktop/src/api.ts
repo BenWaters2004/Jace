@@ -78,6 +78,7 @@ import type {
   CalendarSourceListResponse,
   CalendarSourceUpdate,
   CalendarStatus,
+  CalendarSyncResponse,
 } from "./types";
 
 async function getErrorMessage(response: Response): Promise<string> {
@@ -522,3 +523,10 @@ export async function sendChatStream(
     reader.releaseLock();
   }
 }
+
+// JACE_STEP4C4C_GOOGLE_CALENDAR_SYNC
+export const syncCalendar = () =>
+  request<CalendarSyncResponse>("/calendar/sync", {
+    method: "POST",
+  });
+

@@ -1041,3 +1041,29 @@ export interface CalendarEventCreateRequest {
 export type CalendarEventUpdateRequest = Partial<
   Omit<CalendarEventCreateRequest, "source_id" | "created_by">
 >;
+
+// JACE_STEP4C4C_GOOGLE_CALENDAR_SYNC
+export interface CalendarProviderSyncResult {
+  provider_id: string;
+  status: string;
+  connections_seen: number;
+  connections_synced: number;
+  calendars_discovered: number;
+  calendars_synced: number;
+  events_changed: number;
+  events_deleted: number;
+  needs_reconnect: boolean;
+  errors: string[];
+  connections: Array<Record<string, unknown>>;
+}
+
+export interface CalendarSyncResponse {
+  status: string;
+  needs_reconnect: boolean;
+  calendars_synced: number;
+  events_changed: number;
+  events_deleted: number;
+  errors: string[];
+  providers: CalendarProviderSyncResult[];
+}
+

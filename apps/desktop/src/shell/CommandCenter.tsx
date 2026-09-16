@@ -150,19 +150,6 @@ export function CommandCenter(props: {
               ))}
             </div>
           )}
-          <button
-            type="button"
-            className="calendar-command-button"
-            onClick={() => {
-              props.onScreenChange("calendar");
-              if (!panels.isDetached("workspace") && panels.focused !== "workspace") {
-                panels.toggleMaximized("workspace");
-              }
-            }}
-            title="Open unified calendar"
-          >
-            Calendar
-          </button>
           <button onClick={() => setDrawerOpen((open) => !open)}>Chats</button>
           <button
             type="button"

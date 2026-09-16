@@ -8,6 +8,7 @@ import {
   getCalendarStatus,
   updateCalendarEvent,
   updateCalendarSource,
+  syncCalendar,
 } from "../api";
 import type {
   CalendarEvent,
@@ -68,10 +69,13 @@ export function CalendarWorkspace() {
     ]);
     setStatus(nextStatus);
     setSources(sourceResponse.sources);
-    setEnabledSourceIds((current) => {
-      if (current.size > 0) return current;
-      return new Set(sourceResponse.sources.filter((source) => source.enabled).map((source) => source.id));
-    });
+    setEnabledSourceIds(
+      new Set(
+        sourceResponse.sources
+          .filter((source) => source.enabled)
+          .map((source) => source.id),
+      ),
+    );
     return sourceResponse.sources;
   }, []);
 
@@ -89,14 +93,33 @@ export function CalendarWorkspace() {
     [activeSourceIds, range.end, range.start, timezone],
   );
 
+  // JACE_STEP4C4C_GOOGLE_CALENDAR_SYNC
+  const [syncing, setSyncing] = useState(false);
+
   const refreshAll = useCallback(async () => {
     setError(null);
     setLoading(true);
+    setSyncing(true);
+
     try {
+      const syncResult = await syncCalendar();
+
+      if (syncResult.needs_reconnect) {
+        setError(
+          "Google Calendar access needs to be authorized. "
+          + "Reconnect Google in Settings → Connections after adding calendar.readonly.",
+        );
+      } else if (syncResult.errors.length > 0) {
+        setError(
+          `Calendar sync completed with warnings: ${syncResult.errors.join(" · ")}`,
+        );
+      }
+
       const nextSources = await loadSources();
-      const selected = enabledSourceIds.size > 0
-        ? [...enabledSourceIds]
-        : nextSources.filter((source) => source.enabled).map((source) => source.id);
+      const selected = nextSources
+        .filter((source) => source.enabled)
+        .map((source) => source.id);
+
       const response = await getCalendarEvents(
         range.start.toISOString(),
         range.end.toISOString(),
@@ -105,11 +128,16 @@ export function CalendarWorkspace() {
       );
       setEvents(response.events);
     } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : "Could not load the calendar.");
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Could not synchronize the calendar.",
+      );
     } finally {
+      setSyncing(false);
       setLoading(false);
     }
-  }, [enabledSourceIds, loadSources, range.end, range.start, timezone]);
+  }, [loadSources, range.end, range.start, timezone]);
 
   useEffect(() => {
     void refreshAll();
@@ -123,6 +151,16 @@ export function CalendarWorkspace() {
       setError(refreshError instanceof Error ? refreshError.message : "Could not refresh events.");
     });
   }, [activeSourceIds.join("|"), range.end.getTime(), range.start.getTime(), timezone]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void refreshAll();
+    }, 5 * 60 * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [refreshAll]);
 
   const upcoming = useMemo(() => {
     const now = new Date();
@@ -253,8 +291,13 @@ export function CalendarWorkspace() {
               </button>
             ))}
           </div>
-          <button type="button" className="secondary-button" disabled={loading} onClick={() => void refreshAll()}>
-            {loading ? "Refreshing…" : "Refresh"}
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={loading || syncing}
+            onClick={() => void refreshAll()}
+          >
+            {syncing ? "Syncing…" : loading ? "Refreshing…" : "Refresh"}
           </button>
           <button type="button" className="primary-button" onClick={() => openCreate()}>+ New event</button>
         </div>
