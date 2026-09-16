@@ -70,6 +70,14 @@ import type {
   VoiceTranscriptionResponse,
   ExternalAccessPolicy,
   ExternalAccessPolicyUpdate,
+  CalendarEvent,
+  CalendarEventCreateRequest,
+  CalendarEventListResponse,
+  CalendarEventUpdateRequest,
+  CalendarSource,
+  CalendarSourceListResponse,
+  CalendarSourceUpdate,
+  CalendarStatus,
 } from "./types";
 
 async function getErrorMessage(response: Response): Promise<string> {
@@ -358,6 +366,82 @@ export const resolveToolApproval = (approvalId: string, decision: ToolApprovalDe
     method: "POST",
     body: JSON.stringify({ decision }),
   });
+
+// JACE_STEP4C4B_CALENDAR_WORKSPACE
+export const getCalendarStatus = () =>
+  request<CalendarStatus>("/calendar/status");
+
+export const getCalendarSources = () =>
+  request<CalendarSourceListResponse>("/calendar/sources");
+
+export const updateCalendarSource = (
+  id: string,
+  payload: CalendarSourceUpdate,
+) =>
+  request<CalendarSource>(
+    `/calendar/sources/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+
+export const getCalendarEvents = (
+  start: string,
+  end: string,
+  timezone: string,
+  sourceIds: string[] = [],
+) => {
+  const query = new URLSearchParams({
+    start,
+    end,
+    timezone,
+  });
+
+  sourceIds.forEach((id) => {
+    query.append("source_id", id);
+  });
+
+  return request<CalendarEventListResponse>(
+    `/calendar/events?${query.toString()}`,
+  );
+};
+
+export const getCalendarEvent = (id: string) =>
+  request<CalendarEvent>(
+    `/calendar/events/${encodeURIComponent(id)}`,
+  );
+
+export const createCalendarEvent = (
+  payload: CalendarEventCreateRequest,
+) =>
+  request<CalendarEvent>("/calendar/events", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const updateCalendarEvent = (
+  id: string,
+  payload: CalendarEventUpdateRequest,
+) =>
+  request<CalendarEvent>(
+    `/calendar/events/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+
+export async function deleteCalendarEvent(
+  id: string,
+): Promise<void> {
+  await request(
+    `/calendar/events/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
 
 interface StreamCallbacks {
   onContext?: (event: StreamContextEvent) => void;

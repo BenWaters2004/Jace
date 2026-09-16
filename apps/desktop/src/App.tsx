@@ -64,6 +64,7 @@ import {
 } from "./api";
 import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
+import { CalendarWorkspace } from "./components/CalendarWorkspace";
 import { ComputerHub } from "./components/ComputerHub";
 import { SettingsHub, type SettingsSection } from "./components/SettingsHub";
 import { MemoryView } from "./components/MemoryView";
@@ -1568,6 +1569,9 @@ export default function App(
 
       {screen === "memory" && (
         <MemoryView memories={memories} enabled={settings.memory_enabled} onRefresh={() => void refreshMemories()} onCreate={addMemory} onUpdate={patchMemory} onDelete={removeMemory} onOpenSource={openMemorySource} />
+      )}
+      {screen === "calendar" && (
+        <CalendarWorkspace />
       )}
 
       {screen === "computer" && (

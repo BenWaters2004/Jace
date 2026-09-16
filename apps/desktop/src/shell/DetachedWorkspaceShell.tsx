@@ -6,6 +6,7 @@ import { DETACHED_WORKSPACE_SCREEN_KEY } from "./windowEntry";
 // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
 const TABS: Array<{ screen: Screen; label: string }> = [
   { screen: "chat", label: "Chat" },
+  { screen: "calendar", label: "Calendar" },
   { screen: "computer", label: "Computer" },
   { screen: "automations", label: "Automations" },
   { screen: "memory", label: "Memory" },

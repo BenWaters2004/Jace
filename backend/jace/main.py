@@ -11,6 +11,7 @@ from jace.automations.scheduler import start_automation_scheduler, stop_automati
 from jace.api.agents import router as agents_router
 from jace.api.attachments import router as attachments_router
 from jace.api.automations import router as automations_router
+from jace.api.calendar import router as calendar_router
 from jace.api.chat import router as chat_router
 # JACE_STEP4A1_CONNECTIONS_FOUNDATION
 from jace.api.capabilities import router as capabilities_router
@@ -25,6 +26,7 @@ from jace.api.security import router as security_router
 from jace.api.system import router as system_router
 from jace.api.tools import router as tools_router
 from jace.api.voice import router as voice_router
+from jace.calendar.service import ensure_default_jace_calendar
 from jace.config import settings
 from jace.database import SessionLocal, close_database, init_database
 from jace.db.settings import get_or_create_assistant_settings
@@ -50,7 +52,10 @@ async def lifespan(app: FastAPI):
 
     async with SessionLocal() as session:
         await ensure_tool_permissions(session)
+        # JACE_STEP4C4A_UNIFIED_CALENDAR_CORE
+        await ensure_default_jace_calendar(session)
         profile = await get_or_create_assistant_settings(session)
+        await session.commit()
         if profile.default_model:
             preload_model_name = profile.default_model
 
@@ -111,6 +116,7 @@ app.include_router(system_router)
 app.include_router(voice_router)
 app.include_router(attachments_router)
 app.include_router(automations_router)
+app.include_router(calendar_router)
 app.include_router(agents_router)
 app.include_router(settings_router)
 app.include_router(security_router)

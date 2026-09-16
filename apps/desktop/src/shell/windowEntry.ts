@@ -7,6 +7,7 @@ export const DETACHED_WORKSPACE_SCREEN_KEY =
 // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
 const SCREEN_VALUES: Screen[] = [
   "chat",
+  "calendar",
   "computer",
   "automations",
   "memory",

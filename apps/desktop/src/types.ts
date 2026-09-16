@@ -1,6 +1,6 @@
 export type ChatRole = "user" | "assistant";
 // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
-export type Screen = "chat" | "computer" | "automations" | "memory";
+export type Screen = "chat" | "computer" | "automations" | "memory" | "calendar";
 export type MemoryType = "fact" | "preference" | "project" | "decision" | "goal" | "temporary" | "other";
 export type ReasoningMode = "fast" | "balanced" | "deep";
 export type ResponseStyle = "concise" | "balanced" | "detailed";
@@ -917,4 +917,127 @@ export interface OAuthSession {
   error?: string | null;
 }
 
+// JACE_STEP4C4B_CALENDAR_WORKSPACE
+export type CalendarViewMode = "month" | "week" | "day" | "agenda";
 
+export interface CalendarSource {
+  id: string;
+  provider_id: string;
+  connection_id: string | null;
+  external_calendar_id: string | null;
+  name: string;
+  account_hint: string | null;
+  color: string;
+  timezone: string;
+  read_only: boolean;
+  enabled: boolean;
+  sync_enabled: boolean;
+  is_primary: boolean;
+  sync_status: string;
+  metadata: Record<string, unknown>;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CalendarSourceListResponse {
+  sources: CalendarSource[];
+}
+
+export interface CalendarSourceUpdate {
+  name?: string;
+  color?: string;
+  timezone?: string;
+  enabled?: boolean;
+  sync_enabled?: boolean;
+}
+
+export interface CalendarEvent {
+  id: string;
+  source_id: string;
+  provider_id: string;
+  calendar_name: string;
+  calendar_color: string;
+  account_hint: string | null;
+  source_read_only: boolean;
+
+  external_event_id: string | null;
+  external_series_id: string | null;
+  original_event_id: string | null;
+  ical_uid: string | null;
+
+  title: string;
+  description: string;
+  location: string;
+  meeting_url: string | null;
+
+  all_day: boolean;
+  start_at: string | null;
+  end_at: string | null;
+  start_date: string | null;
+  end_date_exclusive: string | null;
+  timezone: string;
+
+  status: string;
+  availability: string;
+  visibility: string;
+  organizer: Record<string, unknown>;
+  attendees: Array<Record<string, unknown>>;
+  reminders: Array<Record<string, unknown>>;
+  recurrence_rule: string | null;
+  recurrence: Record<string, unknown>;
+
+  created_by: string;
+  sync_state: string;
+  sync_error: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface CalendarEventListResponse {
+  start: string;
+  end: string;
+  timezone: string;
+  events: CalendarEvent[];
+}
+
+export interface CalendarStatus {
+  default_calendar_id: string;
+  timezone: string;
+  source_count: number;
+  enabled_source_count: number;
+  local_event_count: number;
+  external_event_count: number;
+  pending_sync_count: number;
+}
+
+export interface CalendarEventCreateRequest {
+  source_id?: string | null;
+  title: string;
+  description?: string;
+  location?: string;
+  meeting_url?: string | null;
+  all_day: boolean;
+  start_at?: string | null;
+  end_at?: string | null;
+  start_date?: string | null;
+  end_date_exclusive?: string | null;
+  timezone: string;
+  status?: "confirmed" | "tentative" | "cancelled";
+  availability?: "busy" | "free";
+  visibility?: "default" | "public" | "private" | "confidential";
+  organizer?: Record<string, unknown>;
+  attendees?: Array<Record<string, unknown>>;
+  reminders?: Array<Record<string, unknown>>;
+  recurrence_rule?: string | null;
+  recurrence?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  created_by?: "user" | "jace";
+}
+
+export type CalendarEventUpdateRequest = Partial<
+  Omit<CalendarEventCreateRequest, "source_id" | "created_by">
+>;
