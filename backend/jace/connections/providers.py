@@ -147,7 +147,14 @@ MICROSOFT = ProviderDefinition(
     connection_label="Microsoft account",
     oauth_flow="authorization_code_pkce",
     # 4A.2 identity/profile access only.
-    oauth_scopes=("openid", "profile", "email", "offline_access", "User.Read"),
+    oauth_scopes=(
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        "User.Read",
+        "Mail.Read",
+    ),
     oauth_tenant_supported=True,
     capabilities=(
         ProviderCapability(
@@ -158,6 +165,7 @@ MICROSOFT = ProviderDefinition(
             "read",
             required_scopes=("Mail.Read",),
             default_permission="allow",
+            tool_name="outlook_read_email",
         ),
         ProviderCapability(
             "email.search",
@@ -167,6 +175,7 @@ MICROSOFT = ProviderDefinition(
             "read",
             required_scopes=("Mail.Read",),
             default_permission="allow",
+            tool_name="outlook_search_email",
         ),
         ProviderCapability(
             "email.draft",

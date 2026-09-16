@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from typing import Literal
+from urllib.parse import unquote
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,6 +110,28 @@ def _scope_satisfied(
 
     if required in granted:
         return True
+
+    # JACE_STEP4C2_MICROSOFT_SCOPE_NORMALIZATION
+    # Microsoft can report Graph delegated scopes as either short
+    # names (Mail.Read) or resource-qualified values.
+    if provider_id == "microsoft":
+        microsoft_granted: set[str] = set()
+
+        for scope in granted_scopes:
+            decoded = unquote(scope).strip().casefold()
+
+            if not decoded:
+                continue
+
+            microsoft_granted.add(decoded)
+
+            if "/" in decoded:
+                microsoft_granted.add(
+                    decoded.rsplit("/", 1)[-1]
+                )
+
+        if required in microsoft_granted:
+            return True
 
     # GitHub OAuth scopes are hierarchical. A broader scope can satisfy
     # a narrower requirement even when the narrow scope is absent from the
