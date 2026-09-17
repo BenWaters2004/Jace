@@ -6867,3 +6867,153 @@ details.rich-attachment-card > .rich-attachment-heading {
     grid-template-columns: 1fr;
   }
 }
+
+/* JACE_STEP4C4F_CALENDAR_LAYOUT_FIXES
+   One scroll owner + reserved multi-day month lanes. */
+
+.calendar-main {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.calendar-time-view-v2 {
+  min-height: max-content;
+  height: auto;
+}
+
+.calendar-time-grid-v2 {
+  flex: none;
+  min-height: 0;
+}
+
+/* Disable the old nested Week/Day scroll container if older markup remains
+   during HMR. The 4C.4F component no longer renders it. */
+.calendar-time-scroll {
+  overflow: visible !important;
+  min-height: unset !important;
+  flex: none !important;
+}
+
+.calendar-month-weeks-v2 {
+  display: grid;
+  grid-template-rows: repeat(6, minmax(112px, auto));
+  flex: 1;
+}
+
+.calendar-month-week-v2 {
+  position: relative;
+  display: grid;
+  grid-template-rows:
+    36px
+    calc(var(--calendar-all-day-lanes, 0) * 23px)
+    minmax(72px, 1fr);
+  min-height: 112px;
+  border-bottom:
+    1px solid
+    var(--border-color, rgba(255,255,255,.08));
+}
+
+.calendar-month-date-row,
+.calendar-month-event-row {
+  display: grid;
+  grid-template-columns:
+    repeat(7, minmax(0, 1fr));
+}
+
+.calendar-month-date-row {
+  position: relative;
+  z-index: 4;
+}
+
+.calendar-month-date-button,
+.calendar-month-event-cell {
+  min-width: 0;
+  border: 0;
+  border-right:
+    1px solid
+    var(--border-color, rgba(255,255,255,.08));
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-month-date-button {
+  height: 36px;
+  padding: 5px 7px;
+  overflow: visible;
+}
+
+.calendar-month-date-button:hover,
+.calendar-month-event-cell:hover {
+  background: rgba(255,255,255,.025);
+}
+
+.calendar-month-date-button.outside,
+.calendar-month-event-cell.outside {
+  opacity: .45;
+}
+
+.calendar-month-date-button .calendar-month-day-number {
+  position: relative;
+  z-index: 5;
+  margin: 0;
+}
+
+.calendar-month-date-button.today
+.calendar-month-day-number {
+  background: rgba(125,154,255,.16);
+  box-shadow:
+    inset 0 0 0 1px
+    rgba(125,154,255,.42);
+}
+
+.calendar-month-bars-v2 {
+  position: relative;
+  inset: auto;
+  top: auto;
+  left: auto;
+  right: auto;
+  z-index: 3;
+  display: grid;
+  grid-template-columns:
+    repeat(7, minmax(0, 1fr));
+  grid-auto-flow: row;
+  gap: 3px 0;
+  min-height: 0;
+  padding: 1px 3px 2px;
+  pointer-events: none;
+}
+
+.calendar-month-event-row {
+  min-height: 0;
+}
+
+.calendar-month-event-cell {
+  min-height: 72px;
+  padding: 5px 7px 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Header and all-day strip stay visible while the single outer calendar pane
+   scrolls through hours. */
+.calendar-time-header {
+  top: 0;
+}
+
+.calendar-all-day-strip {
+  top: 43px;
+}
+
+@media (max-width: 760px) {
+  .calendar-main {
+    min-height: 520px;
+  }
+
+  .calendar-layout {
+    overflow: visible;
+  }
+}

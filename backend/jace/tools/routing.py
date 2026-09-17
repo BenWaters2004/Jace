@@ -42,6 +42,11 @@ ALL_TOOL_NAMES = {
     "type_control_text",
     "press_control_keys",
     "stop_control_session",
+    "calendar_list_events",
+    "calendar_next_event",
+    "calendar_free_busy",
+    "calendar_check_conflicts",
+    "calendar_find_open_slots",
 }
 
 
@@ -214,6 +219,100 @@ def route_tool_names(message: str) -> set[str]:
 
     if re.search(r"\b(?:run|execute|start)\b.{0,35}\b(?:automation|scheduled task|watcher)\b", lowered):
         selected.update({"list_automations", "run_automation_now"})
+
+    # JACE_STEP4C4F_CALENDAR_INTELLIGENCE_ROUTING
+    calendar_intent = bool(
+        re.search(
+            r"\b(?:calendar|calendars|meeting|meetings|appointment|appointments|"
+            r"agenda|free time|free slot|available|availability|busy|conflict|"
+            r"clash|gap|open slot|time slot)\b",
+            lowered,
+        )
+    )
+    implicit_calendar_question = bool(
+        re.search(
+            r"\b(?:"
+            r"what (?:do i have|have i got|am i doing) (?:today|tomorrow|on |this |next )|"
+            r"what have i got (?:today|tomorrow|on |this |next )|"
+            r"what(?:'s| is) (?:on|in) my (?:day|week)|"
+            r"when am i free|when (?:do i|can i) have time|"
+            r"find (?:me )?(?:an? )?(?:free|open) (?:time|slot|gap)|"
+            r"do i have anything (?:today|tomorrow|on )|"
+            r"am i free|am i busy"
+            r")\b",
+            lowered,
+        )
+    )
+
+    if calendar_intent or implicit_calendar_question:
+        selected.update({
+            "calendar_list_events",
+            "calendar_next_event",
+            "calendar_free_busy",
+            "calendar_check_conflicts",
+            "calendar_find_open_slots",
+        })
+
+        if re.search(
+            r"\b(?:today|tomorrow|tonight|this (?:week|weekend|morning|afternoon|evening)|"
+            r"next (?:week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+            r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+            r"in \d+ (?:minutes?|hours?|days?))\b",
+            lowered,
+        ):
+            selected.add("current_datetime")
+
+    # JACE_STEP4C4F_CALENDAR_DATE_ROUTING_FIX
+    # Calendar date questions must expose both Calendar Intelligence and the
+    # clock. This prevents relative/incomplete phrases from being converted to
+    # an invented ISO range by the model.
+    calendar_request = bool(
+        re.search(
+            r"\b(?:calendar|calendars|agenda|meeting|meetings|appointment|appointments|"
+            r"free time|free slot|available|availability|busy|conflict|clash|"
+            r"open slot|time slot)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:what (?:do i have|have i got|am i doing)|what have i got|"
+            r"do i have anything|am i free|am i busy|when am i free|"
+            r"find (?:me )?(?:an? )?(?:free|open) (?:time|slot|gap))\b",
+            lowered,
+        )
+    )
+
+    calendar_date_phrase = bool(
+        re.search(
+            r"\b(?:today|yesterday|tomorrow|day before yesterday|day after tomorrow|"
+            r"this week|last week|next week|this weekend|next weekend|"
+            r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b\d{4}-\d{2}-\d{2}\b",
+            lowered,
+        )
+        or re.search(
+            r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+            lowered,
+        )
+    )
+
+    if calendar_request:
+        selected.update({
+            "calendar_list_events",
+            "calendar_next_event",
+            "calendar_free_busy",
+            "calendar_check_conflicts",
+            "calendar_find_open_slots",
+        })
+
+        if calendar_date_phrase:
+            selected.add("current_datetime")
 
     # Phase 9 interactive GUI control. Selecting the family lets the model
     # observe first and then act within an approved short-lived session.
