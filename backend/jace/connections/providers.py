@@ -57,6 +57,7 @@ GOOGLE = ProviderDefinition(
         "https://www.googleapis.com/auth/gmail.compose",
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
     ),
     oauth_client_secret_supported=True,
     capabilities=(
@@ -117,6 +118,7 @@ GOOGLE = ProviderDefinition(
             "write",
             required_scopes=("https://www.googleapis.com/auth/calendar.events",),
             default_permission="ask",
+            tool_name="google_calendar_create_event",
         ),
         ProviderCapability(
             "calendar.modify",
@@ -126,6 +128,7 @@ GOOGLE = ProviderDefinition(
             "write",
             required_scopes=("https://www.googleapis.com/auth/calendar.events",),
             default_permission="ask",
+            tool_name="google_calendar_modify_event",
         ),
         ProviderCapability(
             "files.read",
@@ -162,6 +165,7 @@ MICROSOFT = ProviderDefinition(
         "Mail.ReadWrite",
         "Mail.Send",
         "Calendars.Read",
+        "Calendars.ReadWrite",
     ),
     oauth_tenant_supported=True,
     capabilities=(
@@ -222,6 +226,7 @@ MICROSOFT = ProviderDefinition(
             "write",
             required_scopes=("Calendars.ReadWrite",),
             default_permission="ask",
+            tool_name="microsoft_calendar_create_event",
         ),
         ProviderCapability(
             "calendar.modify",
@@ -231,6 +236,7 @@ MICROSOFT = ProviderDefinition(
             "write",
             required_scopes=("Calendars.ReadWrite",),
             default_permission="ask",
+            tool_name="microsoft_calendar_modify_event",
         ),
         ProviderCapability(
             "files.read",

@@ -19,7 +19,10 @@ def ensure_tools_registered() -> None:
     from jace.tools.outlook import register_outlook_tools
     from jace.tools.gmail_write import register_gmail_write_tools
     from jace.tools.outlook_write import register_outlook_write_tools
+    from jace.tools.google_calendar_write import register_google_calendar_write_tools
+    from jace.tools.microsoft_calendar_write import register_microsoft_calendar_write_tools
     from jace.tools.calendar_intelligence import register_calendar_intelligence_tools
+    from jace.tools.calendar_find_event import register_calendar_find_event_tool
     register_builtin_tools()
     register_web_tools()
     register_computer_tools()
@@ -31,7 +34,10 @@ def ensure_tools_registered() -> None:
     register_outlook_tools()
     register_gmail_write_tools()
     register_outlook_write_tools()
+    register_google_calendar_write_tools()
+    register_microsoft_calendar_write_tools()
     register_calendar_intelligence_tools()
+    register_calendar_find_event_tool()
 
     # Extend Jace's existing smart tool router.
     from jace.tools import agent as primary_agent

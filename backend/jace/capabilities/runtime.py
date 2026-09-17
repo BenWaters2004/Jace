@@ -9,6 +9,7 @@ from typing import Any, Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jace.capabilities.registry import snapshot
+from jace.calendar.write_target_resolution import infer_calendar_modify_target
 from jace.config import settings
 
 
@@ -239,14 +240,24 @@ _EMAIL_READ = re.compile(
     r"|\b(?:what(?:'s| is)|anything|new)\b.{0,35}\b(?:in )?(?:my )?(?:email|mail|inbox)\b",
     re.IGNORECASE,
 )
+# JACE_STEP4C5A_CALENDAR_WRITE_INTENT
 _CALENDAR_CREATE = re.compile(
-    r"\b(?:create|add|schedule|book|make)\b.{0,45}\b(?:calendar )?(?:event|meeting|appointment)\b",
+    r"\b(?:create|add|schedule|book|make)\b.{0,45}\b(?:calendar )?(?:event|meeting|appointment)\b"
+    r"|\b(?:add|put|schedule|book)\b.{0,50}\b(?:to|on|in)\s+(?:my\s+)?"
+    r"(?:(?:google|outlook|microsoft)\s+)?calendar\b",
     re.IGNORECASE,
 )
+# JACE_STEP4C5A_CALENDAR_TARGET_RUNTIME
 _CALENDAR_MODIFY = re.compile(
-    r"\b(?:reschedule|move|update|change|edit|cancel)\b.{0,45}\b(?:calendar )?(?:event|meeting|appointment)\b",
+    r"\b(?:reschedule|move|update|change|edit|cancel|delete|remove)\b"
+    r".{0,120}\b(?:calendar|event|meeting|appointment)\b"
+    r"|\b(?:reschedule|move|change)\b.{0,120}\b(?:to|from|at)\s+"
+    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b"
+    r"|\b(?:delete|remove|cancel)\b.{0,100}\b(?:from|on)\s+(?:my\s+)?"
+    r"(?:(?:google|outlook|microsoft)\s+)?calendar\b",
     re.IGNORECASE,
 )
+
 _CALENDAR_READ = re.compile(
     r"\b(?:read|show|check|view|what(?:'s| is)|availability|free|busy|upcoming)\b.{0,50}\b(?:calendar|schedule|meetings?|appointments?)\b"
     r"|\b(?:calendar|schedule)\b.{0,40}\b(?:today|tomorrow|week|month|show|check|availability)\b",
@@ -493,6 +504,8 @@ def _resolve_need(
     message: str,
     need: CapabilityNeed,
     provider_rows: list[dict[str, Any]],
+    *,
+    preferred_connection_id: str | None = None,
 ) -> CapabilityResolution:
     candidates = [
         _candidate_from_row(row)
@@ -500,6 +513,15 @@ def _resolve_need(
         if row.get("source") == "connection"
         and row.get("provider_capability_id") == need.capability_id
     ]
+    if preferred_connection_id:
+        exact_connection = [
+            candidate
+            for candidate in candidates
+            if candidate.connection_id == preferred_connection_id
+        ]
+        if exact_connection:
+            candidates = exact_connection
+
 
     if need.preferred_provider:
         preferred = [
@@ -586,9 +608,30 @@ async def resolve_runtime_capabilities(
 
     capability_snapshot = await snapshot(session)
     rows = list(capability_snapshot.get("capabilities") or [])
+    calendar_modify_hint = None
+    if any(
+        need.capability_id == "calendar.modify"
+        for need in needs
+    ):
+        calendar_modify_hint = await infer_calendar_modify_target(
+            session,
+            message,
+        )
 
     resolutions = tuple(
-        _resolve_need(message, need, rows)
+        _resolve_need(
+            message,
+            need,
+            rows,
+            preferred_connection_id=(
+                calendar_modify_hint.connection_id
+                if (
+                    calendar_modify_hint is not None
+                    and need.capability_id == "calendar.modify"
+                )
+                else None
+            ),
+        )
         for need in needs
     )
 

@@ -640,6 +640,48 @@ async def _execute_tool_call(
         }
 
 
+# JACE_STEP4C5A_CALENDAR_WRITE_COMPLETION_GUARD
+_CALENDAR_WRITE_TOOL_NAMES = {
+    "google_calendar_create_event",
+    "google_calendar_modify_event",
+    "microsoft_calendar_create_event",
+    "microsoft_calendar_modify_event",
+}
+
+_CALENDAR_WRITE_REQUEST_RE = re.compile(
+    r"\b(?:create|add|schedule|book|make|reschedule|move|update|change|"
+    r"edit|cancel|delete|remove)\b.{0,140}\b(?:calendar|event|meeting|appointment)\b"
+    r"|\b(?:reschedule|move|change)\b.{0,120}\b(?:to|from|at)\s+"
+    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b",
+    flags=re.IGNORECASE,
+)
+
+_WRITE_SUCCESS_RE = re.compile(
+    r"\b(?:done|successfully|created|updated|moved|rescheduled|deleted|"
+    r"removed|changed|cancelled)\b",
+    flags=re.IGNORECASE,
+)
+
+_WRITE_FAILURE_RE = re.compile(
+    r"\b(?:couldn't|could not|didn't|did not|failed|denied|not changed|"
+    r"not updated|not moved|not deleted|unable to)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _calendar_write_request(message: str) -> bool:
+    return bool(_CALENDAR_WRITE_REQUEST_RE.search(message or ""))
+
+
+def _looks_like_write_success(content: str) -> bool:
+    normalised = " ".join((content or "").strip().split())
+    if not normalised:
+        return False
+    if _WRITE_FAILURE_RE.search(normalised):
+        return False
+    return bool(_WRITE_SUCCESS_RE.search(normalised))
+
+
 _ELABORATE_REQUEST_RE = re.compile(
     r"\b(?:summari[sz]e|summary|explain|analyse|analyze|review|research|compare|overview|"
     r"tell me about|walk me through|describe|what changed|what does .* (?:say|contain|show))\b",
@@ -784,13 +826,32 @@ async def stream_agent(
     tools = _tool_schemas_for_names(selected_tool_names)
 
     usage = AgentUsage()
+    calendar_write_requested = _calendar_write_request(user_message)
+    calendar_write_completed = False
+    calendar_write_attempted = False
+    calendar_write_last_result: str | None = None
+    calendar_write_retry_count = 0
     empty_response_retries = 0
     incomplete_response_retries = 0
     active_system_prompt = system_prompt
+    if calendar_write_requested:
+        active_system_prompt = (
+            system_prompt
+            + "\n\nCALENDAR WRITE CONTRACT\n"
+            + "This request changes calendar data. A verbal acknowledgement is not execution. "
+            + "If the local event ID is unknown, call calendar_find_event first. Then call the "
+            + "supplied provider calendar create/modify tool. Do not say the calendar was changed "
+            + "unless a provider calendar write tool in this turn returns status=completed. If no "
+            + "write tool is available or execution fails/was denied, say the event was not changed.\n"
+            + "END CALENDAR WRITE CONTRACT"
+        )
 
     decision_window = int(settings.tool_stream_buffer_chars)
     # A turn with no tools cannot produce a tool call, so it always streams live.
-    hold_for_tool_decision = bool(tools) and decision_window != 0
+    hold_for_tool_decision = (
+        calendar_write_requested
+        or (bool(tools) and decision_window != 0)
+    )
 
     for _step in range(settings.max_tool_steps):
         content_parts: list[str] = []
@@ -838,7 +899,11 @@ async def stream_agent(
                     held_parts.append(content)
                     held_chars += len(content)
 
-                    if decision_window > 0 and held_chars >= decision_window:
+                    if (
+                        decision_window > 0
+                        and held_chars >= decision_window
+                        and not calendar_write_requested
+                    ):
                         # Enough prose with no tool call: this is an answer.
                         released = True
                         for held in held_parts:
@@ -960,6 +1025,57 @@ async def stream_agent(
                         content_text += "".join(continuation_parts)
                         final_chunk = continuation_final or final_chunk
 
+            if (
+                calendar_write_requested
+                and not calendar_write_completed
+            ):
+                supplied_write_tools = {
+                    name
+                    for name in selected_tool_names
+                    if name in _CALENDAR_WRITE_TOOL_NAMES
+                }
+                clarification = (
+                    "?" in content_text
+                    or bool(
+                        re.search(
+                            r"\b(?:which|what time|what date|which calendar|"
+                            r"which account|clarify|need to know)\b",
+                            content_text,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                )
+                if (
+                    supplied_write_tools
+                    and not calendar_write_attempted
+                    and not clarification
+                    and calendar_write_retry_count < 1
+                ):
+                    calendar_write_retry_count += 1
+                    active_system_prompt = (
+                        system_prompt
+                        + "\n\nCALENDAR WRITE RECOVERY\n"
+                        + "The user asked you to change calendar data, but no provider calendar "
+                        + "write tool has executed yet. Find the event if necessary, then call the "
+                        + "supplied provider write tool before answering. Do not claim success without "
+                        + "a completed write result.\n"
+                        + "END CALENDAR WRITE RECOVERY"
+                    )
+                    continue
+                if _looks_like_write_success(content_text):
+                    if calendar_write_last_result:
+                        content_text = (
+                            "I didn't complete the calendar change. "
+                            + calendar_write_last_result
+                            + " The event has not been confirmed as changed."
+                        )
+                    else:
+                        content_text = (
+                            "I didn't complete the calendar change because no calendar write tool "
+                            "completed successfully. The event has not been confirmed as changed."
+                        )
+                    content_parts = [content_text]
+
             agent_messages.append({"role": "assistant", "content": content_text})
 
             # Short answers can finish inside the decision window, and the repair
@@ -996,6 +1112,23 @@ async def stream_agent(
                 if event.get("type") == "_tool_message":
                     tool_message = event["message"]
                 else:
+                    event_tool_name = str(event.get("tool_name") or "")
+                    if (
+                        event.get("type") == "tool_call"
+                        and event_tool_name in _CALENDAR_WRITE_TOOL_NAMES
+                    ):
+                        calendar_write_attempted = True
+                    if (
+                        event.get("type") == "tool_result"
+                        and event_tool_name in _CALENDAR_WRITE_TOOL_NAMES
+                    ):
+                        calendar_write_last_result = str(
+                            event.get("summary")
+                            or event.get("status")
+                            or ""
+                        )
+                        if event.get("status") == "completed":
+                            calendar_write_completed = True
                     yield event
             if tool_message is None:
                 tool_name = call["function"]["name"]
@@ -1008,6 +1141,19 @@ async def stream_agent(
 
     # Safety-limit finalisation: tools are removed and one complete answer is
     # generated from the information already gathered.
+    if (
+        calendar_write_requested
+        and not calendar_write_completed
+    ):
+        system_prompt = (
+            system_prompt
+            + "\n\nCALENDAR WRITE TOOL LIMIT SAFETY\n"
+            + "No provider calendar write completed in this turn. Do not claim the calendar "
+            + "was created, moved, updated, deleted, cancelled, or otherwise changed. State "
+            + "that the requested calendar change was not confirmed.\n"
+            + "END CALENDAR WRITE TOOL LIMIT SAFETY"
+        )
+
     limit_prompt = (
         system_prompt
         + "\n\nTOOL LIMIT\n"

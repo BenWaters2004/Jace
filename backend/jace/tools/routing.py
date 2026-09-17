@@ -47,6 +47,7 @@ ALL_TOOL_NAMES = {
     "calendar_free_busy",
     "calendar_check_conflicts",
     "calendar_find_open_slots",
+    "calendar_find_event",
 }
 
 
@@ -312,6 +313,48 @@ def route_tool_names(message: str) -> set[str]:
         })
 
         if calendar_date_phrase:
+            selected.add("current_datetime")
+
+    # JACE_STEP4C5A_CALENDAR_MODIFY_ROUTING
+    calendar_modify_followup = bool(
+        re.search(
+            r"\b(?:move|reschedule|update|change|edit|cancel|delete|remove)\b",
+            lowered,
+        )
+        and (
+            re.search(
+                r"\b(?:calendar|event|meeting|appointment)\b",
+                lowered,
+            )
+            or re.search(
+                r"\b(?:to|from|at)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b",
+                lowered,
+            )
+            or re.search(
+                r"[\"“”‘’'][^\"“”‘’']+[\"“”‘’']",
+                text,
+            )
+        )
+    )
+
+    if calendar_modify_followup:
+        selected.add("calendar_find_event")
+
+        for name in (
+            "calendar_list_events",
+            "calendar_next_event",
+            "calendar_free_busy",
+            "calendar_check_conflicts",
+            "calendar_find_open_slots",
+        ):
+            if name in ALL_TOOL_NAMES:
+                selected.add(name)
+
+        if re.search(
+            r"\b(?:today|yesterday|tomorrow|monday|tuesday|wednesday|"
+            r"thursday|friday|saturday|sunday|this week|next week)\b",
+            lowered,
+        ):
             selected.add("current_datetime")
 
     # Phase 9 interactive GUI control. Selecting the family lets the model
