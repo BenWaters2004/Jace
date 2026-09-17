@@ -448,7 +448,7 @@ export function EventDetails(props: {
 
         {!event.can_edit && (
           <p className="calendar-readonly-note">
-            External provider changes are handled through Jace chat so provider permissions and approvals are enforced.
+            External provider editing is intentionally read-only until 4C.5.
           </p>
         )}
       </div>

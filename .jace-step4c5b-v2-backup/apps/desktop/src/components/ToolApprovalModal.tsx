@@ -250,83 +250,11 @@ function CalendarApprovalSummary({
   const deleteAction = action === "delete";
   const title = stringValue(args.title);
   const calendar = stringValue(args.calendar);
-  const nestedAttendees = objects(args.attendees);
-  const flatRequired = stringList(args.attendee_emails);
-  const flatOptional = stringList(args.optional_attendee_emails);
-  const flatResources = stringList(args.resource_attendee_emails);
-
-  const attendees = (
-    nestedAttendees.length > 0
-      ? nestedAttendees
-      : [
-        ...flatRequired.map((email) => ({
-          email,
-          type: "required",
-        })),
-        ...flatOptional.map((email) => ({
-          email,
-          type: "optional",
-        })),
-        ...flatResources.map((email) => ({
-          email,
-          type: "resource",
-        })),
-      ]
-  );
-
-  const nestedReminders = objects(args.reminders);
-  const flatReminderMinutes = (
-    Array.isArray(args.reminder_minutes)
-      ? args.reminder_minutes.filter(
-        (value): value is number => typeof value === "number",
-      )
-      : []
-  );
-
-  const reminders = (
-    nestedReminders.length > 0
-      ? nestedReminders
-      : flatReminderMinutes.map((minutes) => ({
-        minutes_before_start: minutes,
-        method: "popup",
-      }))
-  );
-
-  const nestedRecurrence = objectValue(args.recurrence);
-  const recurrenceFrequency = stringValue(args.recurrence_frequency);
-
-  const recurrence = (
-    nestedRecurrence
-    ?? (
-      recurrenceFrequency
-        ? {
-          frequency: recurrenceFrequency,
-          interval: Number(args.recurrence_interval || 1),
-          weekdays: stringList(args.recurrence_weekdays),
-          day_of_month: args.recurrence_day_of_month,
-          month: args.recurrence_month,
-          count: args.recurrence_count,
-          until: args.recurrence_until,
-        }
-        : null
-    )
-  );
-
+  const attendees = objects(args.attendees);
+  const reminders = objects(args.reminders);
+  const recurrence = objectValue(args.recurrence);
   const scope = stringValue(args.recurrence_scope) || "single";
-  const onlineMeeting = (
-    stringValue(args.online_meeting)
-    || (
-      args.add_online_meeting === true
-        ? (
-          approval.provider_id === "google"
-            ? "google_meet"
-            : approval.provider_id === "microsoft"
-              ? "microsoft_teams"
-              : "online_meeting"
-        )
-        : ""
-    )
-  );
+  const onlineMeeting = stringValue(args.online_meeting);
   const notifyAttendees = args.notify_attendees !== false;
   const allDay = args.all_day === true;
 
@@ -443,13 +371,7 @@ function CalendarApprovalSummary({
         </div>
       )}
 
-      {(
-        (
-          Array.isArray(args.reminders)
-          || Array.isArray(args.reminder_minutes)
-        )
-        && reminders.length === 0
-      ) && (
+      {Array.isArray(args.reminders) && reminders.length === 0 && (
         <div className="approval-details">
           <span>Reminders</span>
           <code>Disable reminders</code>

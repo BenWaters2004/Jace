@@ -206,10 +206,7 @@ def route_tool_names(message: str) -> set[str]:
     # Phase 8 automation. Include current_datetime when creating a schedule so
     # the model can resolve relative wording such as tomorrow or in two hours.
     if re.search(
-        # JACE_STEP4C5B_AUTOMATION_SCHEDULE_DISAMBIGUATION
-        # Bare "schedule" is ambiguous with Calendar creation. Automation intent is
-        # already covered by remind me / automation / recurring / tomorrow-at / every-X forms.
-        r"\b(?:remind me|automation|automations|recurring task|watcher|every (?:day|weekday|week|hour|morning|evening)|"
+        r"\b(?:remind me|schedule|automation|automations|recurring task|watcher|every (?:day|weekday|week|hour|morning|evening)|"
         r"tomorrow at|in \d+ (?:minutes?|hours?|days?)|notify me when|tell me when|monitor|check every)\b",
         lowered,
     ):
@@ -341,40 +338,6 @@ def route_tool_names(message: str) -> set[str]:
     )
 
     if calendar_modify_followup:
-        selected.add("calendar_find_event")
-
-        for name in (
-            "calendar_list_events",
-            "calendar_next_event",
-            "calendar_free_busy",
-            "calendar_check_conflicts",
-            "calendar_find_open_slots",
-        ):
-            if name in ALL_TOOL_NAMES:
-                selected.add(name)
-
-        if re.search(
-            r"\b(?:today|yesterday|tomorrow|monday|tuesday|wednesday|"
-            r"thursday|friday|saturday|sunday|this week|next week)\b",
-            lowered,
-        ):
-            selected.add("current_datetime")
-
-    # JACE_STEP4C5B_SCHEDULING_ROUTING
-    calendar_scheduling_change = bool(
-        re.search(
-            r"\b(?:invite|add|remove)\b.{0,120}\b(?:attendee|attendees|guest|guests|invitee|invitees)\b"
-    r"|\b(?:invite|add|remove)\b.{0,120}\b[^@\s]+@[^@\s]+\b"
-    r"|\b(?:invite|add|remove)\b.{0,120}[\"“”‘’'][^\"“”‘’']+[\"“”‘’']"
-            r"|\b(?:make|set|change|update)\b.{0,120}\b(?:recurring|recurrence|repeat|repeating)\b"
-            r"|\b(?:add|set|change|remove)\b.{0,120}\b(?:reminder|reminders)\b"
-            r"|\b(?:add|create|remove)\b.{0,120}\b(?:google meet|meet link|teams|teams link|online meeting)\b"
-            r"|\b(?:change|update|delete|cancel)\b.{0,120}\b(?:series|occurrence)\b",
-            lowered,
-        )
-    )
-
-    if calendar_scheduling_change:
         selected.add("calendar_find_event")
 
         for name in (

@@ -258,19 +258,6 @@ _CALENDAR_MODIFY = re.compile(
     re.IGNORECASE,
 )
 
-# JACE_STEP4C5B_SCHEDULING_INTENT
-_CALENDAR_SCHEDULING_MODIFY = re.compile(
-    r"\b(?:invite|add|remove)\b.{0,120}\b(?:attendee|attendees|guest|guests|invitee|invitees)\b"
-    r"|\b(?:invite|add|remove)\b.{0,120}\b[^@\s]+@[^@\s]+\b"
-    r"|\b(?:invite|add|remove)\b.{0,120}[\"“”‘’'][^\"“”‘’']+[\"“”‘’']"
-    r"|\b(?:make|set|change|update)\b.{0,120}\b(?:recurring|recurrence|repeat|repeating)\b"
-    r"|\b(?:add|set|change|remove)\b.{0,120}\b(?:reminder|reminders)\b"
-    r"|\b(?:add|create|remove)\b.{0,120}\b(?:google meet|meet link|teams|teams link|online meeting)\b"
-    r"|\b(?:change|update|delete|cancel)\b.{0,120}\b(?:series|occurrence)\b",
-    re.IGNORECASE,
-)
-
-
 _CALENDAR_READ = re.compile(
     r"\b(?:read|show|check|view|what(?:'s| is)|availability|free|busy|upcoming)\b.{0,50}\b(?:calendar|schedule|meetings?|appointments?)\b"
     r"|\b(?:calendar|schedule)\b.{0,40}\b(?:today|tomorrow|week|month|show|check|availability)\b",
@@ -361,14 +348,8 @@ def detect_capability_needs(message: str) -> tuple[CapabilityNeed, ...]:
 
     if _CALENDAR_CREATE.search(text):
         add("calendar.create", "The request asks Jace to create a calendar event.")
-    if (
-        _CALENDAR_MODIFY.search(text)
-        or _CALENDAR_SCHEDULING_MODIFY.search(text)
-    ):
-        add(
-            "calendar.modify",
-            "The request asks Jace to change a calendar event or its scheduling details.",
-        )
+    if _CALENDAR_MODIFY.search(text):
+        add("calendar.modify", "The request asks Jace to change a calendar event.")
     if _CALENDAR_READ.search(text):
         add("calendar.read", "The request asks Jace to inspect a calendar.")
 

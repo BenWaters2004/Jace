@@ -13,7 +13,6 @@ from jace.ai.prompts import (
 )
 from jace.attachments.processors import prepare_attachments
 from jace.capabilities.runtime import resolve_runtime_capabilities
-from jace.calendar.write_continuation import calendar_capability_message
 from jace.calendar.write_routing import compact_calendar_write_tools
 from jace.attachments.service import assign_attachments_to_message, get_attachments
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
@@ -312,12 +311,8 @@ async def send_streaming_chat(request: PersistentChatRequest):
 
             # JACE_STEP4A4_CHAT_RESOLUTION
             tool_started = time.perf_counter()
-            # JACE_STEP4C5B_V2_WRITE_CONTINUATION_CHAT
-            raw_user_message = request.message or stored_user_text
-            capability_message = calendar_capability_message(
-                raw_user_message,
-                history,
-            )
+            capability_message = request.message or stored_user_text
+
             routed_tools = await routed_tool_names(
                 capability_message
             )
@@ -437,9 +432,7 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 reasoning_mode=reasoning_mode,
                 temperature=temperature,
                 conversation_id=conversation_id,
-                # Use the effective capability message for execution policy only.
-                # Conversation history still contains the literal follow-up text.
-                user_message=capability_message,
+                user_message=request.message or stored_user_text,
                 tool_names=routed_tools,
                 current_images=attachment_images,
                 attachment_context=attachment_context,

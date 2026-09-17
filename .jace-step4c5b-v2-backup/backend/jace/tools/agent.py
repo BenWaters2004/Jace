@@ -1084,11 +1084,7 @@ async def stream_agent(
                         + "END CALENDAR WRITE RECOVERY"
                     )
                     continue
-                # JACE_STEP4C5B_V2_NO_PENDING_WRITE_PROSE
-                # A Calendar write turn may finish only with a required
-                # clarification or with evidence that the provider write
-                # completed. Never finish with processing/executing prose.
-                if not clarification:
+                if _looks_like_write_success(content_text):
                     if calendar_write_last_result:
                         content_text = (
                             "I didn't complete the calendar change. "
@@ -1097,14 +1093,10 @@ async def stream_agent(
                         )
                     else:
                         content_text = (
-                            "I didn't complete the calendar change because no "
-                            "calendar write tool completed successfully. The "
-                            "event has not been confirmed as changed."
+                            "I didn't complete the calendar change because no calendar write tool "
+                            "completed successfully. The event has not been confirmed as changed."
                         )
-
-                    content_parts = [
-                        content_text
-                    ]
+                    content_parts = [content_text]
 
             agent_messages.append({"role": "assistant", "content": content_text})
 

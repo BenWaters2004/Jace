@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # JACE_STEP4C5A_CALENDAR_TARGET_RESOLUTION
-# JACE_STEP4C5B_SCHEDULING_TARGET_RESOLUTION
 
 from dataclasses import dataclass
 import re
@@ -22,36 +21,20 @@ class CalendarModifyTargetHint:
 
 
 _ACTION_RE = re.compile(
-    r"\b(?:"
-    r"move|reschedule|update|change|edit|cancel|delete|remove|"
-    r"invite|add|make|set|create"
-    r")\b",
-    re.IGNORECASE,
-)
-
-_SCHEDULING_OBJECT_RE = re.compile(
-    r"\b(?:"
-    r"attendee|attendees|guest|guests|invitee|invitees|"
-    r"reminder|reminders|recurring|recurrence|repeat|repeating|"
-    r"google meet|meet link|teams|teams link|online meeting|"
-    r"series"
-    r")\b",
+    r"\b(?:move|reschedule|update|change|edit|cancel|delete|remove)\b",
     re.IGNORECASE,
 )
 
 _QUOTED_RE = re.compile(
-    r"""["'“”‘’]([^"'“”‘’]{2,300})["'“”‘’]"""
+    r'''["'“”‘’]([^"'“”‘’]{2,300})["'“”‘’]'''
 )
 
 _TRAILING_CHANGE_RE = re.compile(
-    r"\s+(?:to|from|on|at|with|every)\s+"
-    r"(?:"
-    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)?|"
+    r"\s+(?:to|from|on|at)\s+"
+    r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|"
     r"today|tomorrow|yesterday|"
     r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-    r"next\b.*|this\b.*|"
-    r"[^@\s]+@[^@\s]+"
-    r")$",
+    r"next\b.*|this\b.*)$",
     re.IGNORECASE,
 )
 
@@ -59,7 +42,6 @@ _TRAILING_CHANGE_RE = re.compile(
 def candidate_phrases(message: str) -> list[str]:
     phrases: list[str] = []
 
-    # Quoted titles are always strongest and work well for follow-up writes.
     for match in _QUOTED_RE.finditer(message):
         value = match.group(1).strip()
         if value and value not in phrases:
@@ -68,18 +50,8 @@ def candidate_phrases(message: str) -> list[str]:
     action = _ACTION_RE.search(message)
     if action:
         tail = message[action.end():].strip()
-
-        # Drop common scheduling targets before attempting a plain-title tail.
         tail = re.sub(
             r"^(?:the|my)\s+",
-            "",
-            tail,
-            flags=re.IGNORECASE,
-        )
-        tail = re.sub(
-            r"^(?:attendee|attendees|guest|guests|reminder|reminders|"
-            r"google meet|meet link|teams|teams link|online meeting)\s+"
-            r"(?:to|from|on)\s+",
             "",
             tail,
             flags=re.IGNORECASE,
@@ -92,11 +64,10 @@ def candidate_phrases(message: str) -> list[str]:
             len(tail) >= 2
             and tail not in phrases
             and not re.fullmatch(
-                r"(?:it|this|that|event|meeting|appointment|series)",
+                r"(?:it|this|that|event|meeting|appointment)",
                 tail,
                 flags=re.IGNORECASE,
             )
-            and not _SCHEDULING_OBJECT_RE.fullmatch(tail)
         ):
             phrases.append(tail)
 
@@ -117,6 +88,7 @@ def _unique_targets(rows) -> list[CalendarModifyTargetHint]:
             connection_id,
             event.id,
         )
+
         if key in seen:
             continue
 
@@ -139,10 +111,8 @@ async def infer_calendar_modify_target(
     message: str,
 ) -> CalendarModifyTargetHint | None:
     """
-    Resolve a unique named cached external event to its backend-owned account.
-
-    Used only as a capability-resolution hint. The model never chooses a
-    connection ID; the external write tool still performs normal revalidation.
+    Resolve a uniquely named cached external event to the backend-owned
+    provider connection. The model never chooses the connection ID.
     """
     if not _ACTION_RE.search(message):
         return None
@@ -167,9 +137,10 @@ async def infer_calendar_modify_target(
                 func.lower(CalendarEvent.title) == phrase.casefold(),
             )
         )
-        unique = _unique_targets(
-            list((await session.execute(statement)).all())
-        )
+
+        rows = list((await session.execute(statement)).all())
+        unique = _unique_targets(rows)
+
         if len(unique) == 1:
             return unique[0]
         if len(unique) > 1:
@@ -195,9 +166,10 @@ async def infer_calendar_modify_target(
             )
             .limit(12)
         )
-        unique = _unique_targets(
-            list((await session.execute(statement)).all())
-        )
+
+        rows = list((await session.execute(statement)).all())
+        unique = _unique_targets(rows)
+
         if len(unique) == 1:
             return unique[0]
         if len(unique) > 1:

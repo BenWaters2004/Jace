@@ -1777,23 +1777,6 @@ async def _sync_google_calendars_unlocked(
                             entry.get(
                                 "hidden"
                             ),
-                        # JACE_STEP4C5B_GOOGLE_CONFERENCE_METADATA
-                        "allowed_conference_solution_types":
-                            (
-                                entry.get(
-                                    "conferenceProperties"
-                                )
-                                or {}
-                            ).get(
-                                "allowedConferenceSolutionTypes"
-                            )
-                            if isinstance(
-                                entry.get(
-                                    "conferenceProperties"
-                                ),
-                                dict,
-                            )
-                            else None,
                     },
                 )
 

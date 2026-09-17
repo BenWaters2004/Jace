@@ -648,24 +648,17 @@ _CALENDAR_WRITE_TOOL_NAMES = {
     "microsoft_calendar_modify_event",
 }
 
-# JACE_STEP4C5B_STRICT_WRITE_COMPLETION
 _CALENDAR_WRITE_REQUEST_RE = re.compile(
-    r"\b(?:create|add|schedule|book|make|put|reschedule|move|update|change|"
-    r"edit|cancel|delete|remove|invite|set)\b"
-    r".{0,180}\b(?:calendar|event|meeting|appointment|series|occurrence|"
-    r"attendee|attendees|guest|guests|reminder|reminders|google meet|"
-    r"meet link|teams|teams link|online meeting)\b"
-    r"|\b(?:reschedule|move|change)\b.{0,140}\b(?:to|from|at)\s+"
+    r"\b(?:create|add|schedule|book|make|reschedule|move|update|change|"
+    r"edit|cancel|delete|remove)\b.{0,140}\b(?:calendar|event|meeting|appointment)\b"
+    r"|\b(?:reschedule|move|change)\b.{0,120}\b(?:to|from|at)\s+"
     r"\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b",
     flags=re.IGNORECASE,
 )
 
 _WRITE_SUCCESS_RE = re.compile(
-    r"\b(?:done|successfully|created|updated|moved|rescheduled|scheduled|"
-    r"booked|deleted|removed|changed|cancelled|added|invited|saved)\b"
-    r"|\ball set\b"
-    r"|\bset up\b"
-    r"|\bon (?:your|the) calendar\b",
+    r"\b(?:done|successfully|created|updated|moved|rescheduled|deleted|"
+    r"removed|changed|cancelled)\b",
     flags=re.IGNORECASE,
 )
 
@@ -842,29 +835,14 @@ async def stream_agent(
     incomplete_response_retries = 0
     active_system_prompt = system_prompt
     if calendar_write_requested:
-        supplied_calendar_write_tools = sorted(
-            name
-            for name in selected_tool_names
-            if name in _CALENDAR_WRITE_TOOL_NAMES
-        )
         active_system_prompt = (
             system_prompt
             + "\n\nCALENDAR WRITE CONTRACT\n"
             + "This request changes calendar data. A verbal acknowledgement is not execution. "
-            + (
-                "The executable provider calendar write tool supplied for this turn is: "
-                + ", ".join(supplied_calendar_write_tools)
-                + ". You MUST call it to perform the requested write. "
-                if supplied_calendar_write_tools
-                else (
-                    "No executable provider calendar write tool was supplied for this turn. "
-                    "You MUST NOT claim the calendar was changed. "
-                )
-            )
-            + "For modifications, if the local event ID is unknown, call calendar_find_event first. "
-            + "Do not say the calendar was created, scheduled, booked, changed, moved, updated, "
-            + "deleted or otherwise written unless a provider calendar write tool in this turn "
-            + "returns status=completed.\n"
+            + "If the local event ID is unknown, call calendar_find_event first. Then call the "
+            + "supplied provider calendar create/modify tool. Do not say the calendar was changed "
+            + "unless a provider calendar write tool in this turn returns status=completed. If no "
+            + "write tool is available or execution fails/was denied, say the event was not changed.\n"
             + "END CALENDAR WRITE CONTRACT"
         )
 
@@ -1071,7 +1049,7 @@ async def stream_agent(
                     supplied_write_tools
                     and not calendar_write_attempted
                     and not clarification
-                    and calendar_write_retry_count < 2
+                    and calendar_write_retry_count < 1
                 ):
                     calendar_write_retry_count += 1
                     active_system_prompt = (
@@ -1084,11 +1062,7 @@ async def stream_agent(
                         + "END CALENDAR WRITE RECOVERY"
                     )
                     continue
-                # JACE_STEP4C5B_V2_NO_PENDING_WRITE_PROSE
-                # A Calendar write turn may finish only with a required
-                # clarification or with evidence that the provider write
-                # completed. Never finish with processing/executing prose.
-                if not clarification:
+                if _looks_like_write_success(content_text):
                     if calendar_write_last_result:
                         content_text = (
                             "I didn't complete the calendar change. "
@@ -1097,14 +1071,10 @@ async def stream_agent(
                         )
                     else:
                         content_text = (
-                            "I didn't complete the calendar change because no "
-                            "calendar write tool completed successfully. The "
-                            "event has not been confirmed as changed."
+                            "I didn't complete the calendar change because no calendar write tool "
+                            "completed successfully. The event has not been confirmed as changed."
                         )
-
-                    content_parts = [
-                        content_text
-                    ]
+                    content_parts = [content_text]
 
             agent_messages.append({"role": "assistant", "content": content_text})
 

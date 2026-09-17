@@ -206,10 +206,7 @@ def route_tool_names(message: str) -> set[str]:
     # Phase 8 automation. Include current_datetime when creating a schedule so
     # the model can resolve relative wording such as tomorrow or in two hours.
     if re.search(
-        # JACE_STEP4C5B_AUTOMATION_SCHEDULE_DISAMBIGUATION
-        # Bare "schedule" is ambiguous with Calendar creation. Automation intent is
-        # already covered by remind me / automation / recurring / tomorrow-at / every-X forms.
-        r"\b(?:remind me|automation|automations|recurring task|watcher|every (?:day|weekday|week|hour|morning|evening)|"
+        r"\b(?:remind me|schedule|automation|automations|recurring task|watcher|every (?:day|weekday|week|hour|morning|evening)|"
         r"tomorrow at|in \d+ (?:minutes?|hours?|days?)|notify me when|tell me when|monitor|check every)\b",
         lowered,
     ):

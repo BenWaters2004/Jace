@@ -23,10 +23,6 @@ from jace.tools.base import (
     ToolError,
     ToolExecutionResult,
 )
-from jace.tools.calendar_write_flat import (
-    CalendarCreateFlatInput,
-    to_calendar_create_input,
-)
 from jace.tools.calendar_write_common import (
     CalendarAttendeeInput,
     CalendarCreateEventInput,
@@ -443,13 +439,8 @@ async def microsoft_calendar_create_event_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    flat_payload = data
-    assert isinstance(flat_payload, CalendarCreateFlatInput)
-
-    payload = to_calendar_create_input(
-        flat_payload,
-        provider_id="microsoft",
-    )
+    payload = data
+    assert isinstance(payload, CalendarCreateEventInput)
 
     source, account = await resolve_create_source(
         context,
@@ -666,17 +657,14 @@ def register_microsoft_calendar_write_tools() -> None:
             name="microsoft_calendar_create_event",
             label="Create Outlook Calendar event",
             description=(
-                "Create an Outlook/Microsoft Calendar event using flat scheduling "
-                "fields. For today/tomorrow/weekday wording, call current_datetime "
-                "first and pass exact ISO start_at/end_at values. attendee_emails, "
-                "recurrence_frequency/count, reminder_minutes and "
-                "add_online_meeting are top-level fields. Microsoft may send "
-                "invitations/updates automatically. External write: Ask."
+                "Create an Outlook/Microsoft Calendar event. Supports attendees, "
+                "recurrence, one reminder and Teams where supported. Microsoft "
+                "may send invitations/updates automatically. External write: Ask."
             ),
             category="Calendar",
             risk="write",
             default_permission="ask",
-            input_model=CalendarCreateFlatInput,
+            input_model=CalendarCreateEventInput,
             handler=microsoft_calendar_create_event_tool,
             provider_id="microsoft",
             capability_id="calendar.create",

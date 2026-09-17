@@ -25,10 +25,6 @@ from jace.tools.base import (
     ToolError,
     ToolExecutionResult,
 )
-from jace.tools.calendar_write_flat import (
-    CalendarCreateFlatInput,
-    to_calendar_create_input,
-)
 from jace.tools.calendar_write_common import (
     CalendarAttendeeInput,
     CalendarCreateEventInput,
@@ -357,13 +353,8 @@ async def google_calendar_create_event_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    flat_payload = data
-    assert isinstance(flat_payload, CalendarCreateFlatInput)
-
-    payload = to_calendar_create_input(
-        flat_payload,
-        provider_id="google",
-    )
+    payload = data
+    assert isinstance(payload, CalendarCreateEventInput)
 
     source, account = await resolve_create_source(
         context,
@@ -597,16 +588,13 @@ def register_google_calendar_write_tools() -> None:
             name="google_calendar_create_event",
             label="Create Google Calendar event",
             description=(
-                "Create a Google Calendar event using the flat scheduling fields. "
-                "For today/tomorrow/weekday wording, call current_datetime first "
-                "and pass exact ISO start_at/end_at values. attendee_emails, "
-                "recurrence_frequency/count, reminder_minutes and "
-                "add_online_meeting are simple top-level fields. External write: Ask."
+                "Create a Google Calendar event. Supports attendees/invitations, "
+                "recurrence, reminders and Google Meet. External write: Ask."
             ),
             category="Calendar",
             risk="write",
             default_permission="ask",
-            input_model=CalendarCreateFlatInput,
+            input_model=CalendarCreateEventInput,
             handler=google_calendar_create_event_tool,
             provider_id="google",
             capability_id="calendar.create",
