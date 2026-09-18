@@ -10,7 +10,6 @@ def ensure_tools_registered() -> None:
     from jace.tools.builtins import register_builtin_tools
     from jace.tools.webtools import register_web_tools
     from jace.tools.computer import register_computer_tools
-    from jace.tools.filesystem_intelligence import register_filesystem_intelligence_tools
     from jace.tools.multimodal import register_multimodal_tools
     from jace.tools.automation import register_automation_tools
     from jace.tools.interactive import register_interactive_tools
@@ -27,7 +26,6 @@ def ensure_tools_registered() -> None:
     register_builtin_tools()
     register_web_tools()
     register_computer_tools()
-    register_filesystem_intelligence_tools()
     register_multimodal_tools()
     register_automation_tools()
     register_interactive_tools()

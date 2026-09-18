@@ -640,38 +640,6 @@ async def _execute_tool_call(
         }
 
 
-# JACE_STEP4B1_V3_FILESYSTEM_EXECUTION_GUARD
-_FILESYSTEM_INTELLIGENCE_TOOL_NAMES = {
-    "workspace_overview",
-    "workspace_tree",
-    "workspace_recent_files",
-    "find_workspace_paths",
-    "preview_workspace_edit",
-}
-
-# These read-only tools have safe defaults once workspace_id can be resolved
-# internally. If the small local model narrates instead of calling the only
-# routed tool, Jace can synthesize the empty-argument call and still send it
-# through the normal permission/audit executor.
-_FILESYSTEM_AUTO_TOOL_NAMES = {
-    "workspace_overview",
-    "workspace_tree",
-    "workspace_recent_files",
-}
-
-
-def _filesystem_auto_tool_name(
-    selected_tool_names: list[str] | set[str] | tuple[str, ...],
-) -> str | None:
-    candidates = sorted(
-        set(selected_tool_names)
-        & _FILESYSTEM_AUTO_TOOL_NAMES
-    )
-    if len(candidates) == 1:
-        return candidates[0]
-    return None
-
-
 # JACE_STEP4C5A_CALENDAR_WRITE_COMPLETION_GUARD
 _CALENDAR_WRITE_TOOL_NAMES = {
     "google_calendar_create_event",
@@ -870,17 +838,6 @@ async def stream_agent(
     calendar_write_attempted = False
     calendar_write_last_result: str | None = None
     calendar_write_retry_count = 0
-    filesystem_intelligence_tools = {
-        name
-        for name in selected_tool_names
-        if name in _FILESYSTEM_INTELLIGENCE_TOOL_NAMES
-    }
-    filesystem_intelligence_requested = bool(
-        filesystem_intelligence_tools
-    )
-    filesystem_intelligence_attempted = False
-    filesystem_intelligence_last_result: str | None = None
-    filesystem_intelligence_retry_count = 0
     empty_response_retries = 0
     incomplete_response_retries = 0
     active_system_prompt = system_prompt
@@ -911,26 +868,10 @@ async def stream_agent(
             + "END CALENDAR WRITE CONTRACT"
         )
 
-    if filesystem_intelligence_requested:
-        active_system_prompt = (
-            active_system_prompt
-            + "\n\nFILESYSTEM INTELLIGENCE CONTRACT\n"
-            + "The user's request requires inspecting an approved local workspace. "
-            + "You MUST call the supplied filesystem intelligence tool before giving "
-            + "the requested project/file answer. Do not merely say you need to list "
-            + "workspaces or that you will inspect them. workspace_id may be omitted; "
-            + "the tool will safely auto-select a single active readable workspace or "
-            + "a uniquely named workspace from the user's request. If selection is "
-            + "ambiguous, use the tool error/candidate IDs to clarify. Supplied "
-            + "filesystem intelligence tools: "
-            + ", ".join(sorted(filesystem_intelligence_tools))
-            + ".\nEND FILESYSTEM INTELLIGENCE CONTRACT"
-        )
     decision_window = int(settings.tool_stream_buffer_chars)
     # A turn with no tools cannot produce a tool call, so it always streams live.
     hold_for_tool_decision = (
         calendar_write_requested
-        or filesystem_intelligence_requested
         or (bool(tools) and decision_window != 0)
     )
 
@@ -984,7 +925,6 @@ async def stream_agent(
                         decision_window > 0
                         and held_chars >= decision_window
                         and not calendar_write_requested
-                        and not filesystem_intelligence_requested
                     ):
                         # Enough prose with no tool call: this is an answer.
                         released = True
@@ -1005,55 +945,10 @@ async def stream_agent(
         }
         if thinking_parts:
             assistant_message["thinking"] = "".join(thinking_parts)
-
-        if (
-            not tool_calls
-            and filesystem_intelligence_requested
-            and not filesystem_intelligence_attempted
-        ):
-            auto_tool_name = _filesystem_auto_tool_name(
-                selected_tool_names
-            )
-            if auto_tool_name:
-                tool_calls = [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": auto_tool_name,
-                            "arguments": {},
-                        },
-                    }
-                ]
-
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
 
         if not tool_calls:
-            if (
-                filesystem_intelligence_requested
-                and not filesystem_intelligence_attempted
-            ):
-                if filesystem_intelligence_retry_count < 2:
-                    filesystem_intelligence_retry_count += 1
-                    active_system_prompt = (
-                        system_prompt
-                        + "\n\nFILESYSTEM INTELLIGENCE RECOVERY\n"
-                        + "Your previous attempt described a future workspace action "
-                        + "instead of executing it. Call one of these supplied tools now: "
-                        + ", ".join(sorted(filesystem_intelligence_tools))
-                        + ". Do not tell the user you are about to inspect/list/pull up "
-                        + "the workspace. Execute the tool call first. workspace_id can be "
-                        + "omitted when the workspace is unambiguous.\n"
-                        + "END FILESYSTEM INTELLIGENCE RECOVERY"
-                    )
-                    continue
-
-                content_text = (
-                    "I couldn't inspect the workspace because no filesystem "
-                    "intelligence tool executed successfully in this turn."
-                )
-                content_parts = [content_text]
-
             if not content_text.strip():
                 if empty_response_retries < 1:
                     empty_response_retries += 1
@@ -1248,21 +1143,6 @@ async def stream_agent(
                     tool_message = event["message"]
                 else:
                     event_tool_name = str(event.get("tool_name") or "")
-                    if (
-                        event.get("type") == "tool_call"
-                        and event_tool_name in _FILESYSTEM_INTELLIGENCE_TOOL_NAMES
-                    ):
-                        filesystem_intelligence_attempted = True
-                    if (
-                        event.get("type") == "tool_result"
-                        and event_tool_name in _FILESYSTEM_INTELLIGENCE_TOOL_NAMES
-                    ):
-                        filesystem_intelligence_last_result = str(
-                            event.get("summary")
-                            or event.get("status")
-                            or ""
-                        )
-
                     if (
                         event.get("type") == "tool_call"
                         and event_tool_name in _CALENDAR_WRITE_TOOL_NAMES

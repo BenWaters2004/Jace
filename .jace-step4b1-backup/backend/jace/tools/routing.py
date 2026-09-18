@@ -24,11 +24,6 @@ ALL_TOOL_NAMES = {
     "move_workspace_path",
     "delete_workspace_file",
     "run_workspace_command",
-    "workspace_overview",
-    "workspace_tree",
-    "workspace_recent_files",
-    "find_workspace_paths",
-    "preview_workspace_edit",
     "inspect_attachment",
     "inspect_workspace_media",
     "capture_screen",
@@ -184,88 +179,6 @@ def route_tool_names(message: str) -> set[str]:
         computer_hint or re.search(r"\b(?:project|repo|repository|workspace|code|build|tests?|lint|git)\b", lowered)
     ):
         selected.update({"list_computer_workspaces", "run_workspace_command"})
-    # JACE_STEP4B1_FILESYSTEM_INTELLIGENCE_ROUTING
-    filesystem_overview = bool(
-        re.search(
-            r"\b(?:understand|analyse|analyze|inspect|review|profile|summarise|summarize)\b"
-            r".{0,50}\b(?:project|repo|repository|codebase|workspace)\b"
-            r"|\b(?:project|repo|repository|codebase|workspace)\b.{0,35}"
-            r"\b(?:overview|summary|structure|stack|languages|frameworks)\b",
-            lowered,
-        )
-    )
-
-    filesystem_tree_request = bool(
-        re.search(
-            r"\b(?:show|list|map|inspect|view)\b.{0,35}\b"
-            r"(?:tree|structure|folder structure|directory structure)\b"
-            r"|\b(?:project|repo|repository|codebase|workspace)\s+tree\b",
-            lowered,
-        )
-    )
-
-    filesystem_recent_request = bool(
-        re.search(
-            r"\b(?:recent|recently|latest)\b.{0,30}\b"
-            r"(?:files?|changes?|modified|edited)\b"
-            r"|\b(?:what|which)\b.{0,25}\bfiles?\b.{0,25}"
-            r"\b(?:changed|modified|edited)\b",
-            lowered,
-        )
-    )
-
-    filesystem_find_paths = bool(
-        re.search(
-            r"\b(?:find|locate|show|list)\b.{0,40}\b"
-            r"(?:files?|paths?)\b.{0,50}\b"
-            r"(?:named|ending in|extension|language|typescript|javascript|"
-            r"python|php|react|tsx|jsx|blade|controller|component)\b"
-            r"|\b(?:all|which)\b.{0,20}\b"
-            r"(?:typescript|javascript|python|php|tsx|jsx|blade)\b.{0,20}\bfiles?\b",
-            lowered,
-        )
-    )
-
-    filesystem_preview = bool(
-        re.search(
-            r"\b(?:preview|show)\b.{0,30}\b(?:diff|edit|change|patch)\b"
-            r"|\b(?:what would|what will)\b.{0,30}\b(?:change|edit)\b"
-            r"|\bbefore (?:writing|editing|changing)\b",
-            lowered,
-        )
-    )
-
-    if filesystem_overview:
-        # JACE_STEP4B1_V3_DIRECT_WORKSPACE_ROUTING
-        selected.discard("list_computer_workspaces")
-        selected.add("workspace_overview")
-
-    if filesystem_tree_request:
-        # JACE_STEP4B1_V3_DIRECT_WORKSPACE_ROUTING
-        selected.discard("list_computer_workspaces")
-        selected.add("workspace_tree")
-
-    if filesystem_recent_request:
-        # JACE_STEP4B1_V3_DIRECT_WORKSPACE_ROUTING
-        selected.discard("list_computer_workspaces")
-        selected.add("workspace_recent_files")
-
-    if filesystem_find_paths:
-        # This is filename/path discovery rather than text-content search.
-        selected.discard("search_workspace_files")
-        selected.discard("read_workspace_file")
-        # JACE_STEP4B1_V3_DIRECT_WORKSPACE_ROUTING
-        selected.discard("list_computer_workspaces")
-        selected.add("find_workspace_paths")
-
-    if filesystem_preview:
-        # A preview request must never accidentally route an actual write tool.
-        selected.discard("write_workspace_file")
-        selected.discard("replace_workspace_text")
-        # JACE_STEP4B1_V3_DIRECT_WORKSPACE_ROUTING
-        selected.discard("list_computer_workspaces")
-        selected.add("preview_workspace_edit")
-
 
     # Phase 7 multimodal. User-attached media is injected directly in the
     # current turn. These schemas are for later references, workspace media,
