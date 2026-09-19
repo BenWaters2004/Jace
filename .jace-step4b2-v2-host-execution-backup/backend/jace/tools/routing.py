@@ -34,7 +34,6 @@ ALL_TOOL_NAMES = {
     "move_host_path",
     "delete_host_path",
     "run_shell_command",
-    "inspect_host_media",
     "workspace_overview",
     "workspace_tree",
     "workspace_recent_files",
@@ -303,13 +302,10 @@ def route_tool_names(message: str) -> set[str]:
         )
     )
 
-    # JACE_STEP4B2_V2_HOST_LIST_ROUTING_FIX
     host_list_request = bool(
         re.search(
-            r"\b(?:list|show|browse|inspect)\b.{0,50}\b"
-            r"(?:folder|directory|files|contents?)\b"
-            r"|\bwhat(?:'s| is)\s+in\b"
-            r"|\bshow me what(?:'s| is)\s+in\b",
+            r"\b(?:list|show|browse|inspect)\b.{0,40}\b"
+            r"(?:folder|directory|files|contents?)\b",
             lowered,
         )
     )
@@ -356,35 +352,6 @@ def route_tool_names(message: str) -> set[str]:
         )
     )
 
-
-    # JACE_STEP4B2_V3_HOST_MEDIA_ROUTING
-    host_media_request = bool(
-        explicit_host_path
-        and re.search(
-            r"\.(?:docx|pdf|png|jpe?g|webp|gif|bmp|wav|mp3|m4a|"
-            r"flac|ogg|oga|webm|aac|wma)\b",
-            lowered,
-        )
-        and re.search(
-            r"\b(?:read|open|inspect|show|view|look at|describe|analyse|analyze|"
-            r"summarise|summarize|transcribe)\b",
-            lowered,
-        )
-    )
-
-    host_file_from_directory = bool(
-        explicit_host_path
-        and re.search(
-            r"\bread\b.{0,30}\b(?:text|document|docx|pdf)?\s*file\b"
-            r".{0,20}\bfrom\b",
-            lowered,
-        )
-        and not re.search(
-            r"\.[A-Za-z0-9]{1,8}(?:[.!?;,]*)?\s*$",
-            text,
-        )
-    )
-
     if shell_request:
         selected.add("run_shell_command")
 
@@ -418,15 +385,6 @@ def route_tool_names(message: str) -> set[str]:
             selected.add("move_host_path")
         if host_delete_request:
             selected.add("delete_host_path")
-
-    if host_file_from_directory:
-        selected.discard("read_host_file")
-        selected.add("list_host_directory")
-
-    if host_media_request:
-        selected.discard("read_host_file")
-        selected.discard("host_file_info")
-        selected.add("inspect_host_media")
 
     if re.search(
         r"\b(?:what drives|which drives|computer locations|"

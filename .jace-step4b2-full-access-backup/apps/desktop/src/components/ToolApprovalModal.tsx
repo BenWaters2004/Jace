@@ -515,58 +515,6 @@ function CalendarApprovalSummary({
 }
 
 
-
-// JACE_STEP4B2_SHELL_APPROVAL
-function ShellApprovalSummary({
-  approval,
-}: {
-  approval: PendingToolApproval;
-}) {
-  const shell = (
-    typeof approval.arguments.shell === "string"
-      ? approval.arguments.shell
-      : "powershell"
-  );
-
-  const command = (
-    typeof approval.arguments.command === "string"
-      ? approval.arguments.command
-      : ""
-  );
-
-  const cwd = (
-    typeof approval.arguments.cwd === "string"
-      ? approval.arguments.cwd
-      : "~"
-  );
-
-  return (
-    <div className="shell-approval-summary">
-      <div className="approval-details">
-        <span>Shell</span>
-        <code>{shell}</code>
-      </div>
-
-      <div className="approval-details">
-        <span>Working directory</span>
-        <code>{cwd}</code>
-      </div>
-
-      <div className="approval-arguments">
-        <span>Exact command</span>
-        <pre>{command}</pre>
-      </div>
-
-      <p className="approval-help">
-        This command can access the computer with the same Windows permissions
-        as Jace. Review the exact command before running it. Shell commands
-        always require approval; they cannot be permanently auto-approved.
-      </p>
-    </div>
-  );
-}
-
-
 export function ToolApprovalModal({
   approval,
   onDecision,
@@ -584,8 +532,6 @@ export function ToolApprovalModal({
   const emailWrite = EMAIL_WRITE_TOOLS.has(
     approval.tool_name,
   );
-
-  const shellCommand = approval.tool_name === "run_shell_command";
   const calendarWrite = CALENDAR_WRITE_TOOLS.has(
     approval.tool_name,
   );
@@ -688,12 +634,8 @@ export function ToolApprovalModal({
         )}
 
         {
-          shellCommand
+          emailWrite
             ? (
-              <ShellApprovalSummary approval={approval} />
-            )
-            : emailWrite
-              ? (
               <EmailApprovalSummary approval={approval} />
             )
             : calendarWrite
@@ -749,7 +691,6 @@ export function ToolApprovalModal({
           {isSend ? "Cancel" : "Deny once"}
         </button>
 
-        {!shellCommand && (
         <button
           className="secondary-button"
           disabled={submitting}
@@ -757,7 +698,6 @@ export function ToolApprovalModal({
         >
           {isSend ? "Always allow sending" : "Always allow"}
         </button>
-        )}
 
         <button
           className="primary-button"

@@ -19,7 +19,6 @@ from jace.tools.permissions import (
 )
 from jace.tools.registry import registry
 from jace.tools.routing import route_tool_names
-from jace.computer.host_request import HOST_TOOL_NAMES, host_auto_tool_call
 
 
 @dataclass
@@ -886,17 +885,6 @@ async def stream_agent(
     filesystem_intelligence_attempted = False
     filesystem_intelligence_last_result: str | None = None
     filesystem_intelligence_retry_count = 0
-    # JACE_STEP4B2_V2_HOST_EXECUTION_GUARD
-    host_access_tools = {
-        name
-        for name in selected_tool_names
-        if name in HOST_TOOL_NAMES
-    }
-    host_access_requested = bool(
-        host_access_tools
-    )
-    host_access_attempted = False
-    host_access_retry_count = 0
     empty_response_retries = 0
     incomplete_response_retries = 0
     active_system_prompt = system_prompt
@@ -942,27 +930,11 @@ async def stream_agent(
             + ", ".join(sorted(filesystem_intelligence_tools))
             + ".\nEND FILESYSTEM INTELLIGENCE CONTRACT"
         )
-    if host_access_requested:
-        active_system_prompt = (
-            active_system_prompt
-            + "\n\nFULL HOST ACCESS CONTRACT\n"
-            + "The user's request requires a supplied local-computer tool. "
-            + "Jace DOES have host filesystem and shell access through these tools. "
-            + "You MUST call the appropriate supplied host tool before answering; "
-            + "do not tell the user to run a local command manually and do not claim "
-            + "that you cannot access the local filesystem. For run_shell_command, "
-            + "generate the exact shell command required and call the tool; Jace will "
-            + "show that exact command to the user for mandatory approval before it "
-            + "executes. Supplied host tools: "
-            + ", ".join(sorted(host_access_tools))
-            + ".\nEND FULL HOST ACCESS CONTRACT"
-        )
     decision_window = int(settings.tool_stream_buffer_chars)
     # A turn with no tools cannot produce a tool call, so it always streams live.
     hold_for_tool_decision = (
         calendar_write_requested
         or filesystem_intelligence_requested
-        or host_access_requested
         or (bool(tools) and decision_window != 0)
     )
 
@@ -1017,7 +989,6 @@ async def stream_agent(
                         and held_chars >= decision_window
                         and not calendar_write_requested
                         and not filesystem_intelligence_requested
-                        and not host_access_requested
                     ):
                         # Enough prose with no tool call: this is an answer.
                         released = True
@@ -1058,52 +1029,10 @@ async def stream_agent(
                     }
                 ]
 
-        if (
-            not tool_calls
-            and host_access_requested
-            and not host_access_attempted
-        ):
-            host_call = host_auto_tool_call(
-                selected_tool_names,
-                user_message,
-            )
-            if host_call is not None:
-                tool_calls = [
-                    host_call
-                ]
-
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
 
         if not tool_calls:
-            if (
-                host_access_requested
-                and not host_access_attempted
-            ):
-                if host_access_retry_count < 2:
-                    host_access_retry_count += 1
-                    active_system_prompt = (
-                        system_prompt
-                        + "\n\nFULL HOST ACCESS RECOVERY\n"
-                        + "Your previous attempt answered with prose instead of "
-                        + "using the supplied local-computer tool. Jace has local "
-                        + "filesystem/shell access. Call one of these tools now: "
-                        + ", ".join(sorted(host_access_tools))
-                        + ". For shell work, call run_shell_command with the exact "
-                        + "command so the user can approve it. Do not tell the user "
-                        + "to run the command themselves.\n"
-                        + "END FULL HOST ACCESS RECOVERY"
-                    )
-                    continue
-
-                content_text = (
-                    "I couldn't complete the local-computer request because no "
-                    "host filesystem or shell tool executed successfully in this turn."
-                )
-                content_parts = [
-                    content_text
-                ]
-
             if (
                 filesystem_intelligence_requested
                 and not filesystem_intelligence_attempted
@@ -1323,12 +1252,6 @@ async def stream_agent(
                     tool_message = event["message"]
                 else:
                     event_tool_name = str(event.get("tool_name") or "")
-                    if (
-                        event.get("type") == "tool_call"
-                        and event_tool_name in HOST_TOOL_NAMES
-                    ):
-                        host_access_attempted = True
-
                     if (
                         event.get("type") == "tool_call"
                         and event_tool_name in _FILESYSTEM_INTELLIGENCE_TOOL_NAMES

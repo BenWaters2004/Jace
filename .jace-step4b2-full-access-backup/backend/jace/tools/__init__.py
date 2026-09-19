@@ -11,9 +11,6 @@ def ensure_tools_registered() -> None:
     from jace.tools.webtools import register_web_tools
     from jace.tools.computer import register_computer_tools
     from jace.tools.filesystem_intelligence import register_filesystem_intelligence_tools
-    from jace.tools.host_computer import register_full_computer_access_tools
-    from jace.tools.host_media import register_host_media_tools
-    from jace.tools.shell_reliability import register_shell_reliability_tool
     from jace.tools.multimodal import register_multimodal_tools
     from jace.tools.automation import register_automation_tools
     from jace.tools.interactive import register_interactive_tools
@@ -31,9 +28,6 @@ def ensure_tools_registered() -> None:
     register_web_tools()
     register_computer_tools()
     register_filesystem_intelligence_tools()
-    register_full_computer_access_tools()
-    register_host_media_tools()
-    register_shell_reliability_tool()
     register_multimodal_tools()
     register_automation_tools()
     register_interactive_tools()

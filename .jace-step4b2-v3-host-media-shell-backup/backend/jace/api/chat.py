@@ -14,7 +14,6 @@ from jace.ai.prompts import (
 from jace.attachments.processors import prepare_attachments
 from jace.capabilities.runtime import resolve_runtime_capabilities
 from jace.calendar.write_continuation import calendar_capability_message
-from jace.computer.host_context import host_context_message
 from jace.calendar.write_routing import compact_calendar_write_tools
 from jace.attachments.service import assign_attachments_to_message, get_attachments
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
@@ -315,13 +314,8 @@ async def send_streaming_chat(request: PersistentChatRequest):
             tool_started = time.perf_counter()
             # JACE_STEP4C5B_V2_WRITE_CONTINUATION_CHAT
             raw_user_message = request.message or stored_user_text
-            # JACE_STEP4B2_V3_HOST_CONTEXT_CHAT
-            host_message = host_context_message(
-                raw_user_message,
-                history,
-            )
             capability_message = calendar_capability_message(
-                host_message,
+                raw_user_message,
                 history,
             )
             routed_tools = await routed_tool_names(
@@ -365,7 +359,6 @@ async def send_streaming_chat(request: PersistentChatRequest):
                 "inspect_attachment",
                 "inspect_workspace_media",
                 "capture_screen",
-                "inspect_host_media",
             }
             use_specialist_vision = bool(
                 env_settings.vision_model.strip()
