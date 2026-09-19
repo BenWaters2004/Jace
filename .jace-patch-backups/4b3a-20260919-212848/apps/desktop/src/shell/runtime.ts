@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../constants";
-import { getRuntimeStreamTicket } from "../api";
 
 export type JaceRuntimeState =
   | "offline"
@@ -16,9 +15,6 @@ export type JaceRuntimeState =
 export interface RuntimeEvent {
   type: string;
   sequence?: number;
-  event_id?: string;
-  durable?: boolean;
-  replayed?: boolean;
   timestamp?: string;
 
   state?: JaceRuntimeState;
@@ -88,80 +84,13 @@ runtimeGlobal.__JACE_RUNTIME_HUB__ = hub;
 const RECONNECT_DELAY_MS = 1500;
 const UNUSED_DISCONNECT_GRACE_MS = 500;
 
-// JACE_4B3A_DURABLE_RUNTIME_CLIENT
-const RUNTIME_SEQUENCE_KEY = "jace.runtime.lastDurableSequence";
-let connecting = false;
-
-function readDurableSequence(): number {
-  try {
-    const raw = window.localStorage.getItem(
-      RUNTIME_SEQUENCE_KEY,
-    );
-    const parsed = Number(raw ?? "0");
-
-    return Number.isFinite(parsed) && parsed >= 0
-      ? Math.floor(parsed)
-      : 0;
-  } catch {
-    return 0;
-  }
-}
-
-let latestDurableSequence = readDurableSequence();
-
-function rememberDurableSequence(sequence: number) {
-  if (!Number.isFinite(sequence)) return;
-
-  const next = Math.max(
-    latestDurableSequence,
-    Math.floor(sequence),
-  );
-
-  if (next === latestDurableSequence) return;
-
-  latestDurableSequence = next;
-
-  try {
-    window.localStorage.setItem(
-      RUNTIME_SEQUENCE_KEY,
-      String(next),
-    );
-  } catch {
-    // Replay still works for reconnects in this window.
-  }
-}
-
-function websocketUrl(
-  ticket: string,
-): string {
+function websocketUrl(): string {
   const base = new URL(API_BASE_URL);
-  const protocol =
-    base.protocol === "https:" ? "wss:" : "ws:";
-
-  const url = new URL(
-    `${protocol}//${base.host}/runtime/stream`,
-  );
-
-  url.searchParams.set(
-    "ticket",
-    ticket,
-  );
-  url.searchParams.set(
-    "after_sequence",
-    String(latestDurableSequence),
-  );
-
-  return url.toString();
+  const protocol = base.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${base.host}/runtime/events`;
 }
 
 function emit(event: RuntimeEvent) {
-  if (
-    event.durable === true &&
-    typeof event.sequence === "number"
-  ) {
-    rememberDurableSequence(event.sequence);
-  }
-
   hub.latestEvent = event;
 
   for (const listener of hub.listeners) {
@@ -194,106 +123,97 @@ function scheduleReconnect() {
     hub.retryTimer = null;
 
     if (hub.listeners.size === 0) return;
-    void ensureRuntimeConnection();
+    ensureRuntimeConnection();
   }, RECONNECT_DELAY_MS);
 }
 
-async function ensureRuntimeConnection() {
-  if (listeners.size === 0 || connecting) return;
+function ensureRuntimeConnection() {
+  clearDisconnectTimer();
+
+  if (hub.listeners.size === 0) return;
 
   if (
-    socket &&
-    (
-      socket.readyState === WebSocket.CONNECTING ||
-      socket.readyState === WebSocket.OPEN
-    )
+    hub.socket &&
+    (hub.socket.readyState === WebSocket.CONNECTING ||
+      hub.socket.readyState === WebSocket.OPEN)
   ) {
     return;
   }
 
   clearRetryTimer();
-  closingBecauseUnused = false;
-  connecting = true;
 
-  try {
-    const ticket = await getRuntimeStreamTicket();
+  const generation = ++hub.socketGeneration;
+  const nextSocket = new WebSocket(websocketUrl());
+  hub.socket = nextSocket;
 
-    if (listeners.size === 0) {
-      connecting = false;
+  nextSocket.onopen = () => {
+    if (
+      hub.socket !== nextSocket ||
+      generation !== hub.socketGeneration
+    ) {
       return;
     }
 
-    const nextSocket = new WebSocket(
-      websocketUrl(ticket.ticket),
-    );
+    hub.transportConnected = true;
+    emit({
+      type: "runtime.transport.connected",
+      connected: true,
+      timestamp: new Date().toISOString(),
+    });
+  };
 
-    socket = nextSocket;
+  nextSocket.onmessage = (message) => {
+    if (
+      hub.socket !== nextSocket ||
+      generation !== hub.socketGeneration
+    ) {
+      return;
+    }
 
-    nextSocket.onopen = () => {
-      if (socket !== nextSocket) return;
+    try {
+      const event = JSON.parse(message.data) as RuntimeEvent;
+      emit(event);
+    } catch {
+      // REST state remains authoritative if a presentation event is malformed.
+    }
+  };
 
-      connecting = false;
-      transportConnected = true;
+  nextSocket.onerror = () => {
+    if (hub.socket === nextSocket) {
+      try {
+        nextSocket.close();
+      } catch {
+        // onclose/reconnect is best-effort; REST remains authoritative.
+      }
+    }
+  };
 
+  nextSocket.onclose = () => {
+    const isCurrent =
+      hub.socket === nextSocket &&
+      generation === hub.socketGeneration;
+    const intentional = hub.intentionallyClosing.has(nextSocket);
+
+    if (!isCurrent) {
+      return;
+    }
+
+    hub.socket = null;
+    const wasConnected = hub.transportConnected;
+    hub.transportConnected = false;
+
+    if (!intentional && (wasConnected || hub.listeners.size > 0)) {
       emit({
-        type: "runtime.transport.connected",
-        connected: true,
+        type: "runtime.transport.disconnected",
+        connected: false,
         timestamp: new Date().toISOString(),
       });
-    };
+    }
 
-    nextSocket.onmessage = (message) => {
-      if (socket !== nextSocket) return;
-
-      try {
-        const event = JSON.parse(
-          message.data,
-        ) as RuntimeEvent;
-
-        emit(event);
-      } catch {
-        // REST state remains authoritative if a transport frame is malformed.
-      }
-    };
-
-    nextSocket.onerror = () => {
-      if (socket === nextSocket) {
-        nextSocket.close();
-      }
-    };
-
-    nextSocket.onclose = () => {
-      if (socket === nextSocket) {
-        socket = null;
-      }
-
-      connecting = false;
-
-      const wasConnected = transportConnected;
-      transportConnected = false;
-
-      if (
-        wasConnected ||
-        !closingBecauseUnused
-      ) {
-        emit({
-          type: "runtime.transport.disconnected",
-          connected: false,
-          timestamp: new Date().toISOString(),
-        });
-      }
-
-      if (!closingBecauseUnused) {
-        scheduleReconnect();
-      }
-    };
-  } catch {
-    connecting = false;
-
-    if (!closingBecauseUnused) {
+    if (!intentional) {
       scheduleReconnect();
     }
-  }
+  };
 }
 
 function closeRuntimeConnectionIfStillUnused() {
@@ -337,7 +257,7 @@ export function subscribeRuntimeEvents(
 ): () => void {
   clearDisconnectTimer();
   hub.listeners.add(listener);
-  void ensureRuntimeConnection();
+  ensureRuntimeConnection();
 
   if (hub.latestEvent) {
     queueMicrotask(() => {

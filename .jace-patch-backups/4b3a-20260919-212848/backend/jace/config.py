@@ -74,13 +74,6 @@ class Settings(BaseSettings):
     privacy_cloud_egress_enabled: bool = False
     privacy_default_classification: str = "internal"
 
-    # JACE_4B3A_RUNTIME_EVENT_CONFIG
-    runtime_events_persist: bool = True
-    runtime_event_retention_days: int = 30
-    runtime_event_replay_limit: int = 500
-    runtime_event_subscriber_queue: int = 512
-
-
 
 
     request_timeout_seconds: float = 180.0

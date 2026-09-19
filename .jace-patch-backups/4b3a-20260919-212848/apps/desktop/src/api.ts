@@ -1,9 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  RuntimeReplayResponse,
-  RuntimeStreamTicket,
-} from "./runtimeStreamTypes";
-import type {
   PrivacyInspectRequest,
   PrivacyInspectResponse,
   PrivacyStatus,
@@ -230,21 +226,6 @@ async function request<T>(
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
-
-// JACE_4B3A_RUNTIME_STREAM_API
-export const getRuntimeStreamTicket = () =>
-  request<RuntimeStreamTicket>("/runtime/stream-ticket", {
-    method: "POST",
-  });
-
-export const replayRuntimeEvents = (
-  afterSequence = 0,
-  limit = 200,
-) =>
-  request<RuntimeReplayResponse>(
-    `/runtime/events/replay?after_sequence=${Math.max(0, afterSequence)}&limit=${Math.max(1, limit)}`,
-  );
-
 
 // JACE_4BS8_PRIVACY_GATEWAY_API
 export const getPrivacyStatus = () =>

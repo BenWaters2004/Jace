@@ -645,21 +645,3 @@ class DeviceCapabilityRequest(Base):
         DateTime(timezone=True),
         nullable=True,
     )
-
-# JACE_4B3A_RUNTIME_EVENT_MODEL
-class RuntimeEventRecord(Base):
-    __tablename__ = "runtime_events"
-    __table_args__ = {"sqlite_autoincrement": True}
-
-    sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    event_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True, default=new_id)
-    event_type: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    conversation_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    project_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    workflow_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    task_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    agent_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    device_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    request_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, index=True)

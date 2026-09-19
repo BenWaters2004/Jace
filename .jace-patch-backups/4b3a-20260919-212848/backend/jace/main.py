@@ -24,7 +24,6 @@ from jace.api.conversations import router as conversations_router
 from jace.api.devices import router as devices_router
 from jace.api.memories import router as memories_router
 from jace.api.runtime import router as runtime_router
-from jace.api.runtime_stream import router as runtime_stream_router
 from jace.api.settings import router as settings_router
 from jace.api.security import router as security_router
 from jace.api.system import router as system_router
@@ -61,7 +60,6 @@ async def lifespan(app: FastAPI):
     # Importing the agents API above loads the Phase 11A SQLAlchemy models before
     # create_all() runs, so the new local agent tables are created automatically.
     await init_database()
-    await runtime_events.initialize()
 
     preload_model_name = settings.default_model
 
@@ -160,7 +158,6 @@ app.include_router(connections_callback_router)
 app.include_router(capabilities_router)
 app.include_router(memories_router)
 app.include_router(runtime_router)
-app.include_router(runtime_stream_router)
 app.include_router(computer_router)
 app.include_router(control_router)
 app.include_router(tools_router)

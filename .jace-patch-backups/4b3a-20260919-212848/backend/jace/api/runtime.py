@@ -2,7 +2,6 @@ import asyncio
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from jace.config import settings
 from jace.runtime import runtime_events
 
 
@@ -16,12 +15,6 @@ async def runtime_snapshot():
 
 @router.websocket("/events")
 async def runtime_event_stream(websocket: WebSocket):
-    # JACE_4B3A_LEGACY_RUNTIME_SOCKET_GATE
-    # Local compatibility only. Server mode uses the one-time-ticket stream.
-    if settings.mode == "server" and settings.auth_enabled:
-        await websocket.close(code=4401)
-        return
-
     await websocket.accept()
     subscriber = await runtime_events.subscribe()
 

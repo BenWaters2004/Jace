@@ -85,10 +85,4 @@ class RuntimeEventBus:
         }
 
 
-# JACE_4B3A_DURABLE_RUNTIME_EVENTS
-# Import after RuntimeEventBus is defined so the durable implementation can
-# subclass it without changing existing publisher imports.
-from jace.runtime.durable import DurableRuntimeEventBus
-
-runtime_events = DurableRuntimeEventBus()
-
+runtime_events = RuntimeEventBus()
