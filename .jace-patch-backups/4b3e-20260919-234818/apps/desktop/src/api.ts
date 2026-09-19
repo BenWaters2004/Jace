@@ -31,11 +31,11 @@ import type {
   DeviceCapabilityRequestRecord,
 } from "./deviceCapabilityTypes";
 import type {
+  DeviceListResponse,
   DevicePairingCreateRequest,
   DevicePairingResponse,
-  DeviceUpdateRequest,
   DeviceRecord,
-  DeviceListResponse,
+  DeviceUpdateRequest,
 } from "./deviceTypes";
 import {
   clearAuthSession,
@@ -77,10 +77,6 @@ import type {
   ComputerWorkspaceCreateRequest,
   ComputerWorkspaceListResponse,
   ComputerWorkspaceUpdateRequest,
-  ExecutionScope,
-  ExecutionScopeCreateRequest,
-  ExecutionScopeListResponse,
-  ExecutionScopeUpdateRequest,
   ControlActionListResponse,
   ControlAppPolicy,
   ControlAppPolicyCreateRequest,
@@ -596,34 +592,6 @@ export const updateComputerWorkspace = (id: string, payload: ComputerWorkspaceUp
   request<ComputerWorkspace>(`/computer/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
 export async function deleteComputerWorkspace(id: string): Promise<void> {
   await request(`/computer/workspaces/${id}`, { method: "DELETE" });
-}
-
-
-// JACE_4B3E_EXECUTION_SCOPE_UI_API
-export const getExecutionScopes = (activeOnly = false) =>
-  request<ExecutionScopeListResponse>(
-    `/execution/scopes?active_only=${activeOnly ? "true" : "false"}`,
-  );
-
-export const createExecutionScope = (payload: ExecutionScopeCreateRequest) =>
-  request<ExecutionScope>("/execution/scopes", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-export const updateExecutionScope = (
-  id: string,
-  payload: ExecutionScopeUpdateRequest,
-) =>
-  request<ExecutionScope>(`/execution/scopes/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
-
-export async function deleteExecutionScope(id: string): Promise<void> {
-  await request(`/execution/scopes/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
 }
 export const createComputerCommand = (workspaceId: string, payload: ComputerCommandCreateRequest) =>
   request<ComputerCommandPreset>(`/computer/workspaces/${workspaceId}/commands`, {

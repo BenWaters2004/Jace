@@ -45,12 +45,6 @@ export interface RuntimeEvent {
 
 type RuntimeListener = (event: RuntimeEvent) => void;
 
-
-// JACE_4B3E_DESKTOP_BUILD_CONSOLIDATION
-const listeners = new Set<RuntimeListener>();
-let socket: WebSocket | null = null;
-let transportConnected = false;
-let closingBecauseUnused = false;
 interface RuntimeHub {
   listeners: Set<RuntimeListener>;
   socket: WebSocket | null;

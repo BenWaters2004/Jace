@@ -1,9 +1,9 @@
 import type {
   OfficeWorker,
-} from "../../agents/useAgentOffice";
+} from "../agents/useAgentOffice";
 import type {
   AgentTask,
-} from "../../agents/types";
+} from "../agents/types";
 import {
   SPECIALIST_CHARACTER_INDEX,
 } from "./assets";

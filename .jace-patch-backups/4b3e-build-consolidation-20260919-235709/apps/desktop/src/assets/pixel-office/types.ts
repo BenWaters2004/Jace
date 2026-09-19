@@ -1,4 +1,4 @@
-import type { AgentTask } from "../../agents/types";
+import type { AgentTask } from "../agents/types";
 
 export type OfficeDirection =
   | "up"

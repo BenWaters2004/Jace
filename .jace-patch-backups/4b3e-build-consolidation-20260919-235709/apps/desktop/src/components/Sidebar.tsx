@@ -59,13 +59,24 @@ export function Sidebar(props: SidebarProps) {
           <span className="nav-icon">◇</span> Memory
           <span className="nav-count">{props.memoryCount}</span>
         </button>
+        <button className={props.screen === "tools" ? "active" : ""} onClick={() => props.onScreenChange("tools")}>
+          <span className="nav-icon">⌁</span> Tools
+          <span className="nav-count">{props.toolCount}</span>
+        </button>
         <button className={props.screen === "computer" ? "active" : ""} onClick={() => props.onScreenChange("computer")}>
           <span className="nav-icon">▣</span> Computer
           <span className="nav-count">{props.computerCount}</span>
         </button>
+        <button className={props.screen === "control" ? "active" : ""} onClick={() => props.onScreenChange("control")}>
+          <span className="nav-icon">◎</span> Control
+          <span className={`nav-count ${props.controlCount > 0 ? "control-live-count" : ""}`}>{props.controlCount}</span>
+        </button>
         <button className={props.screen === "automations" ? "active" : ""} onClick={() => props.onScreenChange("automations")}>
           <span className="nav-icon">⏱</span> Automations
           <span className="nav-count">{props.automationCount}</span>
+        </button>
+        <button className={props.screen === "settings" ? "active" : ""} onClick={() => props.onScreenChange("settings")}>
+          <span className="nav-icon">⚙</span> Settings
         </button>
       </nav>
 

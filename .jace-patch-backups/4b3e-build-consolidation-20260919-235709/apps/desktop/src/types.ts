@@ -615,7 +615,29 @@ export interface ComputerWorkspaceListResponse {
 
 
 // JACE_4B3E_EXECUTION_SCOPE_UI_TYPES
+export interface DeviceRecord {
+  id: string;
+  owner_user_id?: string | null;
+  name: string;
+  hostname: string;
+  platform: string;
+  os_version?: string | null;
+  architecture: string;
+  agent_version?: string | null;
+  capabilities: string[];
+  metadata?: Record<string, unknown>;
+  state: string;
+  is_active: boolean;
+  paired_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  last_seen_at?: string | null;
+  revoked_at?: string | null;
+}
 
+export interface DeviceListResponse {
+  devices: DeviceRecord[];
+}
 
 export interface ExecutionScope {
   id: string;

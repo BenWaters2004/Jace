@@ -34,8 +34,6 @@ import type {
   DevicePairingCreateRequest,
   DevicePairingResponse,
   DeviceUpdateRequest,
-  DeviceRecord,
-  DeviceListResponse,
 } from "./deviceTypes";
 import {
   clearAuthSession,

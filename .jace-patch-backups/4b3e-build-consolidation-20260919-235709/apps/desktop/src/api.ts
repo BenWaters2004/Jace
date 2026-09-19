@@ -31,11 +31,11 @@ import type {
   DeviceCapabilityRequestRecord,
 } from "./deviceCapabilityTypes";
 import type {
+  DeviceListResponse,
   DevicePairingCreateRequest,
   DevicePairingResponse,
-  DeviceUpdateRequest,
   DeviceRecord,
-  DeviceListResponse,
+  DeviceUpdateRequest,
 } from "./deviceTypes";
 import {
   clearAuthSession,
@@ -77,6 +77,7 @@ import type {
   ComputerWorkspaceCreateRequest,
   ComputerWorkspaceListResponse,
   ComputerWorkspaceUpdateRequest,
+  DeviceListResponse,
   ExecutionScope,
   ExecutionScopeCreateRequest,
   ExecutionScopeListResponse,
@@ -600,6 +601,9 @@ export async function deleteComputerWorkspace(id: string): Promise<void> {
 
 
 // JACE_4B3E_EXECUTION_SCOPE_UI_API
+export const getDevices = () =>
+  request<DeviceListResponse>("/devices");
+
 export const getExecutionScopes = (activeOnly = false) =>
   request<ExecutionScopeListResponse>(
     `/execution/scopes?active_only=${activeOnly ? "true" : "false"}`,

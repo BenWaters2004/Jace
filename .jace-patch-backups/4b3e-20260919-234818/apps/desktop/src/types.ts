@@ -613,47 +613,6 @@ export interface ComputerWorkspaceListResponse {
   workspaces: ComputerWorkspace[];
 }
 
-
-// JACE_4B3E_EXECUTION_SCOPE_UI_TYPES
-
-
-export interface ExecutionScope {
-  id: string;
-  label: string;
-  device_id: string;
-  workspace_id: string;
-  device_root_path: string;
-  allowed_shells: string[];
-  process_enabled: boolean;
-  terminal_enabled: boolean;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ExecutionScopeListResponse {
-  scopes: ExecutionScope[];
-}
-
-export interface ExecutionScopeCreateRequest {
-  label: string;
-  device_id: string;
-  workspace_id: string;
-  device_root_path?: string | null;
-  allowed_shells: string[];
-  process_enabled: boolean;
-  terminal_enabled: boolean;
-}
-
-export interface ExecutionScopeUpdateRequest {
-  label?: string;
-  device_root_path?: string;
-  allowed_shells?: string[];
-  process_enabled?: boolean;
-  terminal_enabled?: boolean;
-  is_active?: boolean;
-}
-
 export interface ComputerStatus {
   enabled: boolean;
   workspace_count: number;

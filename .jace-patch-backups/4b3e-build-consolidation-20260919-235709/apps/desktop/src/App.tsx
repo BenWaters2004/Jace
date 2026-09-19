@@ -226,8 +226,6 @@ export default function App(
   const [memoryContextCount, setMemoryContextCount] = useState(0);
   const [toolContextCount, setToolContextCount] = useState(0);
   const [performanceDiagnostics, setPerformanceDiagnostics] = useState<PerformanceDiagnostics | null>(null);
-  void conversationSearch;
-  void toolContextCount;
   const abortRef = useRef<AbortController | null>(null);
   const fallbackRuntimeState: JaceRuntimeState = pendingApproval
     ? "waiting_permission"
@@ -1137,6 +1135,18 @@ export default function App(
     setScreen("chat");
   }
 
+  async function renameConversation(conversation: ConversationSummary) {
+    if (isGenerating) return;
+    const title = window.prompt("Rename conversation", conversation.title);
+    if (!title?.trim()) return;
+    try {
+      await updateConversation(conversation.id, { title: title.trim() });
+      await refreshConversations();
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : "Could not rename conversation.");
+    }
+  }
+
   async function removeConversation(conversation: ConversationSummary) {
     if (isGenerating || !window.confirm(`Delete "${conversation.title}"?`)) return;
     try {
@@ -1523,6 +1533,7 @@ export default function App(
   }
 
   const activeMemoryCount = memories.filter((memory) => memory.is_active).length;
+  const availableToolCount = tools.filter((tool) => tool.permission !== "deny").length;
   const title = activeConversation?.title ?? "New conversation";
 
   const workspace = (
@@ -1629,7 +1640,7 @@ export default function App(
         voiceReady={Boolean(voiceSettings.enabled && voiceController.canRecord)}
         voiceLastTranscript={voiceController.lastTranscript}
         onVoiceStart={startVoicePushToTalk}
-        onVoiceStop={async () => { await voiceController.stopListening(); }}
+        onVoiceStop={voiceController.stopListening}
         screen={screen}
         workspace={workspace}
         conversations={conversations}

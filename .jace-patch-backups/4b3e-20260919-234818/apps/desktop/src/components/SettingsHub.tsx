@@ -6,7 +6,6 @@ import { AuditView } from "./AuditView";
 import { CapabilityOverview } from "./CapabilityOverview";
 import { ConnectionsView } from "./ConnectionsView";
 import { ControlView } from "./ControlView";
-import { ExecutionScopesSettings } from "./ExecutionScopesSettings";
 import { DesktopWindowModeSettings } from "./DesktopWindowModeSettings";
 import { SecurityControls } from "./SecurityControls";
 import { SettingsView } from "./SettingsView";
@@ -258,10 +257,6 @@ function PermissionsSection(
           </span>
         </div>
       </div>
-
-      {/* JACE_4B3E_EXECUTION_SCOPE_SETTINGS */}
-
-      <ExecutionScopesSettings />
 
       <ControlView
         {...props.control}

@@ -14,7 +14,7 @@ import type {
   UIEvent,
   ClipboardEvent,
 } from "react";
-import { getConversation } from "../api";
+import { attachmentContentUrl, getConversation } from "../api";
 import type {
   AttachmentRecord,
   ChatMessage,
@@ -71,12 +71,19 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function attachmentGlyph(
-  kind: "audio" | "pdf" | "document" | string,
-): string {
-  if (kind === "audio") return "♪";
-  if (kind === "pdf") return "PDF";
-  return "DOC";
+function toolStatusText(status: ToolActivity["status"]) {
+  switch (status) {
+    case "requested":
+      return "Requested";
+    case "awaiting_approval":
+      return "Waiting for approval";
+    case "completed":
+      return "Completed";
+    case "denied":
+      return "Denied";
+    case "failed":
+      return "Failed";
+  }
 }
 
 function MessageAttachment({ attachment }: { attachment: AttachmentRecord }) {

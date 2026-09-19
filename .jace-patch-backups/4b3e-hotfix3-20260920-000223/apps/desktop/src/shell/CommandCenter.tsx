@@ -173,24 +173,24 @@ export function CommandCenter(props: {
           activeAutomations={props.automations.filter((item) => item.enabled)}
           notifications={props.notifications}
           pendingApproval={props.pendingApproval}
-          activities={props.toolActivity}
           onOpenTasks={() => props.onScreenChange("automations")}
           onOpenApproval={props.onOpenApproval}
         />
 
         <div className="command-center-column">
-          {/* JACE_4B3E_HOTFIX3_CORE_BLOCK_REPAIR */}
           {!panels.isHidden("core") && (
+      {/* JACE_4B3E_HOTFIX2_JACECORE_ACTIVITIES */}
             <JaceCore
-              name={props.assistantName}
-              state={props.state}
-              model={props.model}
-              runtimeConnected={props.runtimeConnected}
-              amplitude={props.voiceAmplitude}
-              onExpand={() => panels.toggleMaximized("core")}
-              controls={<PanelControls panel="core" manager={panels} />}
+                        name={props.assistantName}
+                        state={props.state}
+                        model={props.model}
+                        runtimeConnected={props.runtimeConnected}
+                        amplitude={props.voiceAmplitude}
+                        onExpand={() => panels.toggleMaximized("core")}
+                        controls={<PanelControls panel="core" manager={panels} />}
             />
           )}
+
           {!panels.isHidden("office") && (
             <AgentOffice
                         activities={props.toolActivity}

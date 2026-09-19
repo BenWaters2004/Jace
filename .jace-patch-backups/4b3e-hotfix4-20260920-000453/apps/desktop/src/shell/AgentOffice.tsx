@@ -1137,7 +1137,7 @@ export function AgentOffice(props: {
   ).length;
   const queuedCount = office.status?.queued_tasks ?? 0;
 
-  const busyCount = busyExecutors + queuedCount;
+  const busyCount = busyExecutors.length + queuedCount;
   return (
     <section className="cc-panel agent-office-panel phase11-agent-office" data-office-view={officeView}>
       <div className="cc-panel-topline agent-office-topline">

@@ -181,7 +181,7 @@ function RichChartSvg({
   spec: ChartSpec;
   type: "bar" | "line";
 }) {
-  const { maximum, span } = chartBounds(spec);
+  const { minimum, maximum, span } = chartBounds(spec);
   const plotWidth = CHART_WIDTH - CHART_LEFT - CHART_RIGHT;
   const plotHeight = CHART_HEIGHT - CHART_TOP - CHART_BOTTOM;
   const categoryWidth = plotWidth / Math.max(spec.labels.length, 1);

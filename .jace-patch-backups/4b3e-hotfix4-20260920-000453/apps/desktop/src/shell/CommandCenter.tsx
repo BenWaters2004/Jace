@@ -173,7 +173,6 @@ export function CommandCenter(props: {
           activeAutomations={props.automations.filter((item) => item.enabled)}
           notifications={props.notifications}
           pendingApproval={props.pendingApproval}
-          activities={props.toolActivity}
           onOpenTasks={() => props.onScreenChange("automations")}
           onOpenApproval={props.onOpenApproval}
         />
