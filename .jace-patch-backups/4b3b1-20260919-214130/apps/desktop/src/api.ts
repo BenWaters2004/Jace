@@ -1,11 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  ProcessListResponse,
-  ProcessOutputResponse,
-  ProcessRuntimeRecord,
-  ProcessStartRequest,
-} from "./processRuntimeTypes";
-import type {
   RuntimeReplayResponse,
   RuntimeStreamTicket,
 } from "./runtimeStreamTypes";
@@ -236,51 +230,6 @@ async function request<T>(
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
-
-// JACE_4B3B1_PROCESS_RUNTIME_API
-export const startProcess = (
-  payload: ProcessStartRequest,
-) =>
-  request<ProcessRuntimeRecord>("/processes", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-export const listProcesses = (
-  query = "",
-) =>
-  request<ProcessListResponse>(
-    `/processes${query ? `?${query}` : ""}`,
-  );
-
-export const getProcess = (
-  processId: string,
-) =>
-  request<ProcessRuntimeRecord>(
-    `/processes/${encodeURIComponent(processId)}`,
-  );
-
-export const getProcessOutput = (
-  processId: string,
-  afterSequence = 0,
-  limit = 500,
-) =>
-  request<ProcessOutputResponse>(
-    `/processes/${encodeURIComponent(processId)}/output?after_sequence=${Math.max(0, afterSequence)}&limit=${Math.max(1, limit)}`,
-  );
-
-export const terminateProcess = (
-  processId: string,
-  force = false,
-) =>
-  request<ProcessRuntimeRecord>(
-    `/processes/${encodeURIComponent(processId)}/terminate`,
-    {
-      method: "POST",
-      body: JSON.stringify({ force }),
-    },
-  );
-
 
 // JACE_4B3A_RUNTIME_STREAM_API
 export const getRuntimeStreamTicket = () =>

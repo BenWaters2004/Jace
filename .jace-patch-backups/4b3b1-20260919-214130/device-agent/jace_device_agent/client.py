@@ -16,7 +16,6 @@ from jace_device_agent.config import (
 )
 from jace_device_agent.credentials import credential_store
 from jace_device_agent.identity import collect_identity
-from jace_device_agent.process_runtime import ProcessRuntimeManager
 from jace_device_agent.executor import execute_capability
 
 
@@ -25,8 +24,6 @@ class DeviceAgentClient:
         self.config = config
         self._stopping = asyncio.Event()
         self._capability_tasks: dict[str, asyncio.Task] = {}
-        # JACE_4B3B1_PROCESS_AGENT_CLIENT
-        self._process_runtime = ProcessRuntimeManager(config)
 
     def stop(self) -> None:
         self._stopping.set()
@@ -97,10 +94,7 @@ class DeviceAgentClient:
         )
 
         identity = collect_identity(
-            device_name=self.config.device_name,
-            process_runtime_enabled=(
-                self.config.allow_process_execution
-            ),
+            device_name=self.config.device_name
         )
 
         print(
@@ -152,9 +146,6 @@ class DeviceAgentClient:
                 f"{self.config.device_id}"
             )
 
-            self._process_runtime.attach(websocket)
-            await self._process_runtime.send_snapshot()
-
             receiver = asyncio.create_task(
                 self._receiver(websocket)
             )
@@ -196,10 +187,7 @@ class DeviceAgentClient:
     ) -> None:
         while not self._stopping.is_set():
             identity = collect_identity(
-                device_name=self.config.device_name,
-                process_runtime_enabled=(
-                    self.config.allow_process_execution
-                ),
+                device_name=self.config.device_name
             )
 
             await websocket.send(
@@ -282,14 +270,6 @@ class DeviceAgentClient:
                     )
                 )
                 continue
-
-            if message_type.startswith("process."):
-                handled = await self._process_runtime.handle_message(
-                    message
-                )
-
-                if handled:
-                    continue
 
             if message_type == "capability.request":
                 # JACE_4BS6_DEVICE_CAPABILITY_EXECUTION

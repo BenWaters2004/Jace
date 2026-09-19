@@ -37,10 +37,6 @@ class AgentConfig:
     reconnect_min_seconds: float = 1.0
     reconnect_max_seconds: float = 30.0
     allow_insecure_remote: bool = False
-    # JACE_4B3B1_PROCESS_AGENT_CONFIG
-    allow_process_execution: bool = False
-    process_history_bytes: int = 2097152
-    process_max_concurrent: int = 8
 
     @classmethod
     def load(cls) -> "AgentConfig":

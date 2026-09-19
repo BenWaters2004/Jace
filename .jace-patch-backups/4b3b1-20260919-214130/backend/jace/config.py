@@ -80,14 +80,6 @@ class Settings(BaseSettings):
     runtime_event_replay_limit: int = 500
     runtime_event_subscriber_queue: int = 512
 
-    # JACE_4B3B1_PROCESS_RUNTIME_CONFIG
-    process_runtime_enabled: bool = True
-    process_output_max_bytes: int = 2097152
-    process_command_max_chars: int = 50000
-    process_start_ack_timeout_seconds: float = 10.0
-    process_max_timeout_seconds: int = 86400
-
-
 
 
 

@@ -11,7 +11,7 @@ from jace_device_agent import __version__
 from jace_device_agent.executor import advertised_execution_capabilities
 
 
-def discover_capabilities(process_runtime_enabled: bool = False) -> list[str]:
+def discover_capabilities() -> list[str]:
     """Advertise host capabilities that later phases may broker.
 
     4B.S5 does not execute these capabilities remotely yet.
@@ -46,10 +46,6 @@ def discover_capabilities(process_runtime_enabled: bool = False) -> list[str]:
     if shutil.which("ollama"):
         capabilities.add("model.ollama")
 
-    # JACE_4B3B1_PROCESS_RUNTIME_CAPABILITY
-    if process_runtime_enabled:
-        capabilities.add("process.runtime")
-
     # JACE_4BS6_DEVICE_EXECUTION_CAPABILITIES
     capabilities.update(advertised_execution_capabilities())
     return sorted(capabilities)
@@ -58,7 +54,6 @@ def discover_capabilities(process_runtime_enabled: bool = False) -> list[str]:
 def collect_identity(
     *,
     device_name: str | None = None,
-    process_runtime_enabled: bool = False,
 ) -> dict[str, Any]:
     hostname = socket.gethostname().strip() or "unknown-device"
     name = (device_name or hostname).strip()
@@ -70,7 +65,7 @@ def collect_identity(
         "os_version": platform.platform(),
         "architecture": platform.machine() or None,
         "agent_version": __version__,
-        "capabilities": discover_capabilities(process_runtime_enabled=process_runtime_enabled),
+        "capabilities": discover_capabilities(),
         "metadata": {
             "python_version": platform.python_version(),
             "python_implementation": platform.python_implementation(),

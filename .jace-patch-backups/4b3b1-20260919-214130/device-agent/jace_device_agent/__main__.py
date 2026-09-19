@@ -73,16 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show the host identity/capabilities advertised to Jace.",
     )
 
-    # JACE_4B3B1_PROCESS_RUNTIME_CLI
-    process_parser = subparsers.add_parser(
-        "process-runtime",
-        help="Enable, disable or inspect remote process execution.",
-    )
-    process_parser.add_argument(
-        "action",
-        choices=["enable", "disable", "status"],
-    )
-
     return parser
 
 
@@ -148,7 +138,6 @@ def show_status() -> int:
                 "device_id": config.device_id,
                 "device_name": config.device_name,
                 "credential_present": token_present,
-                "process_runtime_enabled": config.allow_process_execution,
             },
             indent=2,
         )
@@ -174,42 +163,6 @@ def main() -> int:
         print(
             json.dumps(
                 collect_identity(),
-                indent=2,
-            )
-        )
-        return 0
-
-    if args.command == "process-runtime":
-        config = AgentConfig.load()
-
-        if args.action == "enable":
-            config.allow_process_execution = True
-            config.save()
-            print(
-                "Device Agent process runtime enabled. "
-                "Restart the Device Agent to advertise process.runtime."
-            )
-            return 0
-
-        if args.action == "disable":
-            config.allow_process_execution = False
-            config.save()
-            print(
-                "Device Agent process runtime disabled. "
-                "Restart the Device Agent to remove process.runtime."
-            )
-            return 0
-
-        print(
-            json.dumps(
-                {
-                    "enabled": (
-                        config.allow_process_execution
-                    ),
-                    "config_path": str(
-                        config_path()
-                    ),
-                },
                 indent=2,
             )
         )
