@@ -1,10 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  DeviceCapabilityCatalogResponse,
-  DeviceCapabilityExecuteRequest,
-  DeviceCapabilityRequestRecord,
-} from "./deviceCapabilityTypes";
-import type {
   DeviceListResponse,
   DevicePairingCreateRequest,
   DevicePairingResponse,
@@ -216,39 +211,6 @@ async function request<T>(
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
-
-// JACE_4BS6_DEVICE_CAPABILITY_API
-export const getDeviceCapabilityCatalog = () =>
-  request<DeviceCapabilityCatalogResponse>(
-    "/capabilities/device/catalog",
-  );
-
-export const executeDeviceCapability = (
-  payload: DeviceCapabilityExecuteRequest,
-) =>
-  request<DeviceCapabilityRequestRecord>(
-    "/capabilities/device/execute",
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-  );
-
-export const getDeviceCapabilityRequest = (
-  requestId: string,
-) =>
-  request<DeviceCapabilityRequestRecord>(
-    `/capabilities/device/requests/${encodeURIComponent(requestId)}`,
-  );
-
-export const cancelDeviceCapabilityRequest = (
-  requestId: string,
-) =>
-  request<DeviceCapabilityRequestRecord>(
-    `/capabilities/device/requests/${encodeURIComponent(requestId)}/cancel`,
-    { method: "POST" },
-  );
-
 
 // JACE_4BS4_DEVICE_API
 export const getDevices = () =>

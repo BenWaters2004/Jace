@@ -315,22 +315,12 @@ async def connect_device(websocket: WebSocket):
                 continue
 
             if message_type == "capability.result":
-                # JACE_4BS6_DEVICE_RESULT_ROUTING
-                from jace.capabilities.device_broker import device_capability_broker
-
-                handled = await device_capability_broker.resolve_result(
+                await runtime_events.publish(
+                    "device.capability.result.unhandled",
                     device_id=device.id,
-                    message=message,
+                    request_id=message.get("request_id"),
+                    status=message.get("status"),
                 )
-
-                if not handled:
-                    await runtime_events.publish(
-                        "device.capability.result.unmatched",
-                        device_id=device.id,
-                        request_id=message.get("request_id"),
-                        status=message.get("status"),
-                    )
-
                 continue
 
             await websocket.send_json(

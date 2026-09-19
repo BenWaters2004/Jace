@@ -8,7 +8,6 @@ import sys
 from typing import Any
 
 from jace_device_agent import __version__
-from jace_device_agent.executor import advertised_execution_capabilities
 
 
 def discover_capabilities() -> list[str]:
@@ -46,8 +45,6 @@ def discover_capabilities() -> list[str]:
     if shutil.which("ollama"):
         capabilities.add("model.ollama")
 
-    # JACE_4BS6_DEVICE_EXECUTION_CAPABILITIES
-    capabilities.update(advertised_execution_capabilities())
     return sorted(capabilities)
 
 

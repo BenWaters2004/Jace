@@ -16,14 +16,12 @@ from jace_device_agent.config import (
 )
 from jace_device_agent.credentials import credential_store
 from jace_device_agent.identity import collect_identity
-from jace_device_agent.executor import execute_capability
 
 
 class DeviceAgentClient:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
         self._stopping = asyncio.Event()
-        self._capability_tasks: dict[str, asyncio.Task] = {}
 
     def stop(self) -> None:
         self._stopping.set()
@@ -204,52 +202,6 @@ class DeviceAgentClient:
 
             await asyncio.sleep(heartbeat_seconds)
 
-    async def _run_capability_request(
-        self,
-        websocket,
-        message: dict[str, Any],
-    ) -> None:
-        request_id = str(message.get("request_id") or "").strip()
-        capability = str(message.get("capability") or "").strip()
-        parameters = message.get("parameters") or {}
-
-        if not isinstance(parameters, dict):
-            parameters = {}
-
-        try:
-            result, evidence = await execute_capability(
-                capability,
-                parameters,
-            )
-            response = {
-                "type": "capability.result",
-                "request_id": request_id,
-                "status": "completed",
-                "result": result,
-                "evidence": evidence,
-            }
-
-        except asyncio.CancelledError:
-            response = {
-                "type": "capability.result",
-                "request_id": request_id,
-                "status": "cancelled",
-                "error": "Device capability execution was cancelled.",
-            }
-
-        except Exception as exc:
-            response = {
-                "type": "capability.result",
-                "request_id": request_id,
-                "status": "failed",
-                "error": str(exc),
-            }
-
-        try:
-            await websocket.send(json.dumps(response))
-        except Exception:
-            pass
-
     async def _receiver(self, websocket) -> None:
         async for raw in websocket:
             message: dict[str, Any] = json.loads(raw)
@@ -272,37 +224,23 @@ class DeviceAgentClient:
                 continue
 
             if message_type == "capability.request":
-                # JACE_4BS6_DEVICE_CAPABILITY_EXECUTION
-                request_id = str(message.get("request_id") or "").strip()
-
-                if not request_id:
-                    continue
-
-                existing = self._capability_tasks.get(request_id)
-                if existing is not None and not existing.done():
-                    continue
-
-                task = asyncio.create_task(
-                    self._run_capability_request(
-                        websocket,
-                        message,
+                # The transport is ready for 4B.S6, but this phase does not
+                # execute remote capabilities.
+                await websocket.send(
+                    json.dumps(
+                        {
+                            "type": "capability.result",
+                            "request_id": message.get(
+                                "request_id"
+                            ),
+                            "status": "unsupported",
+                            "error": (
+                                "Remote capability execution "
+                                "requires Jace Phase 4B.S6."
+                            ),
+                        }
                     )
                 )
-                self._capability_tasks[request_id] = task
-
-                def _cleanup(_task, rid=request_id):
-                    self._capability_tasks.pop(rid, None)
-
-                task.add_done_callback(_cleanup)
-                continue
-
-            if message_type == "capability.cancel":
-                request_id = str(message.get("request_id") or "").strip()
-                task = self._capability_tasks.get(request_id)
-
-                if task is not None and not task.done():
-                    task.cancel()
-
                 continue
 
             if message_type == "server.shutdown":
