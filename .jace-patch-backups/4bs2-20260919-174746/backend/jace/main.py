@@ -42,14 +42,6 @@ logger = logging.getLogger("uvicorn.error")
 async def lifespan(app: FastAPI):
     del app
 
-
-    # JACE_4BS2_STARTUP_MODE
-    logger.info(
-        "Starting %s in %s mode",
-        settings.server_name,
-        settings.mode,
-    )
-
     ensure_tools_registered()
 
     # Importing the agents API above loads the Phase 11A SQLAlchemy models before
@@ -102,36 +94,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="Jace Core backend for the Jace AI assistant.",
+    description="Local backend for the Jace AI assistant.",
     lifespan=lifespan,
 )
 
-# JACE_4BS2_MODE_AWARE_CORS
-#
-# Local mode keeps localhost/Tauri development working.
-# Server mode deliberately has no wildcard fallback.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.configured_cors_origins,
     allow_origin_regex=(
-        (
-            r"^(http://localhost(:\d+)?|"
-            r"http://127\.0\.0\.1(:\d+)?|"
-            r"http://tauri\.localhost|"
-            r"https://tauri\.localhost|"
-            r"tauri://localhost)$"
-        )
-        if settings.mode == "local"
-        else None
+        r"^(http://localhost(:\d+)?|"
+        r"http://127\.0\.0\.1(:\d+)?|"
+        r"http://tauri\.localhost|"
+        r"https://tauri\.localhost|"
+        r"tauri://localhost)$"
     ),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "X-Jace-Client-ID",
-        "X-Jace-Request-ID",
-    ],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 app.include_router(system_router)

@@ -3,42 +3,26 @@ from collections.abc import AsyncIterator
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from jace.config import DATA_DIRECTORY, settings
+from jace.config import DATABASE_PATH, DATA_DIRECTORY
 from jace.db.models import Base
 
 
-# JACE_4BS2_DATABASE_RUNTIME
 DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
-
-DATABASE_URL = settings.resolved_database_url
+DATABASE_URL = "sqlite+aiosqlite:///" + DATABASE_PATH.as_posix()
 engine = create_async_engine(DATABASE_URL, echo=False)
-DATABASE_BACKEND = engine.url.get_backend_name()
-IS_SQLITE = DATABASE_BACKEND == "sqlite"
-
-SessionLocal = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
-if IS_SQLITE:
-
-    @event.listens_for(engine.sync_engine, "connect")
-    def set_sqlite_pragmas(dbapi_connection, connection_record):
-        del connection_record
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA busy_timeout=5000")
-        cursor.close()
+@event.listens_for(engine.sync_engine, "connect")
+def set_sqlite_pragmas(dbapi_connection, connection_record):
+    del connection_record
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
 
 
 async def _ensure_step4a5_columns(connection) -> None:
-    # JACE_4BS2_SQLITE_COMPAT
-    # The existing compatibility migration is SQLite-specific.
-    if not IS_SQLITE:
-        return
-
     result = await connection.exec_driver_sql(
         "PRAGMA table_info(tool_audit_log)"
     )
@@ -72,13 +56,10 @@ async def _ensure_step4a5_columns(connection) -> None:
 
 
 async def init_database() -> None:
-    # JACE_4BS2_DATABASE_INIT
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
-
-        if IS_SQLITE:
-            await _ensure_step4a5_columns(connection)
-            await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+        await _ensure_step4a5_columns(connection)
+        await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
 
 
 async def close_database() -> None:

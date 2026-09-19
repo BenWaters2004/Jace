@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,24 +15,6 @@ VOICE_WHISPER_DIRECTORY = VOICE_DIRECTORY / "whisper"
 class Settings(BaseSettings):
     app_name: str = "Jace"
     app_version: str = "0.10.0-beta.1"
-
-    # JACE_4BS2_RUNTIME_CONFIG
-    # Local remains the default so the current desktop workflow is unchanged.
-    mode: Literal["local", "server"] = "local"
-    host: str = "127.0.0.1"
-    port: int = 8000
-    server_name: str = "Jace Core"
-    public_url: str = ""
-
-    # Blank keeps the existing data/jace.db SQLite database.
-    # Future VPS example:
-    # postgresql+asyncpg://jace:password@127.0.0.1/jace
-    database_url: str = ""
-
-    # Comma-separated explicit browser/client origins.
-    # Local mode additionally permits localhost/Tauri through the local regex.
-    cors_allowed_origins: str = ""
-
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:4b"
@@ -209,32 +190,6 @@ class Settings(BaseSettings):
     interactive_store_screenshots_default: bool = False
     interactive_max_text_chars: int = 4_000
     interactive_max_hotkey_keys: int = 5
-
-    # JACE_4BS2_RUNTIME_HELPERS
-    @property
-    def is_server_mode(self) -> bool:
-        return self.mode == "server"
-
-    @property
-    def resolved_database_url(self) -> str:
-        configured = self.database_url.strip()
-        if configured:
-            return configured
-        return "sqlite+aiosqlite:///" + DATABASE_PATH.as_posix()
-
-    @property
-    def database_backend(self) -> str:
-        scheme = self.resolved_database_url.split(":", 1)[0]
-        return scheme.split("+", 1)[0]
-
-    @property
-    def configured_cors_origins(self) -> list[str]:
-        origins: list[str] = []
-        for item in self.cors_allowed_origins.split(","):
-            origin = item.strip().rstrip("/")
-            if origin and origin not in origins:
-                origins.append(origin)
-        return origins
 
     model_config = SettingsConfigDict(
         env_file=".env",
