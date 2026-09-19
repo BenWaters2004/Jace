@@ -17,9 +17,6 @@ _PUBLIC_PATHS = {
     "/auth/bootstrap",
     "/auth/login",
     "/auth/refresh",
-    # JACE_4BS4_DEVICE_PUBLIC_PATHS
-    "/devices/pair",
-    "/devices/heartbeat",
 }
 
 

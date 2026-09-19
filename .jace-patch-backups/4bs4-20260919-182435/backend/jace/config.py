@@ -41,11 +41,6 @@ class Settings(BaseSettings):
     auth_password_min_length: int = 12
     auth_bootstrap_token: str = ""
 
-    # JACE_4BS4_DEVICE_CONFIG
-    device_pairing_minutes: int = 10
-    device_online_window_seconds: int = 90
-
-
 
 
     ollama_base_url: str = "http://127.0.0.1:11434"

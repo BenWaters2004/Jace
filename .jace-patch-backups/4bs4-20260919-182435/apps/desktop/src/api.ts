@@ -1,11 +1,4 @@
 import { API_BASE_URL } from "./constants";
-import type {
-  DeviceListResponse,
-  DevicePairingCreateRequest,
-  DevicePairingResponse,
-  DeviceRecord,
-  DeviceUpdateRequest,
-} from "./deviceTypes";
 import {
   clearAuthSession,
   getAuthAccessToken,
@@ -211,36 +204,6 @@ async function request<T>(
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
-
-// JACE_4BS4_DEVICE_API
-export const getDevices = () =>
-  request<DeviceListResponse>("/devices");
-
-export const getDevice = (deviceId: string) =>
-  request<DeviceRecord>(`/devices/${encodeURIComponent(deviceId)}`);
-
-export const createDevicePairing = (
-  payload: DevicePairingCreateRequest = {},
-) =>
-  request<DevicePairingResponse>("/devices/pairing", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-export const updateDevice = (
-  deviceId: string,
-  payload: DeviceUpdateRequest,
-) =>
-  request<DeviceRecord>(`/devices/${encodeURIComponent(deviceId)}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
-
-export const revokeDevice = (deviceId: string) =>
-  request<DeviceRecord>(`/devices/${encodeURIComponent(deviceId)}`, {
-    method: "DELETE",
-  });
-
 
 // Phase 4B.S3 authentication API.
 export const getAuthStatus = () =>

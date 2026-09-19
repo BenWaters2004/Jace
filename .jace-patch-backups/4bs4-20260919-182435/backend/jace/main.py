@@ -21,7 +21,6 @@ from jace.api.connections import callback_router as connections_callback_router,
 from jace.api.computer import router as computer_router
 from jace.api.control import router as control_router
 from jace.api.conversations import router as conversations_router
-from jace.api.devices import router as devices_router
 from jace.api.memories import router as memories_router
 from jace.api.runtime import router as runtime_router
 from jace.api.settings import router as settings_router
@@ -158,5 +157,4 @@ app.include_router(computer_router)
 app.include_router(control_router)
 app.include_router(tools_router)
 app.include_router(conversations_router)
-app.include_router(devices_router)
 app.include_router(chat_router)
