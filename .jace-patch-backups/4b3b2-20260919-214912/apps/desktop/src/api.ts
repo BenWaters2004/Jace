@@ -1,11 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  TerminalListResponse,
-  TerminalOpenRequest,
-  TerminalOutputResponse,
-  TerminalRuntimeRecord,
-} from "./terminalRuntimeTypes";
-import type {
   ProcessListResponse,
   ProcessOutputResponse,
   ProcessRuntimeRecord,
@@ -242,76 +236,6 @@ async function request<T>(
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
-
-// JACE_4B3B2_TERMINAL_RUNTIME_API
-export const openTerminal = (
-  payload: TerminalOpenRequest,
-) =>
-  request<TerminalRuntimeRecord>("/terminals", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-export const listTerminals = (
-  query = "",
-) =>
-  request<TerminalListResponse>(
-    `/terminals${query ? `?${query}` : ""}`,
-  );
-
-export const getTerminal = (
-  terminalId: string,
-) =>
-  request<TerminalRuntimeRecord>(
-    `/terminals/${encodeURIComponent(terminalId)}`,
-  );
-
-export const getTerminalOutput = (
-  terminalId: string,
-  afterSequence = 0,
-  limit = 1000,
-) =>
-  request<TerminalOutputResponse>(
-    `/terminals/${encodeURIComponent(terminalId)}/output?after_sequence=${Math.max(0, afterSequence)}&limit=${Math.max(1, limit)}`,
-  );
-
-export const sendTerminalInput = (
-  terminalId: string,
-  data: string,
-) =>
-  request<TerminalRuntimeRecord>(
-    `/terminals/${encodeURIComponent(terminalId)}/input`,
-    {
-      method: "POST",
-      body: JSON.stringify({ data }),
-    },
-  );
-
-export const resizeTerminal = (
-  terminalId: string,
-  cols: number,
-  rows: number,
-) =>
-  request<TerminalRuntimeRecord>(
-    `/terminals/${encodeURIComponent(terminalId)}/resize`,
-    {
-      method: "POST",
-      body: JSON.stringify({ cols, rows }),
-    },
-  );
-
-export const closeTerminal = (
-  terminalId: string,
-  force = false,
-) =>
-  request<TerminalRuntimeRecord>(
-    `/terminals/${encodeURIComponent(terminalId)}/close`,
-    {
-      method: "POST",
-      body: JSON.stringify({ force }),
-    },
-  );
-
 
 // JACE_4B3B1_PROCESS_RUNTIME_API
 export const startProcess = (

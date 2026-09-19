@@ -314,25 +314,6 @@ async def connect_device(websocket: WebSocket):
             if message_type == "pong":
                 continue
 
-            if message_type.startswith("terminal."):
-                # JACE_4B3B2_TERMINAL_DEVICE_ROUTING
-                from jace.terminal_runtime import terminal_runtime
-
-                handled = await terminal_runtime.handle_device_message(
-                    device_id=device.id,
-                    message=message,
-                )
-
-                if not handled:
-                    await runtime_events.publish(
-                        "device.terminal.message.unmatched",
-                        device_id=device.id,
-                        terminal_id=message.get("terminal_id"),
-                        message_type=message_type,
-                    )
-
-                continue
-
             if message_type.startswith("process."):
                 # JACE_4B3B1_PROCESS_DEVICE_ROUTING
                 from jace.process_runtime import process_runtime

@@ -41,10 +41,6 @@ class AgentConfig:
     allow_process_execution: bool = False
     process_history_bytes: int = 2097152
     process_max_concurrent: int = 8
-    # JACE_4B3B2_TERMINAL_AGENT_CONFIG
-    allow_terminal_sessions: bool = False
-    terminal_history_bytes: int = 4194304
-    terminal_max_concurrent: int = 4
 
     @classmethod
     def load(cls) -> "AgentConfig":

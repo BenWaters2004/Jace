@@ -17,7 +17,6 @@ from jace_device_agent.config import (
 from jace_device_agent.credentials import credential_store
 from jace_device_agent.identity import collect_identity
 from jace_device_agent.process_runtime import ProcessRuntimeManager
-from jace_device_agent.terminal_runtime import TerminalRuntimeManager
 from jace_device_agent.executor import execute_capability
 
 
@@ -28,8 +27,6 @@ class DeviceAgentClient:
         self._capability_tasks: dict[str, asyncio.Task] = {}
         # JACE_4B3B1_PROCESS_AGENT_CLIENT
         self._process_runtime = ProcessRuntimeManager(config)
-        # JACE_4B3B2_TERMINAL_AGENT_CLIENT
-        self._terminal_runtime = TerminalRuntimeManager(config)
 
     def stop(self) -> None:
         self._stopping.set()
@@ -104,9 +101,6 @@ class DeviceAgentClient:
             process_runtime_enabled=(
                 self.config.allow_process_execution
             ),
-            terminal_runtime_enabled=(
-                self.config.allow_terminal_sessions
-            ),
         )
 
         print(
@@ -160,8 +154,6 @@ class DeviceAgentClient:
 
             self._process_runtime.attach(websocket)
             await self._process_runtime.send_snapshot()
-            self._terminal_runtime.attach(websocket)
-            await self._terminal_runtime.send_snapshot()
 
             receiver = asyncio.create_task(
                 self._receiver(websocket)
@@ -290,14 +282,6 @@ class DeviceAgentClient:
                     )
                 )
                 continue
-
-            if message_type.startswith("terminal."):
-                handled = await self._terminal_runtime.handle_message(
-                    message
-                )
-
-                if handled:
-                    continue
 
             if message_type.startswith("process."):
                 handled = await self._process_runtime.handle_message(

@@ -73,16 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show the host identity/capabilities advertised to Jace.",
     )
 
-    # JACE_4B3B2_TERMINAL_RUNTIME_CLI
-    terminal_parser = subparsers.add_parser(
-        "terminal-runtime",
-        help="Enable, disable or inspect interactive terminal access.",
-    )
-    terminal_parser.add_argument(
-        "action",
-        choices=["enable", "disable", "status"],
-    )
-
     # JACE_4B3B1_PROCESS_RUNTIME_CLI
     process_parser = subparsers.add_parser(
         "process-runtime",
@@ -159,7 +149,6 @@ def show_status() -> int:
                 "device_name": config.device_name,
                 "credential_present": token_present,
                 "process_runtime_enabled": config.allow_process_execution,
-                "terminal_runtime_enabled": config.allow_terminal_sessions,
             },
             indent=2,
         )
@@ -185,42 +174,6 @@ def main() -> int:
         print(
             json.dumps(
                 collect_identity(),
-                indent=2,
-            )
-        )
-        return 0
-
-    if args.command == "terminal-runtime":
-        config = AgentConfig.load()
-
-        if args.action == "enable":
-            config.allow_terminal_sessions = True
-            config.save()
-            print(
-                "Device Agent terminal runtime enabled. "
-                "Restart the Device Agent to advertise terminal.runtime."
-            )
-            return 0
-
-        if args.action == "disable":
-            config.allow_terminal_sessions = False
-            config.save()
-            print(
-                "Device Agent terminal runtime disabled. "
-                "Restart the Device Agent to remove terminal.runtime."
-            )
-            return 0
-
-        print(
-            json.dumps(
-                {
-                    "enabled": (
-                        config.allow_terminal_sessions
-                    ),
-                    "config_path": str(
-                        config_path()
-                    ),
-                },
                 indent=2,
             )
         )

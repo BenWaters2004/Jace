@@ -11,7 +11,6 @@ from jace_device_agent import __version__
 from jace_device_agent.executor import advertised_execution_capabilities
 
 
-from jace_device_agent.config import AgentConfig
 def discover_capabilities(
     process_runtime_enabled: bool = False,
     terminal_runtime_enabled: bool = False,
@@ -66,28 +65,9 @@ def discover_capabilities(
 def collect_identity(
     *,
     device_name: str | None = None,
-    process_runtime_enabled: bool | None = None,
-    terminal_runtime_enabled: bool | None = None,
+    process_runtime_enabled: bool = False,
+    terminal_runtime_enabled: bool = False,
 ) -> dict[str, Any]:
-    # JACE_4B3B2_RUNTIME_CAPABILITY_CONFIG_FALLBACK
-    # The saved local Device Agent config is the authority for
-    # high-risk runtime opt-ins when a caller omits these flags.
-    if (
-        process_runtime_enabled is None
-        or terminal_runtime_enabled is None
-    ):
-        local_config = AgentConfig.load()
-
-        if process_runtime_enabled is None:
-            process_runtime_enabled = (
-                local_config.allow_process_execution
-            )
-
-        if terminal_runtime_enabled is None:
-            terminal_runtime_enabled = (
-                local_config.allow_terminal_sessions
-            )
-
     hostname = socket.gethostname().strip() or "unknown-device"
     name = (device_name or hostname).strip()
 

@@ -87,13 +87,6 @@ class Settings(BaseSettings):
     process_start_ack_timeout_seconds: float = 10.0
     process_max_timeout_seconds: int = 86400
 
-    # JACE_4B3B2_TERMINAL_RUNTIME_CONFIG
-    terminal_runtime_enabled: bool = True
-    terminal_output_max_bytes: int = 4194304
-    terminal_input_max_chars: int = 20000
-    terminal_start_ack_timeout_seconds: float = 10.0
-
-
 
 
 

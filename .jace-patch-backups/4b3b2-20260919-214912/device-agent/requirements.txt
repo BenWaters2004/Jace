@@ -2,4 +2,3 @@ httpx>=0.28,<1
 websockets>=15,<16
 keyring>=25,<26
 psutil>=6,<8
-pywinpty==2.0.15; platform_system == "Windows"
