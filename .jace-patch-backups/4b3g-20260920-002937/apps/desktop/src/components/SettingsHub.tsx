@@ -2,6 +2,7 @@
 import type { ComponentProps } from "react";
 
 import { AppearanceSettings } from "./AppearanceSettings";
+import { AuditView } from "./AuditView";
 import { CapabilityOverview } from "./CapabilityOverview";
 import { ConnectionsView } from "./ConnectionsView";
 import { ControlView } from "./ControlView";
@@ -13,7 +14,6 @@ import { ToolsView } from "./ToolsView";
 import { WindowLayoutSettings } from "./WindowLayoutSettings";
 
 
-import { ExecutionAuditView } from "./ExecutionAuditView"; // JACE_4B3G_EXECUTION_AUDIT_VIEW
 export type SettingsSection =
   | "general"
   | "appearance"
@@ -274,25 +274,37 @@ function PermissionsSection(
 function AuditSection(
   props: {
     tools: ToolsProps;
+    control: ControlProps;
   },
 ) {
   return (
     <section className="settings-hub-section">
       <SectionHeader
-        kicker="Audit"
+        kicker="Audit Log"
         title="Jace activity"
-        description="Trace execution policy, scope/device provenance, approvals and outcomes without persisting raw shell commands or terminal keystrokes."
+        description={
+          "Review tool activity with provider, account, capability and "
+          + "policy context. Tokens and connection secrets are never "
+          + "included in the audit trail."
+        }
       />
 
-      <ExecutionAuditView
+      <AuditView
         audit={props.tools.audit}
-        tools={props.tools.tools}
-        onRefresh={props.tools.onRefresh}
-        onClearAudit={props.tools.onClearAudit}
+        controlActions={
+          props.control.actions
+        }
+        onRefresh={
+          props.tools.onRefresh
+        }
+        onClearAudit={
+          props.tools.onClearAudit
+        }
       />
     </section>
   );
 }
+
 
 export function SettingsHub(
   props: SettingsHubProps,
@@ -387,6 +399,7 @@ export function SettingsHub(
           && (
             <AuditSection
               tools={props.tools}
+              control={props.control}
             />
           )
         }

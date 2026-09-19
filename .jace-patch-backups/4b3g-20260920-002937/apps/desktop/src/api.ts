@@ -779,21 +779,6 @@ export const getToolAudit = (limit = 100) => request<ToolAuditListResponse>(`/to
 export async function clearToolAudit(): Promise<void> {
   await request("/tools/audit", { method: "DELETE" });
 }
-// JACE_4B3G_CLEAR_CHAT_APPROVALS_API
-export const clearConversationToolGrants = (
-  conversationId: string,
-) =>
-  request<{
-    success: boolean;
-    conversation_id: string;
-    cleared: number;
-  }>(
-    `/tools/approvals/session-grants/${encodeURIComponent(conversationId)}`,
-    {
-      method: "DELETE",
-    },
-  );
-
 export const getPendingToolApprovals = () => request<PendingToolApprovalsResponse>("/tools/approvals");
 export const resolveToolApproval = (approvalId: string, decision: ToolApprovalDecision) =>
   request<ToolApprovalDecisionResponse>(`/tools/approvals/${approvalId}`, {

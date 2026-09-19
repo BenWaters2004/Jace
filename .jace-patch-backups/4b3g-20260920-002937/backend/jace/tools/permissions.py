@@ -10,10 +10,6 @@ from jace.config import settings
 from jace.db.models import ToolAuditLog, ToolPermission
 from jace.tools import ensure_tools_registered
 from jace.tools.registry import registry
-from jace.tools.execution_audit import (
-    execution_policy_context,
-    redact_execution_sensitive,
-)
 
 
 def utc_now() -> datetime:
@@ -110,11 +106,6 @@ def _audit_arguments(
             f"{len(terminal_input.encode('utf-8', errors='replace'))} bytes>"
         )
 
-    safe = redact_execution_sensitive(
-        tool_name,
-        safe,
-    )
-
     return safe
 
 
@@ -210,40 +201,18 @@ async def create_tool_audit(
     permission_mode: str,
     arguments: dict[str, Any],
     status: str = "requested",
-    configured_permission: str | None = None,
-    session_grant_used: bool | None = None,
-    session_grant_available: bool | None = None,
     provider_id: str | None = None,
     connection_id: str | None = None,
     capability_id: str | None = None,
     account_hint: str | None = None,
 ) -> ToolAuditLog:
-    # JACE_4B3G_EXECUTION_POLICY_AUDIT
-    safe_arguments = _audit_arguments(
-        tool_name,
-        arguments,
-    )
-
-    policy_context = await execution_policy_context(
-        session,
-        tool_name=tool_name,
-        arguments=arguments,
-        configured_permission=configured_permission,
-        effective_permission=permission_mode,
-        session_grant_used=session_grant_used,
-        session_grant_available=session_grant_available,
-    )
-
-    if policy_context is not None:
-        safe_arguments["_jace_policy"] = policy_context
-
     entry = ToolAuditLog(
         conversation_id=conversation_id,
         tool_name=tool_name,
         permission_mode=permission_mode,
         status=status,
         arguments_json=json.dumps(
-            safe_arguments,
+            _audit_arguments(tool_name, arguments),
             ensure_ascii=False,
             separators=(",", ":"),
         ),

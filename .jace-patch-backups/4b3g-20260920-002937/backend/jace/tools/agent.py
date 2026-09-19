@@ -434,23 +434,6 @@ async def _execute_tool_call(
             conversation_id=conversation_id,
             tool_name=tool_name,
             permission_mode=permission,
-            # JACE_4B3G_AUDIT_POLICY_CALL
-            configured_permission=tool_permission,
-            session_grant_used=bool(
-                locals().get(
-                    "session_grant_used",
-                    (
-                        tool_permission == "ask"
-                        and permission == "allow"
-                    ),
-                )
-            ),
-            session_grant_available=bool(
-                locals().get(
-                    "session_grant_key",
-                    None,
-                )
-            ),
             arguments=audit_arguments,
             provider_id=(capability_binding or {}).get("provider_id"),
             connection_id=(capability_binding or {}).get("connection_id"),

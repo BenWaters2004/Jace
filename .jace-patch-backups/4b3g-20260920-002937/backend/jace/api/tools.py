@@ -186,24 +186,6 @@ async def pending_approvals():
     )
 
 
-# JACE_4B3G_CLEAR_SESSION_GRANTS
-@router.delete(
-    "/approvals/session-grants/{conversation_id}",
-)
-async def clear_session_grants(
-    conversation_id: str,
-):
-    cleared = approval_manager.clear_conversation_grants(
-        conversation_id
-    )
-
-    return {
-        "success": True,
-        "conversation_id": conversation_id,
-        "cleared": cleared,
-    }
-
-
 @router.post(
     "/approvals/{approval_id}",
     response_model=ToolApprovalDecisionResponse,

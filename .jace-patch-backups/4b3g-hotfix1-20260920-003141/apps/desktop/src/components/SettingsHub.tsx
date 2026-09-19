@@ -2,6 +2,7 @@
 import type { ComponentProps } from "react";
 
 import { AppearanceSettings } from "./AppearanceSettings";
+import { AuditView } from "./AuditView";
 import { CapabilityOverview } from "./CapabilityOverview";
 import { ConnectionsView } from "./ConnectionsView";
 import { ControlView } from "./ControlView";
@@ -387,6 +388,7 @@ export function SettingsHub(
           && (
             <AuditSection
               tools={props.tools}
+              control={props.control}
             />
           )
         }

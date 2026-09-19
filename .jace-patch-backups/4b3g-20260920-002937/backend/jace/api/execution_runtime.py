@@ -29,10 +29,6 @@ from jace.execution_scopes.security import device_scoped_path
 from jace.execution_scopes.service import scope_shells
 from jace.process_runtime import process_runtime
 from jace.terminal_runtime import terminal_runtime
-from jace.tools.permissions import (
-    create_tool_audit,
-    update_tool_audit,
-)
 
 
 router = APIRouter(
@@ -336,44 +332,6 @@ async def _require_terminal_in_scope(
     return scope, row
 
 
-
-async def _create_ui_audit(
-    *,
-    tool_name: str,
-    arguments: dict,
-):
-    async with SessionLocal() as session:
-        return await create_tool_audit(
-            session,
-            conversation_id=None,
-            tool_name=tool_name,
-            permission_mode="explicit_user_action",
-            arguments=arguments,
-            configured_permission="explicit_user_action",
-            session_grant_used=False,
-            session_grant_available=False,
-        )
-
-
-async def _complete_ui_audit(
-    audit_id: str,
-    *,
-    status: str,
-    result_preview: str | None = None,
-    error: str | None = None,
-):
-    async with SessionLocal() as session:
-        await update_tool_audit(
-            session,
-            audit_id,
-            status=status,
-            result_preview=result_preview,
-            error=error,
-            completed=True,
-        )
-
-
-
 def _runtime_error(exc: Exception) -> HTTPException:
     if isinstance(exc, PermissionError):
         return HTTPException(status_code=403, detail=str(exc))
@@ -394,11 +352,6 @@ def _runtime_error(exc: Exception) -> HTTPException:
 async def start_scoped_process(
     payload: ScopedProcessStart,
 ):
-    audit = await _create_ui_audit(
-        tool_name="ui_run_device_command",
-        arguments=payload.model_dump(),
-    )
-
     scope, device = await _require_scope(
         scope_id=payload.scope_id,
         shell=payload.shell,
@@ -429,21 +382,7 @@ async def start_scoped_process(
         RuntimeError,
         ValueError,
     ) as exc:
-        await _complete_ui_audit(
-            audit.id,
-            status="failed",
-            error=str(exc),
-        )
         raise _runtime_error(exc) from exc
-
-    await _complete_ui_audit(
-        audit.id,
-        status="completed",
-        result_preview=(
-            "Process launch accepted: "
-            f"{row.id} · {row.status}"
-        ),
-    )
 
     return ScopedProcessResult(
         scope_id=scope.id,
@@ -459,15 +398,6 @@ async def terminate_scoped_process(
     process_id: str,
     payload: ScopedProcessMutation,
 ):
-    audit = await _create_ui_audit(
-        tool_name="ui_stop_device_process",
-        arguments={
-            "scope_id": payload.scope_id,
-            "process_id": process_id,
-            "force": payload.force,
-        },
-    )
-
     scope, _row = await _require_process_in_scope(
         process_id,
         payload.scope_id,
@@ -481,21 +411,7 @@ async def terminate_scoped_process(
             force=payload.force,
         )
     except (LookupError, RuntimeError) as exc:
-        await _complete_ui_audit(
-            audit.id,
-            status="failed",
-            error=str(exc),
-        )
         raise _runtime_error(exc) from exc
-
-    await _complete_ui_audit(
-        audit.id,
-        status="completed",
-        result_preview=(
-            "Process termination requested: "
-            f"{row.id} · {row.status}"
-        ),
-    )
 
     return ScopedProcessResult(
         scope_id=scope.id,
@@ -510,11 +426,6 @@ async def terminate_scoped_process(
 async def open_scoped_terminal(
     payload: ScopedTerminalOpen,
 ):
-    audit = await _create_ui_audit(
-        tool_name="ui_open_device_terminal",
-        arguments=payload.model_dump(),
-    )
-
     scope, device = await _require_scope(
         scope_id=payload.scope_id,
         shell=payload.shell,
@@ -544,21 +455,7 @@ async def open_scoped_terminal(
         RuntimeError,
         ValueError,
     ) as exc:
-        await _complete_ui_audit(
-            audit.id,
-            status="failed",
-            error=str(exc),
-        )
         raise _runtime_error(exc) from exc
-
-    await _complete_ui_audit(
-        audit.id,
-        status="completed",
-        result_preview=(
-            "Terminal opened: "
-            f"{row.id} · {row.status}"
-        ),
-    )
 
     return ScopedTerminalResult(
         scope_id=scope.id,
@@ -643,15 +540,6 @@ async def scoped_terminal_close(
     terminal_id: str,
     payload: ScopedTerminalClose,
 ):
-    audit = await _create_ui_audit(
-        tool_name="ui_close_device_terminal",
-        arguments={
-            "scope_id": payload.scope_id,
-            "terminal_id": terminal_id,
-            "force": payload.force,
-        },
-    )
-
     scope, _row = await _require_terminal_in_scope(
         terminal_id,
         payload.scope_id,
@@ -665,21 +553,7 @@ async def scoped_terminal_close(
             force=payload.force,
         )
     except (LookupError, RuntimeError) as exc:
-        await _complete_ui_audit(
-            audit.id,
-            status="failed",
-            error=str(exc),
-        )
         raise _runtime_error(exc) from exc
-
-    await _complete_ui_audit(
-        audit.id,
-        status="completed",
-        result_preview=(
-            "Terminal close requested: "
-            f"{row.id} · {row.status}"
-        ),
-    )
 
     return ScopedTerminalResult(
         scope_id=scope.id,
