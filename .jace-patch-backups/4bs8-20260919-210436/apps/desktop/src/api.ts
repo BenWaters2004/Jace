@@ -1,10 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  PrivacyInspectRequest,
-  PrivacyInspectResponse,
-  PrivacyStatus,
-} from "./privacyTypes";
-import type {
   ModelGatewayResolveRequest,
   ModelGatewayResolvedRoute,
   ModelGatewayStatus,
@@ -226,19 +221,6 @@ async function request<T>(
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
-
-// JACE_4BS8_PRIVACY_GATEWAY_API
-export const getPrivacyStatus = () =>
-  request<PrivacyStatus>("/privacy/status");
-
-export const inspectPrivacy = (
-  payload: PrivacyInspectRequest,
-) =>
-  request<PrivacyInspectResponse>("/privacy/inspect", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
 
 // JACE_4BS7_MODEL_GATEWAY_API
 export const getModelGatewayStatus = () =>

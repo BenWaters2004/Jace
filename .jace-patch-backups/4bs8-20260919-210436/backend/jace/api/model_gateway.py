@@ -57,7 +57,6 @@ async def model_gateway_status():
                 "provider_id": provider.provider_id,
                 "local": provider.local,
                 "enabled": provider.enabled,
-                "supports_protected_cloud": provider.supports_protected_cloud,
                 "operations": list(provider.operations),
             }
             for provider in model_gateway.providers()

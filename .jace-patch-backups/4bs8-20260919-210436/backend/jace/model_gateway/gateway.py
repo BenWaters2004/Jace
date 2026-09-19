@@ -206,75 +206,6 @@ class ModelGateway:
 
         return provider
 
-    # JACE_4BS8_PRIVACY_ENFORCEMENT
-    def _local_fallback(self, capability: str) -> ModelRoute:
-        candidates = [
-            provider
-            for provider in self._providers.values()
-            if provider.enabled and provider.local
-        ]
-        candidates.sort(
-            key=lambda provider: (
-                provider.provider_id != "ollama",
-                provider.provider_id,
-            )
-        )
-
-        if not candidates:
-            raise ModelProviderUnavailableError(
-                "Privacy policy requires local processing, "
-                "but no local model provider is available."
-            )
-
-        provider = candidates[0]
-
-        return ModelRoute(
-            capability=capability,
-            provider=provider.provider_id,
-            model=self._default_model(capability),
-            local=True,
-            explicit_model=False,
-        )
-
-    def _prepare_privacy(
-        self,
-        *,
-        route: ModelRoute,
-        capability: str,
-        payload: dict[str, Any],
-        privacy_classification: str | None,
-        privacy_mode: str | None,
-    ):
-        from jace.privacy import privacy_gateway
-
-        provider = self._provider(route)
-
-        decision = privacy_gateway.prepare_for_provider(
-            payload,
-            provider_local=provider.local,
-            provider_supports_protected_cloud=(
-                provider.supports_protected_cloud
-            ),
-            classification_hint=privacy_classification,
-            requested_mode=privacy_mode,
-        )
-
-        if decision.require_local and not route.local:
-            route = self._local_fallback(capability)
-            provider = self._provider(route)
-
-            decision = privacy_gateway.prepare_for_provider(
-                payload,
-                provider_local=True,
-                provider_supports_protected_cloud=(
-                    provider.supports_protected_cloud
-                ),
-                classification_hint=privacy_classification,
-                requested_mode=privacy_mode,
-            )
-
-        return route, provider, decision
-
     async def stream_chat(
         self,
         *,
@@ -286,46 +217,26 @@ class ModelGateway:
         temperature: float = 0.4,
         tools: list[dict[str, Any]] | None = None,
         local_only: bool = False,
-        privacy_classification: str | None = None,
-        privacy_mode: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         route = self.resolve(
             capability,
             requested_model=model,
             local_only=local_only,
         )
-        route, provider, privacy = self._prepare_privacy(
-            route=route,
-            capability=capability,
-            payload={
-                "messages": messages,
-                "system_prompt": system_prompt,
-                "tools": tools,
-            },
-            privacy_classification=privacy_classification,
-            privacy_mode=privacy_mode,
-        )
-
-        prepared = privacy.transformed_payload
+        provider = self._provider(route)
 
         async for chunk in provider.stream_chat(
             model=route.model,
-            messages=prepared["messages"],
-            system_prompt=prepared["system_prompt"],
+            messages=messages,
+            system_prompt=system_prompt,
             reasoning_mode=reasoning_mode,
             temperature=temperature,
-            tools=prepared["tools"],
+            tools=tools,
         ):
             if isinstance(chunk, dict):
                 chunk.setdefault("model_provider", route.provider)
                 chunk.setdefault("model_capability", capability)
                 chunk.setdefault("model", route.model)
-                chunk.setdefault(
-                    "privacy_classification",
-                    privacy.classification,
-                )
-                chunk.setdefault("privacy_mode", privacy.mode)
-                chunk.setdefault("privacy_action", privacy.action)
 
             yield chunk
 
@@ -339,8 +250,6 @@ class ModelGateway:
         reasoning_mode: str = "fast",
         temperature: float = 0.4,
         local_only: bool = False,
-        privacy_classification: str | None = None,
-        privacy_mode: str | None = None,
     ) -> str:
         parts: list[str] = []
 
@@ -353,8 +262,6 @@ class ModelGateway:
             temperature=temperature,
             tools=None,
             local_only=local_only,
-            privacy_classification=privacy_classification,
-            privacy_mode=privacy_mode,
         ):
             message = chunk.get("message") or {}
             content = message.get("content") or ""
@@ -375,8 +282,6 @@ class ModelGateway:
         reasoning_mode: str = "fast",
         temperature: float = 0.4,
         local_only: bool = False,
-        privacy_classification: str | None = None,
-        privacy_mode: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         async for chunk in self.stream_chat(
             capability=capability,
@@ -387,8 +292,6 @@ class ModelGateway:
             temperature=temperature,
             tools=tools,
             local_only=local_only,
-            privacy_classification=privacy_classification,
-            privacy_mode=privacy_mode,
         ):
             yield chunk
 
@@ -401,31 +304,18 @@ class ModelGateway:
         system_prompt: str,
         response_model: type[StructuredModel],
         local_only: bool = False,
-        privacy_classification: str | None = None,
-        privacy_mode: str | None = None,
     ) -> StructuredModel:
         route = self.resolve(
             capability,
             requested_model=model,
             local_only=local_only,
         )
-        route, provider, privacy = self._prepare_privacy(
-            route=route,
-            capability=capability,
-            payload={
-                "messages": messages,
-                "system_prompt": system_prompt,
-            },
-            privacy_classification=privacy_classification,
-            privacy_mode=privacy_mode,
-        )
-
-        prepared = privacy.transformed_payload
+        provider = self._provider(route)
 
         return await provider.structured_chat(
             model=route.model,
-            messages=prepared["messages"],
-            system_prompt=prepared["system_prompt"],
+            messages=messages,
+            system_prompt=system_prompt,
             response_model=response_model,
         )
 
@@ -436,25 +326,17 @@ class ModelGateway:
         capability: str = "embedding",
         model: str | None = None,
         local_only: bool = False,
-        privacy_classification: str | None = None,
-        privacy_mode: str | None = None,
     ) -> list[float]:
         route = self.resolve(
             capability,
             requested_model=model,
             local_only=local_only,
         )
-        route, provider, privacy = self._prepare_privacy(
-            route=route,
-            capability=capability,
-            payload={"text": text},
-            privacy_classification=privacy_classification,
-            privacy_mode=privacy_mode,
-        )
+        provider = self._provider(route)
 
         return await provider.embed(
             model=route.model,
-            text=privacy.transformed_payload["text"],
+            text=text,
         )
 
     async def warm(

@@ -45,8 +45,6 @@ async def stream_chat(
     tools: list[dict[str, Any]] | None = None,
     capability: str = "conversation.fast",
     local_only: bool = False,
-    privacy_classification: str | None = None,
-    privacy_mode: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     async for chunk in model_gateway.stream_chat(
         capability=capability,
@@ -57,8 +55,6 @@ async def stream_chat(
         temperature=temperature,
         tools=tools,
         local_only=local_only,
-        privacy_classification=privacy_classification,
-        privacy_mode=privacy_mode,
     ):
         yield chunk
 
@@ -71,8 +67,6 @@ async def structured_chat(
     response_model: type[StructuredModel],
     capability: str = "memory.extract",
     local_only: bool = False,
-    privacy_classification: str | None = None,
-    privacy_mode: str | None = None,
 ) -> StructuredModel:
     return await model_gateway.generate_structured(
         capability=capability,
@@ -81,8 +75,6 @@ async def structured_chat(
         system_prompt=system_prompt,
         response_model=response_model,
         local_only=local_only,
-        privacy_classification=privacy_classification,
-        privacy_mode=privacy_mode,
     )
 
 
@@ -92,16 +84,12 @@ async def embed_text(
     model: str | None = None,
     capability: str = "embedding",
     local_only: bool = False,
-    privacy_classification: str | None = None,
-    privacy_mode: str | None = None,
 ) -> list[float]:
     return await model_gateway.embed(
         text,
         capability=capability,
         model=model,
         local_only=local_only,
-        privacy_classification=privacy_classification,
-        privacy_mode=privacy_mode,
     )
 
 

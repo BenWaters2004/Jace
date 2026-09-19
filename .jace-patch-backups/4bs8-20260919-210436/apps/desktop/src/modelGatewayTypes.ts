@@ -2,7 +2,6 @@ export interface ModelGatewayProvider {
   provider_id: string;
   local: boolean;
   enabled: boolean;
-  supports_protected_cloud: boolean;
   operations: string[];
 }
 

@@ -35,5 +35,4 @@ class ProviderInfo:
     provider_id: str
     local: bool
     enabled: bool
-    supports_protected_cloud: bool
     operations: tuple[str, ...]

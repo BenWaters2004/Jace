@@ -69,12 +69,6 @@ class Settings(BaseSettings):
     model_route_embedding: str = ""
     model_route_reranking: str = ""
 
-    # JACE_4BS8_PRIVACY_GATEWAY_CONFIG
-    privacy_enabled: bool = True
-    privacy_cloud_egress_enabled: bool = False
-    privacy_default_classification: str = "internal"
-
-
 
     request_timeout_seconds: float = 180.0
 

@@ -16,7 +16,6 @@ class ModelProvider(ABC):
     provider_id: str
     local: bool = False
     enabled: bool = True
-    supports_protected_cloud: bool = False
 
     @property
     @abstractmethod
@@ -28,7 +27,6 @@ class ModelProvider(ABC):
             provider_id=self.provider_id,
             local=self.local,
             enabled=self.enabled,
-            supports_protected_cloud=self.supports_protected_cloud,
             operations=self.operations,
         )
 

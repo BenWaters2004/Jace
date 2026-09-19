@@ -25,7 +25,6 @@ class OllamaProvider(ModelProvider):
     provider_id = "ollama"
     local = True
     enabled = True
-    supports_protected_cloud = True
 
     @property
     def operations(self) -> tuple[str, ...]:
