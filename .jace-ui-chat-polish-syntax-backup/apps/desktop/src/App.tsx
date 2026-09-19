@@ -1654,7 +1654,7 @@ export default function App(
         onOpenSettings={() => setSettingsOpen(true)}
         onNewChat={newChat}
         onLoadConversation={(id) => void loadConversation(id)}
-        
+        {/* JACE_UI_CHAT_POLISH_2026_09_19 */}
         onDeleteConversation={(conversation) => void removeConversation(conversation)}
         onOpenApproval={() => { setSettingsSection("capabilities"); setSettingsOpen(true); }}
         onEmergencyStop={() => void emergencyStopDesktopControl()}

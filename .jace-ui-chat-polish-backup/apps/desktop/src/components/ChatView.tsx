@@ -47,6 +47,7 @@ interface ChatViewProps {
   selectedModel: string;
   reasoningMode: ReasoningMode;
   memoryContextCount: number;
+  toolContextCount: number;
   performanceDiagnostics: PerformanceDiagnostics | null;
   toolActivity: ToolActivity[];
   pendingAttachments: PendingAttachment[];
@@ -435,14 +436,8 @@ export function ChatView(props: ChatViewProps) {
   return (
     <section className="content-shell chat-shell">
       <header className="page-header compact-header">
-        {/* JACE_UI_CHAT_POLISH_2026_09_19 */}
-        <div className="chat-header-copy">
-          <h1
-            className="chat-conversation-title"
-            title={props.title}
-          >
-            {props.title}
-          </h1>
+        <div>
+          <h1>{props.title}</h1>
           <p>{props.selectedModel || "No model selected"}</p>
         </div>
 
@@ -453,7 +448,11 @@ export function ChatView(props: ChatViewProps) {
             </span>
           )}
 
-          
+          {props.toolContextCount > 0 && (
+            <span className="tool-context-badge">
+              ⌁ {props.toolContextCount} tools
+            </span>
+          )}
 
           <select
             value={props.reasoningMode}

@@ -1550,6 +1550,7 @@ export default function App(
           selectedModel={selectedModel}
           reasoningMode={reasoningMode}
           memoryContextCount={memoryContextCount}
+          toolContextCount={toolContextCount}
           performanceDiagnostics={performanceDiagnostics}
           toolActivity={toolActivity}
           pendingAttachments={pendingAttachments}
@@ -1654,8 +1655,6 @@ export default function App(
         onOpenSettings={() => setSettingsOpen(true)}
         onNewChat={newChat}
         onLoadConversation={(id) => void loadConversation(id)}
-        
-        onDeleteConversation={(conversation) => void removeConversation(conversation)}
         onOpenApproval={() => { setSettingsSection("capabilities"); setSettingsOpen(true); }}
         onEmergencyStop={() => void emergencyStopDesktopControl()}
       />

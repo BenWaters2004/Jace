@@ -59,7 +59,6 @@ export function CommandCenter(props: {
   onOpenSettings: () => void;
   onNewChat: () => void;
   onLoadConversation: (id: string) => void;
-  onDeleteConversation: (conversation: ConversationSummary) => void;
   onOpenApproval: () => void;
   onEmergencyStop: () => void;
 }) {
@@ -351,47 +350,20 @@ export function CommandCenter(props: {
           </button>
 
           <div className="drawer-list">
-            {/* JACE_UI_CHAT_POLISH_2026_09_19 */}
             {props.conversations.map((conversation) => (
-              <div
+              <button
                 key={conversation.id}
-                className={`drawer-conversation-row ${
+                className={
                   conversation.id === props.activeConversationId ? "active" : ""
-                }`}
+                }
+                onClick={() => {
+                  props.onLoadConversation(conversation.id);
+                  setDrawerOpen(false);
+                }}
               >
-                <button
-                  type="button"
-                  className="drawer-conversation-select"
-                  onClick={() => {
-                    props.onLoadConversation(conversation.id);
-                    setDrawerOpen(false);
-                  }}
-                  title={conversation.title}
-                >
-                  <strong>{conversation.title}</strong>
-                  <small>{conversation.message_count} messages</small>
-                </button>
-
-                <button
-                  type="button"
-                  className="drawer-conversation-delete"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    props.onDeleteConversation(conversation);
-                  }}
-                  title={`Delete "${conversation.title}"`}
-                  aria-label={`Delete conversation ${conversation.title}`}
-                >
-                  <svg
-                    viewBox="0 0 20 20"
-                    aria-hidden="true"
-                    focusable="false"
-                  >
-                    <path d="M6.5 6.5v8M10 6.5v8M13.5 6.5v8" />
-                    <path d="M4.5 4.5h11M8 4.5V3h4v1.5M5.5 4.5l.7 12h7.6l.7-12" />
-                  </svg>
-                </button>
-              </div>
+                <strong>{conversation.title}</strong>
+                <small>{conversation.message_count} messages</small>
+              </button>
             ))}
           </div>
         </aside>
