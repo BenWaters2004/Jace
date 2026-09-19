@@ -17,6 +17,7 @@ def ensure_tools_registered() -> None:
     from jace.tools.multimodal import register_multimodal_tools
     from jace.tools.automation import register_automation_tools
     from jace.tools.interactive import register_interactive_tools
+    from jace.tools.execution_bridge import register_execution_bridge_tools
     from jace.tools.agent_orchestration import register_agent_orchestration_tools
     from jace.tools.gmail import register_gmail_tools
 
@@ -37,6 +38,7 @@ def ensure_tools_registered() -> None:
     register_multimodal_tools()
     register_automation_tools()
     register_interactive_tools()
+    register_execution_bridge_tools()
     register_agent_orchestration_tools()
     register_gmail_tools()
     register_outlook_tools()

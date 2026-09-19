@@ -180,6 +180,26 @@ _PERMISSION_ORDER = {
     "deny": 2,
 }
 
+# JACE_4B3C_POLICY_FLOOR
+def _stricter_permission(
+    current: str,
+    minimum: str,
+) -> str:
+    current_value = _PERMISSION_ORDER.get(
+        current,
+        _PERMISSION_ORDER["ask"],
+    )
+    minimum_value = _PERMISSION_ORDER.get(
+        minimum,
+        _PERMISSION_ORDER["ask"],
+    )
+
+    return (
+        current
+        if current_value >= minimum_value
+        else minimum
+    )
+
 
 def _effective_permission(
     tool_permission: str,
@@ -339,6 +359,72 @@ async def _execute_tool_call(
             tool_permission,
             capability_binding,
         )
+        policy_decision = definition.resolve_policy(
+            arguments
+        )
+        permission = _stricter_permission(
+            permission,
+            policy_decision.minimum_permission,
+        )
+        # JACE_4B3D_SESSION_GRANT_USE
+        session_grant_key = definition.session_grant_key(
+            arguments
+        )
+        session_grant_used = False
+
+        if (
+            permission == "ask"
+            and session_grant_key
+            and approval_manager.is_session_granted(
+                conversation_id,
+                tool_name,
+                session_grant_key,
+                arguments,
+            )
+        ):
+            permission = "allow"
+            session_grant_used = True
+        effective_risk = (
+            policy_decision.risk
+            or definition.risk
+        )
+        policy_description = (
+            definition.description
+        )
+
+        if policy_decision.reason:
+            policy_description = (
+                policy_description
+                + " Policy: "
+                + policy_decision.reason
+            )
+
+        audit_arguments = dict(
+            arguments
+        )
+        audit_arguments[
+            "_jace_policy"
+        ] = {
+            "classification": (
+                policy_decision.classification
+            ),
+            "minimum_permission": (
+                policy_decision.minimum_permission
+            ),
+            "effective_permission": (
+                permission
+            ),
+            "risk": effective_risk,
+            "reason": (
+                policy_decision.reason
+            ),
+            "session_grant_available": bool(
+                session_grant_key
+            ),
+            "session_grant_used": (
+                session_grant_used
+            ),
+        }
         # JACE_STEP4B2_SHELL_ALWAYS_ASK
         # Shell execution is intentionally never persistently auto-approved.
         if tool_name == "run_shell_command" and permission != "deny":
@@ -348,7 +434,7 @@ async def _execute_tool_call(
             conversation_id=conversation_id,
             tool_name=tool_name,
             permission_mode=permission,
-            arguments=arguments,
+            arguments=audit_arguments,
             provider_id=(capability_binding or {}).get("provider_id"),
             connection_id=(capability_binding or {}).get("connection_id"),
             capability_id=(capability_binding or {}).get("capability_id"),
@@ -362,9 +448,13 @@ async def _execute_tool_call(
         "call_id": call_id,
         "tool_name": tool_name,
         "label": definition.label,
-        "description": definition.description,
-        "risk": definition.risk,
+        "description": policy_description,
+        "risk": effective_risk,
         "permission": permission,
+        "policy_classification": policy_decision.classification,
+        "policy_reason": policy_decision.reason,
+        "session_grant_available": bool(session_grant_key),
+        "session_grant_used": session_grant_used,
         "arguments": arguments,
         "provider_id": (capability_binding or {}).get("provider_id"),
         "connection_id": (capability_binding or {}).get("connection_id"),
@@ -405,14 +495,22 @@ async def _execute_tool_call(
             conversation_id=conversation_id,
             tool_name=tool_name,
             label=definition.label,
-            description=definition.description,
-            risk=definition.risk,
+            description=policy_description,
+            risk=effective_risk,
             arguments=arguments,
+            configured_permission=tool_permission,
             provider_id=(capability_binding or {}).get("provider_id"),
             connection_id=(capability_binding or {}).get("connection_id"),
             capability_id=(capability_binding or {}).get("capability_id"),
             account_hint=(capability_binding or {}).get("account_hint"),
         )
+        if session_grant_key:
+            # JACE_4B3D_EXACT_GRANT_EXECUTOR_V2
+            approval_manager.bind_session_grant(
+                approval.approval_id,
+                session_grant_key,
+                arguments,
+            )
 
         async with SessionLocal() as session:
             await update_tool_audit(
@@ -428,8 +526,11 @@ async def _execute_tool_call(
             "call_id": call_id,
             "tool_name": tool_name,
             "label": definition.label,
-            "description": definition.description,
-            "risk": definition.risk,
+            "description": policy_description,
+            "risk": effective_risk,
+            "policy_classification": policy_decision.classification,
+            "policy_reason": policy_decision.reason,
+            "session_grant_available": bool(session_grant_key),
             "arguments": arguments,
             "provider_id": (capability_binding or {}).get("provider_id"),
             "connection_id": (capability_binding or {}).get("connection_id"),

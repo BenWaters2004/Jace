@@ -176,6 +176,10 @@ async def pending_approvals():
                 connection_id=approval.connection_id,
                 capability_id=approval.capability_id,
                 account_hint=approval.account_hint,
+                session_grant_available=(
+                    approval_manager.grant_key(approval.approval_id)
+                    is not None
+                ),
             )
             for approval in approval_manager.list()
         ]
@@ -198,10 +202,44 @@ async def resolve_approval(
             detail="This tool approval is no longer pending.",
         )
 
+    # JACE_4B3D_ALLOW_SESSION_APPROVAL
     approved = request.decision in {
         "allow_once",
+        "allow_session",
         "allow_always",
     }
+
+    # JACE_4B3D_ALLOW_SESSION_EXACT_V2
+    if request.decision == "allow_session":
+        if not approval_manager.grant_session_from_approval(
+            approval_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This approval is not eligible for an exact "
+                    "conversation-scoped grant."
+                ),
+            )
+
+        # `Allow for chat` must never silently promote a saved tool permission.
+        # Restore the permission snapshot captured when this approval was
+        # created. For run_device_command this is normally `ask`.
+        if (
+            not approval.connection_id
+            and approval.configured_permission
+            in {
+                "allow",
+                "ask",
+                "deny",
+            }
+        ):
+            async with SessionLocal() as session:
+                await set_tool_permission(
+                    session,
+                    approval.tool_name,
+                    approval.configured_permission,
+                )
 
     if request.decision in {
         "allow_always",

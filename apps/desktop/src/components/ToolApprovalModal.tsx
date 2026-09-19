@@ -726,6 +726,12 @@ export function ToolApprovalModal({
                 )
                 : (
                   "Allow once applies only to this call. "
+                  + (
+                    approval.session_grant_available
+                      ? "Allow for chat remembers only this exact approved "
+                        + "execution shape for the current conversation. "
+                      : ""
+                  )
                   + "Always allow changes the saved permission for this tool."
                 )
           }
@@ -759,6 +765,16 @@ export function ToolApprovalModal({
         </button>
         )}
 
+        {/* JACE_4B3D_ALLOW_FOR_CHAT */}
+        {approval.session_grant_available && (
+          <button
+            className="secondary-button"
+            disabled={submitting}
+            onClick={() => void decide("allow_session")}
+          >
+            Allow for chat
+          </button>
+        )}
         <button
           className="primary-button"
           disabled={submitting}

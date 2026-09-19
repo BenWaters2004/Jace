@@ -64,6 +64,18 @@ ALL_TOOL_NAMES = {
     "calendar_check_conflicts",
     "calendar_find_open_slots",
     "calendar_find_event",
+    "list_execution_devices",
+    "inspect_device_command",
+    "run_device_command",
+    "get_device_process",
+    "read_device_process_output",
+    "stop_device_process",
+    "open_device_terminal",
+    "read_device_terminal_output",
+    "send_device_terminal_input",
+    "resize_device_terminal",
+    "close_device_terminal",
+    "list_execution_scopes",
 }
 
 
@@ -675,5 +687,230 @@ def route_tool_names(message: str) -> set[str]:
 
     if re.search(r"\b(?:stop|cancel|abort|emergency stop)\b.{0,25}\b(?:control|mouse|computer|desktop|browser)\b", lowered):
         selected.update({"control_status", "stop_control_session"})
+
+    # JACE_4B3C_EXECUTION_ROUTING
+    execution_shell_intent = bool(
+        re.search(
+            r"\b(?:powershell|cmd(?:\.exe)?|command prompt|bash|wsl|"
+            r"terminal|shell|device agent|remote command)\b",
+            lowered,
+        )
+    )
+    execution_command_intent = bool(
+        re.search(
+            r"\b(?:run|execute|launch|start|invoke)\b.{0,40}"
+            r"\b(?:command|script|powershell|cmd|bash|wsl|shell|terminal)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:powershell|cmd|bash|wsl)\s+(?:command|script)\b",
+            lowered,
+        )
+    )
+
+    if execution_shell_intent or execution_command_intent:
+        selected.add("list_execution_devices")
+
+    if execution_command_intent:
+        selected.update(
+            {
+                "inspect_device_command",
+                "run_device_command",
+                "get_device_process",
+                "read_device_process_output",
+            }
+        )
+
+    if re.search(
+        r"\b(?:process|job)\b.{0,35}"
+        r"\b(?:status|output|stdout|stderr|stop|terminate|kill|cancel)\b"
+        r"|\b(?:stop|terminate|kill|cancel)\b.{0,35}\b(?:process|job)\b",
+        lowered,
+    ):
+        selected.update(
+            {
+                "get_device_process",
+                "read_device_process_output",
+                "stop_device_process",
+            }
+        )
+
+    if re.search(
+        r"\b(?:interactive terminal|terminal session|persistent shell|"
+        r"open (?:a )?(?:powershell|cmd|bash|wsl) terminal|"
+        r"send .* to (?:the )?terminal|terminal output|terminal scrollback|"
+        r"resize (?:the )?terminal|close (?:the )?terminal)\b",
+        lowered,
+    ):
+        selected.update(
+            {
+                "list_execution_devices",
+                "open_device_terminal",
+                "read_device_terminal_output",
+                "send_device_terminal_input",
+                "resize_device_terminal",
+                "close_device_terminal",
+            }
+        )
+
+    # JACE_4B3C_TERMINAL_ROUTING_NATURAL_LANGUAGE_FIX
+    terminal_open_intent = bool(
+        re.search(
+            r"\b(?:open|start|launch|create)\b.{0,45}\b"
+            r"(?:(?:an?\s+)?interactive\s+|persistent\s+)?"
+            r"(?:(?:powershell|cmd|command prompt|bash|wsl)\s+)?"
+            r"(?:terminal|shell)(?:\s+session)?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:interactive terminal|interactive shell|"
+            r"persistent terminal|persistent shell|"
+            r"terminal session|shell session)\b",
+            lowered,
+        )
+    )
+
+    terminal_existing_session_intent = bool(
+        re.search(
+            r"\b(?:send|type|enter|write)\b.{0,60}\b(?:terminal|shell)\b"
+            r"|\b(?:terminal|shell)\b.{0,60}\b"
+            r"(?:input|output|scrollback|resize|close|stop)\b",
+            lowered,
+        )
+    )
+
+    if terminal_open_intent:
+        selected.update(
+            {
+                "list_execution_devices",
+                "open_device_terminal",
+                "read_device_terminal_output",
+                "send_device_terminal_input",
+                "resize_device_terminal",
+                "close_device_terminal",
+            }
+        )
+
+    if terminal_existing_session_intent:
+        selected.update(
+            {
+                "read_device_terminal_output",
+                "send_device_terminal_input",
+                "resize_device_terminal",
+                "close_device_terminal",
+            }
+        )
+
+    # JACE_4B3D_EXECUTION_SCOPE_ROUTING
+    execution_scope_tools = {
+        "inspect_device_command",
+        "run_device_command",
+        "open_device_terminal",
+    }
+
+    if selected & execution_scope_tools:
+        selected.add(
+            "list_execution_scopes"
+        )
+
+    # JACE_4B3D_SCOPED_EXECUTION_ROUTING_PRIORITY
+    #
+    # 4B.3D makes ExecutionScope the model-facing authority for arbitrary shell
+    # execution. Legacy direct-shell tools must not be offered alongside scoped
+    # execution because the model could otherwise bypass the device/workspace
+    # scope simply by choosing the older tool.
+    explicit_execution_scope_intent = bool(
+        re.search(
+            r"\bexecution\s+scopes?\b",
+            lowered,
+        )
+    )
+
+    arbitrary_shell_command_intent = bool(
+        re.search(
+            r"\b(?:run|execute|invoke|launch|start)\b.{0,70}\b"
+            r"(?:powershell|pwsh|cmd(?:\.exe)?|command prompt|bash|wsl|shell)"
+            r"(?:\s+command|\s+script)?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:powershell|pwsh|cmd(?:\.exe)?|command prompt|bash|wsl)\b"
+            r".{0,70}\b(?:command|script)\b",
+            lowered,
+        )
+    )
+
+    scoped_terminal_intent = bool(
+        re.search(
+            r"\b(?:open|start|launch|create)\b.{0,60}\b"
+            r"(?:interactive\s+|persistent\s+)?"
+            r"(?:powershell|pwsh|cmd(?:\.exe)?|command prompt|bash|wsl)?\s*"
+            r"(?:terminal|shell)(?:\s+session)?\b",
+            lowered,
+        )
+    )
+
+    if explicit_execution_scope_intent:
+        selected.add(
+            "list_execution_scopes"
+        )
+
+        # An explicitly named execution scope is not a ComputerWorkspace lookup.
+        # Avoid giving the model two competing discovery/execution systems.
+        selected.discard(
+            "list_computer_workspaces"
+        )
+        selected.discard(
+            "run_workspace_command"
+        )
+        selected.discard(
+            "run_shell_command"
+        )
+
+        if re.search(
+            r"\b(?:run|execute|invoke)\b",
+            lowered,
+        ):
+            selected.update(
+                {
+                    "inspect_device_command",
+                    "run_device_command",
+                }
+            )
+
+        if scoped_terminal_intent:
+            selected.update(
+                {
+                    "open_device_terminal",
+                    "read_device_terminal_output",
+                    "send_device_terminal_input",
+                    "resize_device_terminal",
+                    "close_device_terminal",
+                }
+            )
+
+    if arbitrary_shell_command_intent:
+        # Arbitrary shell execution is now handled by the 4B.3D scoped bridge.
+        # The legacy direct shell path remains registered for compatibility but
+        # is deliberately no longer model-routable for these requests.
+        selected.discard(
+            "run_shell_command"
+        )
+
+        selected.update(
+            {
+                "list_execution_scopes",
+                "inspect_device_command",
+                "run_device_command",
+            }
+        )
+
+    if scoped_terminal_intent:
+        selected.discard(
+            "run_shell_command"
+        )
+        selected.add(
+            "list_execution_scopes"
+        )
 
     return selected

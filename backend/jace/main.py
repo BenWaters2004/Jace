@@ -27,6 +27,7 @@ from jace.api.runtime import router as runtime_router
 from jace.api.runtime_stream import router as runtime_stream_router
 from jace.api.processes import router as processes_router
 from jace.api.terminals import router as terminals_router
+from jace.api.execution_scopes import router as execution_scopes_router
 from jace.api.settings import router as settings_router
 from jace.api.security import router as security_router
 from jace.api.system import router as system_router
@@ -165,6 +166,7 @@ app.include_router(runtime_router)
 app.include_router(runtime_stream_router)
 app.include_router(processes_router)
 app.include_router(terminals_router)
+app.include_router(execution_scopes_router)
 app.include_router(computer_router)
 app.include_router(control_router)
 app.include_router(tools_router)

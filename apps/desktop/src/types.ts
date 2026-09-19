@@ -8,7 +8,7 @@ export type ToolPermissionMode = "allow" | "ask" | "deny";
 export type CapabilityPermissionMode = "allow" | "ask" | "deny";
 export type ToolRisk = "read" | "write" | "execute";
 export type ToolActivityStatus = "requested" | "awaiting_approval" | "completed" | "denied" | "failed";
-export type ToolApprovalDecision = "allow_once" | "allow_always" | "deny_once" | "deny_always";
+export type ToolApprovalDecision = "allow_once" | "allow_session" | "allow_always" | "deny_once" | "deny_always";
 
 export interface GenerationStats {
   timeToFirstTokenMs: number | null;
@@ -341,6 +341,7 @@ export interface StreamApprovalRequiredEvent {
   connection_id?: string | null;
   capability_id?: string | null;
   account_hint?: string | null;
+  session_grant_available?: boolean;
 }
 
 export interface StreamToolResultEvent {
@@ -551,6 +552,7 @@ export interface PendingToolApproval {
   connection_id?: string | null;
   capability_id?: string | null;
   account_hint?: string | null;
+  session_grant_available?: boolean;
 }
 
 export interface PendingToolApprovalsResponse {

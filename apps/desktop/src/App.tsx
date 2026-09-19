@@ -680,6 +680,8 @@ export default function App(
       connection_id: event.connection_id,
       capability_id: event.capability_id,
       account_hint: event.account_hint,
+      // JACE_4B3D_APPROVAL_STREAM_GRANT_FLAG
+      session_grant_available: event.session_grant_available,
     });
 
     setToolActivity((current) => current.map((item) =>

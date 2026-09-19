@@ -109,6 +109,7 @@ class ProcessRuntimeService:
         task_id: str | None = None,
         agent_id: str | None = None,
         conversation_id: str | None = None,
+        scope_root: str | None = None,
         wait_for_start: bool = True,
     ) -> ProcessRun:
         shell = shell.strip().lower()
@@ -256,6 +257,8 @@ class ProcessRuntimeService:
                 "cwd": row.cwd,
                 "mode": mode,
                 "timeout_seconds": timeout_seconds,
+                # JACE_4B3D_PROCESS_SCOPE_ROOT
+                "scope_root": scope_root,
             },
         )
 

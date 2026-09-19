@@ -37,6 +37,28 @@ class ToolExecutionResult:
 ToolHandler = Callable[[BaseModel, ToolContext], Awaitable[ToolExecutionResult]]
 
 
+# JACE_4B3C_DYNAMIC_TOOL_POLICY
+@dataclass(frozen=True)
+class ToolPolicyDecision:
+    minimum_permission: ToolPermissionMode = "allow"
+    classification: str = "standard"
+    reason: str | None = None
+    risk: ToolRisk | None = None
+
+
+ToolPolicyResolver = Callable[
+    [dict[str, Any]],
+    ToolPolicyDecision,
+]
+
+
+# JACE_4B3D_SESSION_GRANT_RESOLVER
+ToolSessionGrantResolver = Callable[
+    [dict[str, Any]],
+    str | None,
+]
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     name: str
@@ -49,6 +71,66 @@ class ToolDefinition:
     handler: ToolHandler
     provider_id: str | None = None
     capability_id: str | None = None
+    policy_resolver: ToolPolicyResolver | None = None
+    session_grant_resolver: ToolSessionGrantResolver | None = None
+
+    def resolve_policy(
+        self,
+        arguments: dict[str, Any],
+    ) -> ToolPolicyDecision:
+        if self.policy_resolver is None:
+            return ToolPolicyDecision(
+                minimum_permission="allow",
+                classification="standard",
+                risk=self.risk,
+            )
+
+        try:
+            decision = self.policy_resolver(arguments)
+        except Exception as exc:
+            return ToolPolicyDecision(
+                minimum_permission="ask",
+                classification="policy_error",
+                risk=self.risk,
+                reason=(
+                    "Dynamic tool policy evaluation failed closed: "
+                    f"{exc}"
+                ),
+            )
+
+        if decision.minimum_permission not in {"allow", "ask", "deny"}:
+            return ToolPolicyDecision(
+                minimum_permission="ask",
+                classification="policy_error",
+                risk=self.risk,
+                reason=(
+                    "Dynamic tool policy returned an invalid permission "
+                    "and was escalated to ask."
+                ),
+            )
+
+        return decision
+
+    def session_grant_key(
+        self,
+        arguments: dict[str, Any],
+    ) -> str | None:
+        if self.session_grant_resolver is None:
+            return None
+
+        try:
+            value = self.session_grant_resolver(
+                arguments
+            )
+        except Exception:
+            return None
+
+        value = str(
+            value
+            or ""
+        ).strip()
+
+        return value or None
 
     def ollama_schema(self) -> dict[str, Any]:
         schema = self.input_model.model_json_schema()

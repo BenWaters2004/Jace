@@ -338,7 +338,7 @@ class ToolAuditListResponse(BaseModel):
 
 
 class ToolApprovalDecisionRequest(BaseModel):
-    decision: Literal["allow_once", "allow_always", "deny_once", "deny_always"]
+    decision: Literal["allow_once", "allow_session", "allow_always", "deny_once", "deny_always"]
 
 
 class ToolApprovalDecisionResponse(BaseModel):
@@ -368,6 +368,7 @@ class PendingToolApprovalResponse(BaseModel):
     connection_id: str | None = None
     capability_id: str | None = None
     account_hint: str | None = None
+    session_grant_available: bool = False
 
 
 class PendingToolApprovalsResponse(BaseModel):

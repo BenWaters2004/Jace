@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -74,6 +75,36 @@ def _audit_arguments(
     } and isinstance(safe.get("body"), str):
         body = safe["body"]
         safe["body"] = f"<redacted email body: {len(body)} characters>"
+
+    # JACE_4B3C_EXECUTION_AUDIT_REDACTION
+    if (
+        tool_name in {
+            "inspect_device_command",
+            "run_device_command",
+        }
+        and isinstance(safe.get("command"), str)
+    ):
+        command = safe["command"]
+        encoded = command.encode(
+            "utf-8",
+            errors="replace",
+        )
+        safe["command"] = {
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "characters": len(command),
+            "bytes": len(encoded),
+        }
+
+    if (
+        tool_name == "send_device_terminal_input"
+        and isinstance(safe.get("data"), str)
+    ):
+        terminal_input = safe["data"]
+        safe["data"] = (
+            "<redacted terminal input: "
+            f"{len(terminal_input)} characters, "
+            f"{len(terminal_input.encode('utf-8', errors='replace'))} bytes>"
+        )
 
     return safe
 

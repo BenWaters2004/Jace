@@ -975,3 +975,77 @@ class TerminalOutputChunk(Base):
         default=utc_now,
         index=True,
     )
+
+# JACE_4B3D_EXECUTION_SCOPE_MODEL
+class ExecutionScope(Base):
+    __tablename__ = "execution_scopes"
+    __table_args__ = (
+        UniqueConstraint(
+            "device_id",
+            "workspace_id",
+            "device_root_path",
+            name="uq_execution_scope_mount",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=new_id,
+    )
+    label: Mapped[str] = mapped_column(
+        String(160),
+        nullable=False,
+        index=True,
+    )
+    device_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "devices.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "computer_workspaces.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+    device_root_path: Mapped[str] = mapped_column(
+        String(1600),
+        nullable=False,
+    )
+    allowed_shells_json: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default='["powershell"]',
+    )
+    process_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    terminal_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )

@@ -16,6 +16,7 @@ from typing import Any
 import psutil
 
 from jace_device_agent.config import AgentConfig
+from jace_device_agent.scope_security import resolve_scoped_cwd
 
 
 _FINAL = {
@@ -252,6 +253,15 @@ class ProcessRuntimeManager:
             and str(cwd_raw).strip()
             else None
         )
+        scope_root_raw = message.get(
+            "scope_root"
+        )
+        scope_root = (
+            str(scope_root_raw).strip()
+            if scope_root_raw is not None
+            and str(scope_root_raw).strip()
+            else None
+        )
 
         timeout_raw = message.get(
             "timeout_seconds"
@@ -273,23 +283,11 @@ class ProcessRuntimeManager:
                 command,
             )
 
-            if cwd is not None:
-                path = Path(
-                    os.path.expandvars(
-                        os.path.expanduser(
-                            cwd
-                        )
-                    )
-                ).resolve()
-
-                if not path.is_dir():
-                    raise ValueError(
-                        f"Working directory does not exist: {path}"
-                    )
-
-                cwd = str(
-                    path
-                )
+            # JACE_4B3D_DEVICE_PROCESS_SCOPE_ENFORCEMENT
+            cwd = resolve_scoped_cwd(
+                cwd,
+                scope_root,
+            )
 
             kwargs: dict[
                 str,

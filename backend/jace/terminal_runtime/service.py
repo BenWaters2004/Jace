@@ -63,6 +63,7 @@ class TerminalRuntimeService:
         task_id: str | None = None,
         agent_id: str | None = None,
         conversation_id: str | None = None,
+        scope_root: str | None = None,
         wait_for_start: bool = True,
     ) -> TerminalSession:
         if not settings.terminal_runtime_enabled:
@@ -192,6 +193,8 @@ class TerminalRuntimeService:
                 "cwd": row.cwd,
                 "cols": row.cols,
                 "rows": row.rows,
+                # JACE_4B3D_TERMINAL_SCOPE_ROOT
+                "scope_root": scope_root,
             },
         )
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from jace_device_agent.config import AgentConfig
+from jace_device_agent.scope_security import resolve_scoped_cwd
 
 
 _FINAL = {
@@ -631,6 +632,15 @@ class TerminalRuntimeManager:
             and str(cwd_raw).strip()
             else None
         )
+        scope_root_raw = message.get(
+            "scope_root"
+        )
+        scope_root = (
+            str(scope_root_raw).strip()
+            if scope_root_raw is not None
+            and str(scope_root_raw).strip()
+            else None
+        )
 
         rows = max(
             5,
@@ -658,23 +668,11 @@ class TerminalRuntimeManager:
         )
 
         try:
-            if cwd is not None:
-                expanded = Path(
-                    os.path.expandvars(
-                        os.path.expanduser(
-                            cwd
-                        )
-                    )
-                ).resolve()
-
-                if not expanded.is_dir():
-                    raise ValueError(
-                        f"Working directory does not exist: {expanded}"
-                    )
-
-                cwd = str(
-                    expanded
-                )
+            # JACE_4B3D_DEVICE_TERMINAL_SCOPE_ENFORCEMENT
+            cwd = resolve_scoped_cwd(
+                cwd,
+                scope_root,
+            )
 
             if os.name == "nt":
                 backend = (
