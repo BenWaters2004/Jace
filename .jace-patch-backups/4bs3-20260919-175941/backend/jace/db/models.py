@@ -413,31 +413,3 @@ class ControlActionAudit(Base):
     screenshot_attachment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-# JACE_4BS3_AUTH_MODELS
-class AuthUser(Base):
-    __tablename__ = "auth_users"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
-    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
-    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class AuthSession(Base):
-    __tablename__ = "auth_sessions"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False, index=True)
-    access_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    refresh_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    client_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
-    client_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    access_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    refresh_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

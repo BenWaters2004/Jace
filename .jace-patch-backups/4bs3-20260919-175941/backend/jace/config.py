@@ -34,14 +34,6 @@ class Settings(BaseSettings):
     # Local mode additionally permits localhost/Tauri through the local regex.
     cors_allowed_origins: str = ""
 
-    # JACE_4BS3_AUTH_CONFIG
-    auth_enabled: bool = True
-    auth_access_token_minutes: int = 30
-    auth_refresh_token_days: int = 30
-    auth_password_min_length: int = 12
-    auth_bootstrap_token: str = ""
-
-
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:4b"

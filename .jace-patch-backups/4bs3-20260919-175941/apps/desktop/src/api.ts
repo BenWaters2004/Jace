@@ -1,16 +1,4 @@
 import { API_BASE_URL } from "./constants";
-import {
-  clearAuthSession,
-  getAuthAccessToken,
-  getAuthRefreshToken,
-  getOrCreateClientId,
-  setAuthSession,
-  type AuthBootstrapRequest,
-  type AuthLoginRequest,
-  type AuthStatusResponse,
-  type AuthTokenResponse,
-  type AuthUser,
-} from "./auth";
 import type {
   CapabilityPermissionMode,
   OAuthSession,
@@ -107,74 +95,6 @@ async function getErrorMessage(response: Response): Promise<string> {
   return `${response.status} ${response.statusText}`;
 }
 
-// JACE_4BS3_DESKTOP_AUTH
-let authRefreshPromise: Promise<boolean> | null = null;
-
-function authenticatedHeaders(input?: HeadersInit): Headers {
-  const headers = new Headers(input);
-  const token = getAuthAccessToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  headers.set("X-Jace-Client-ID", getOrCreateClientId());
-  return headers;
-}
-
-async function refreshAuthSession(): Promise<boolean> {
-  const refreshToken = getAuthRefreshToken();
-  if (!refreshToken) return false;
-
-  if (!authRefreshPromise) {
-    authRefreshPromise = (async () => {
-      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Jace-Client-ID": getOrCreateClientId(),
-        },
-        body: JSON.stringify({
-          refresh_token: refreshToken,
-          client_id: getOrCreateClientId(),
-        }),
-      });
-
-      if (!response.ok) {
-        clearAuthSession();
-        return false;
-      }
-
-      const next = (await response.json()) as AuthTokenResponse;
-      setAuthSession(next);
-      return true;
-    })().finally(() => {
-      authRefreshPromise = null;
-    });
-  }
-
-  return authRefreshPromise;
-}
-
-async function authenticatedFetch(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-  retryAuth = true,
-): Promise<Response> {
-  let response = await fetch(input, {
-    ...init,
-    headers: authenticatedHeaders(init?.headers),
-  });
-
-  if (response.status === 401 && retryAuth && getAuthRefreshToken()) {
-    const refreshed = await refreshAuthSession();
-    if (refreshed) {
-      response = await fetch(input, {
-        ...init,
-        headers: authenticatedHeaders(init?.headers),
-      });
-    }
-  }
-
-  return response;
-}
-
 async function request<T>(
   path: string,
   options?: RequestInit,
@@ -184,7 +104,7 @@ async function request<T>(
 
   console.debug("[Jace API]", method, url);
 
-  const response = await authenticatedFetch(url, {
+  const response = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -205,46 +125,6 @@ async function request<T>(
 
 export const getHealth = () => request<HealthResponse>("/health");
 
-// Phase 4B.S3 authentication API.
-export const getAuthStatus = () =>
-  request<AuthStatusResponse>("/auth/status");
-
-export async function bootstrapAuth(
-  payload: AuthBootstrapRequest,
-  bootstrapToken: string,
-): Promise<AuthTokenResponse> {
-  const session = await request<AuthTokenResponse>("/auth/bootstrap", {
-    method: "POST",
-    headers: { "X-Jace-Bootstrap-Token": bootstrapToken },
-    body: JSON.stringify(payload),
-  });
-  setAuthSession(session);
-  return session;
-}
-
-export async function loginAuth(
-  payload: AuthLoginRequest,
-): Promise<AuthTokenResponse> {
-  const session = await request<AuthTokenResponse>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  setAuthSession(session);
-  return session;
-}
-
-export const getCurrentAuthUser = () =>
-  request<AuthUser>("/auth/me");
-
-export async function logoutAuth(): Promise<void> {
-  try {
-    await request<{ success: boolean }>("/auth/logout", { method: "POST" });
-  } finally {
-    clearAuthSession();
-  }
-}
-
-
 export const getAttachmentStatus = () => request<AttachmentStatus>("/attachments/status");
 export const getAttachment = (id: string) => request<AttachmentRecord>(`/attachments/${id}`);
 export const attachmentContentUrl = (id: string) => `${API_BASE_URL}/attachments/${id}/content`;
@@ -252,7 +132,7 @@ export const attachmentContentUrl = (id: string) => `${API_BASE_URL}/attachments
 export async function uploadAttachment(conversationId: string, file: File): Promise<AttachmentRecord> {
   const form = new FormData();
   form.append("file", file, file.name);
-  const response = await authenticatedFetch(`${API_BASE_URL}/attachments?conversation_id=${encodeURIComponent(conversationId)}`, {
+  const response = await fetch(`${API_BASE_URL}/attachments?conversation_id=${encodeURIComponent(conversationId)}`, {
     method: "POST",
     body: form,
   });
@@ -280,7 +160,7 @@ export async function transcribeVoiceRecording(blob: Blob): Promise<VoiceTranscr
   const form = new FormData();
   const extension = blob.type.includes("ogg") ? "ogg" : blob.type.includes("wav") ? "wav" : "webm";
   form.append("file", blob, `jace-voice.${extension}`);
-  const response = await authenticatedFetch(`${API_BASE_URL}/voice/transcribe`, { method: "POST", body: form });
+  const response = await fetch(`${API_BASE_URL}/voice/transcribe`, { method: "POST", body: form });
   if (!response.ok) throw new Error(await getErrorMessage(response));
   return response.json() as Promise<VoiceTranscriptionResponse>;
 }
@@ -291,7 +171,7 @@ export async function synthesizeVoice(payload: {
   speed?: number;
   language?: string;
 }): Promise<ArrayBuffer> {
-  const response = await authenticatedFetch(`${API_BASE_URL}/voice/synthesize`, {
+  const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -608,7 +488,7 @@ export async function sendChatStream(
   callbacks: StreamCallbacks,
   signal: AbortSignal,
 ): Promise<void> {
-  const response = await authenticatedFetch(`${API_BASE_URL}/chat/stream`, {
+  const response = await fetch(`${API_BASE_URL}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

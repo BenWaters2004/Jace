@@ -8,9 +8,7 @@ from jace.agents import start_agent_manager, stop_agent_manager
 from jace.ai.client import close_ollama_client
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError, warm_model
 from jace.automations.scheduler import start_automation_scheduler, stop_automation_scheduler
-from jace.auth.middleware import AuthMiddleware
 from jace.api.agents import router as agents_router
-from jace.api.auth import router as auth_router
 from jace.api.attachments import router as attachments_router
 from jace.api.automations import router as automations_router
 from jace.api.calendar import router as calendar_router
@@ -108,9 +106,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# JACE_4BS3_AUTH_MIDDLEWARE
-app.add_middleware(AuthMiddleware)
-
 # JACE_4BS2_MODE_AWARE_CORS
 #
 # Local mode keeps localhost/Tauri development working.
@@ -140,7 +135,6 @@ app.add_middleware(
 )
 
 app.include_router(system_router)
-app.include_router(auth_router)
 app.include_router(voice_router)
 app.include_router(attachments_router)
 app.include_router(automations_router)
