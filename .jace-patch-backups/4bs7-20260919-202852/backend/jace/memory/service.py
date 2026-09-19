@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jace.model_gateway import embed_text, resolved_model_name
+from jace.ai.embeddings import embed_text
 from jace.config import settings
 from jace.db.models import Memory
 
@@ -134,7 +134,7 @@ async def create_memory(
         source_type=source_type,
         source_conversation_id=source_conversation_id,
         source_message_id=source_message_id,
-        embedding_model=resolved_model_name("embedding"),
+        embedding_model=settings.embedding_model,
         embedding_json=serialize_embedding(embedding),
         is_pinned=is_pinned,
         is_active=True,
@@ -184,7 +184,7 @@ async def update_memory(
 
     if needs_embedding:
         embedding = await embed_text(memory_embedding_text(memory.memory_type, memory.subject, memory.content))
-        memory.embedding_model = resolved_model_name("embedding")
+        memory.embedding_model = settings.embedding_model
         memory.embedding_json = serialize_embedding(embedding)
 
     memory.updated_at = utc_now()

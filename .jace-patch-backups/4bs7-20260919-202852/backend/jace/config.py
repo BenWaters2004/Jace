@@ -57,19 +57,6 @@ class Settings(BaseSettings):
     embedding_model: str = "qwen3-embedding:0.6b"
     memory_extraction_model: str = "qwen3.5:4b"
 
-    # JACE_4BS7_MODEL_GATEWAY_CONFIG
-    model_gateway_default_provider: str = "ollama"
-    model_route_conversation_fast: str = ""
-    model_route_reasoning_high: str = ""
-    model_route_coding_high: str = ""
-    model_route_vision: str = ""
-    model_route_research_high: str = ""
-    model_route_local_private: str = ""
-    model_route_memory_extract: str = ""
-    model_route_embedding: str = ""
-    model_route_reranking: str = ""
-
-
     request_timeout_seconds: float = 180.0
 
     # Performance: keep the main chat model resident for the lifetime of a

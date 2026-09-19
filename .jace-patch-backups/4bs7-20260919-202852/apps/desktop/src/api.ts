@@ -1,10 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  ModelGatewayResolveRequest,
-  ModelGatewayResolvedRoute,
-  ModelGatewayStatus,
-} from "./modelGatewayTypes";
-import type {
   DeviceCapabilityCatalogResponse,
   DeviceCapabilityExecuteRequest,
   DeviceCapabilityRequestRecord,
@@ -221,19 +216,6 @@ async function request<T>(
 }
 
 export const getHealth = () => request<HealthResponse>("/health");
-
-// JACE_4BS7_MODEL_GATEWAY_API
-export const getModelGatewayStatus = () =>
-  request<ModelGatewayStatus>("/model-gateway/status");
-
-export const resolveModelGatewayRoute = (
-  payload: ModelGatewayResolveRequest,
-) =>
-  request<ModelGatewayResolvedRoute>("/model-gateway/resolve", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
 
 // JACE_4BS6_DEVICE_CAPABILITY_API
 export const getDeviceCapabilityCatalog = () =>

@@ -4,8 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from jace.ai.engine import OllamaRequestError
-from jace.model_gateway import stream_chat
+from jace.ai.engine import OllamaRequestError, stream_chat
 from jace.config import settings
 from jace.capabilities.security import validate_external_tool_binding
 from jace.database import SessionLocal

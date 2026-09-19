@@ -27,7 +27,6 @@ from jace.api.runtime import router as runtime_router
 from jace.api.settings import router as settings_router
 from jace.api.security import router as security_router
 from jace.api.system import router as system_router
-from jace.api.model_gateway import router as model_gateway_router
 from jace.api.tools import router as tools_router
 from jace.api.voice import router as voice_router
 from jace.calendar.service import ensure_default_jace_calendar
@@ -142,7 +141,6 @@ app.add_middleware(
 )
 
 app.include_router(system_router)
-app.include_router(model_gateway_router)
 app.include_router(auth_router)
 app.include_router(voice_router)
 app.include_router(attachments_router)

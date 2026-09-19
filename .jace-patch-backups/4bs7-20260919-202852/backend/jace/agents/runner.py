@@ -16,7 +16,7 @@ from jace.agents.service import (
     task_metadata,
     update_task_state,
 )
-from jace.model_gateway import stream_chat
+from jace.ai.engine import stream_chat
 from jace.config import settings
 from jace.computer.service import list_workspaces
 from jace.database import SessionLocal

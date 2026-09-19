@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jace.model_gateway import structured_chat
+from jace.ai.engine import structured_chat
 from jace.ai.prompts import (
     MEMORY_EXTRACTION_SYSTEM_PROMPT,
     MEMORY_RECONCILIATION_SYSTEM_PROMPT,
@@ -175,7 +175,7 @@ ASSISTANT RESPONSE FOR CONTEXT ONLY:
 Only information established by the USER may become memory."""
 
     result = await structured_chat(
-        capability="memory.extract",
+        model=settings.memory_extraction_model,
         messages=[{"role": "user", "content": prompt}],
         system_prompt=MEMORY_EXTRACTION_SYSTEM_PROMPT,
         response_model=MemoryExtractionResult,
@@ -259,7 +259,7 @@ COMPLETED AGENT RESULT:
 Only retain durable, project-specific or environment-specific findings that the completed result actually supports."""
 
     result = await structured_chat(
-        capability="memory.extract",
+        model=settings.memory_extraction_model,
         messages=[{"role": "user", "content": prompt}],
         system_prompt=AGENT_MEMORY_EXTRACTION_SYSTEM_PROMPT,
         response_model=MemoryExtractionResult,
@@ -382,7 +382,7 @@ async def reconcile_candidate(
         )
 
     reconciliation = await structured_chat(
-        capability="memory.extract",
+        model=settings.memory_extraction_model,
         messages=[
             {
                 "role": "user",
