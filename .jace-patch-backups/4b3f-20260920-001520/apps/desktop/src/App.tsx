@@ -65,7 +65,7 @@ import {
 import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
 import { CalendarWorkspace } from "./components/CalendarWorkspace";
-import { ComputerRuntimeHub } from "./components/ComputerRuntimeHub"; // JACE_4B3F_COMPUTER_RUNTIME_HUB
+import { ComputerHub } from "./components/ComputerHub";
 import { SettingsHub, type SettingsSection } from "./components/SettingsHub";
 import { MemoryView } from "./components/MemoryView";
 import { SettingsOverlay } from "./components/SettingsOverlay";
@@ -1565,7 +1565,7 @@ export default function App(
       )}
 
       {screen === "computer" && (
-        <ComputerRuntimeHub
+        <ComputerHub
           status={computerStatus}
           workspaces={computerWorkspaces}
           onRefresh={() => void refreshComputer()}

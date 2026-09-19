@@ -1,0 +1,380 @@
+/* JACE_4B3F_RUNTIME_SURFACE */
+
+.computer-runtime-hub,
+.computer-runtime-body,
+.runtime-surface {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.computer-runtime-hub {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.computer-runtime-tabs,
+.runtime-mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.computer-runtime-tabs {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+.computer-runtime-tabs button,
+.runtime-mode-tabs button {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted, #98a2b3);
+}
+
+.computer-runtime-tabs button.active,
+.runtime-mode-tabs button.active {
+  border-color: var(--border-color, rgba(255, 255, 255, 0.14));
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary, #f3f4f6);
+}
+
+.runtime-surface {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.runtime-surface-header,
+.runtime-scope-bar,
+.runtime-panel-head,
+.runtime-process-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.runtime-surface-header h2 {
+  margin: 2px 0 4px;
+}
+
+.runtime-surface-header p {
+  margin: 0;
+  max-width: 780px;
+  color: var(--text-muted, #98a2b3);
+}
+
+.runtime-scope-bar {
+  align-items: stretch;
+  padding: 12px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.runtime-scope-bar > label,
+.runtime-create-card label {
+  display: grid;
+  gap: 5px;
+}
+
+.runtime-scope-bar > label {
+  min-width: min(360px, 45%);
+}
+
+.runtime-scope-bar label > span,
+.runtime-create-card label > span {
+  color: var(--text-muted, #98a2b3);
+  font-size: 11px;
+}
+
+.runtime-scope-context {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.runtime-scope-context code {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-scope-context span,
+.runtime-scope-context code {
+  color: var(--text-muted, #98a2b3);
+  font-size: 11px;
+}
+
+.runtime-surface-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 9px;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.runtime-surface-error button {
+  flex: 0 0 auto;
+}
+
+.runtime-surface-empty,
+.runtime-list-empty {
+  color: var(--text-muted, #98a2b3);
+}
+
+.runtime-surface-empty {
+  padding: 24px;
+  border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  text-align: center;
+}
+
+.runtime-mode-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.runtime-mode-tabs button span {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 10px;
+}
+
+.runtime-terminal-layout,
+.runtime-process-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.runtime-runtime-list {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.runtime-create-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.runtime-create-card input,
+.runtime-create-card select,
+.runtime-create-card textarea,
+.runtime-scope-bar select {
+  width: 100%;
+}
+
+.runtime-create-card textarea {
+  resize: vertical;
+  min-height: 78px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.runtime-create-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.runtime-direct-action-note {
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: rgba(234, 179, 8, 0.07);
+  color: var(--text-muted, #98a2b3);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.runtime-list-scroll {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding-right: 3px;
+}
+
+.runtime-list-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  text-align: left;
+}
+
+.runtime-list-item:hover,
+.runtime-list-item.active {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.runtime-list-item.active {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.runtime-list-item strong,
+.runtime-list-item span,
+.runtime-list-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-list-item span,
+.runtime-list-item small {
+  color: var(--text-muted, #98a2b3);
+}
+
+.runtime-terminal-panel,
+.runtime-process-panel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 11px;
+  background: #090d12;
+}
+
+.runtime-panel-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.runtime-panel-head > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.runtime-panel-head strong,
+.runtime-panel-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-panel-head span {
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+.runtime-panel-actions {
+  display: flex;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.runtime-terminal-host {
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.runtime-terminal-host .xterm {
+  height: 100%;
+}
+
+.runtime-terminal-host .xterm-viewport {
+  scrollbar-width: thin;
+}
+
+.runtime-terminal-overlay {
+  position: absolute;
+  inset: 52px 0 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: #98a2b3;
+  background: #090d12;
+}
+
+.runtime-truncation-warning {
+  padding: 6px 10px;
+  background: rgba(234, 179, 8, 0.1);
+  color: #fde68a;
+  font-size: 10px;
+}
+
+.runtime-process-output {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  color: #e5e7eb;
+  background: #090d12;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.runtime-process-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #98a2b3;
+  font-size: 10px;
+}
+
+.runtime-process-meta strong {
+  color: #fde68a;
+}
+
+@media (max-width: 900px) {
+  .runtime-terminal-layout,
+  .runtime-process-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(420px, 1fr);
+    overflow: auto;
+  }
+
+  .runtime-list-scroll {
+    max-height: 260px;
+  }
+
+  .runtime-scope-bar {
+    flex-direction: column;
+  }
+
+  .runtime-scope-bar > label {
+    min-width: 0;
+  }
+
+  .runtime-scope-context {
+    justify-content: flex-start;
+  }
+}

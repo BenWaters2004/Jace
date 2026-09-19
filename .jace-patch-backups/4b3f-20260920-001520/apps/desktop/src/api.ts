@@ -1,11 +1,5 @@
 import { API_BASE_URL } from "./constants";
 import type {
-  ScopedProcessResult,
-  ScopedProcessStartRequest,
-  ScopedTerminalOpenRequest,
-  ScopedTerminalResult,
-} from "./runtimeSurfaceTypes";
-import type {
   TerminalListResponse,
   TerminalOpenRequest,
   TerminalOutputResponse,
@@ -974,88 +968,4 @@ export const syncCalendar = () =>
   request<CalendarSyncResponse>("/calendar/sync", {
     method: "POST",
   });
-
-
-// JACE_4B3F_SCOPED_RUNTIME_SURFACE_API
-export const startScopedProcess = (
-  payload: ScopedProcessStartRequest,
-) =>
-  request<ScopedProcessResult>("/execution/runtime/processes", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-export const terminateScopedProcess = (
-  processId: string,
-  scopeId: string,
-  force = false,
-) =>
-  request<ScopedProcessResult>(
-    `/execution/runtime/processes/${encodeURIComponent(processId)}/terminate`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        scope_id: scopeId,
-        force,
-      }),
-    },
-  );
-
-export const openScopedTerminal = (
-  payload: ScopedTerminalOpenRequest,
-) =>
-  request<ScopedTerminalResult>("/execution/runtime/terminals", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-export const sendScopedTerminalInput = (
-  terminalId: string,
-  scopeId: string,
-  data: string,
-) =>
-  request<ScopedTerminalResult>(
-    `/execution/runtime/terminals/${encodeURIComponent(terminalId)}/input`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        scope_id: scopeId,
-        data,
-      }),
-    },
-  );
-
-export const resizeScopedTerminal = (
-  terminalId: string,
-  scopeId: string,
-  cols: number,
-  rows: number,
-) =>
-  request<ScopedTerminalResult>(
-    `/execution/runtime/terminals/${encodeURIComponent(terminalId)}/resize`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        scope_id: scopeId,
-        cols,
-        rows,
-      }),
-    },
-  );
-
-export const closeScopedTerminal = (
-  terminalId: string,
-  scopeId: string,
-  force = false,
-) =>
-  request<ScopedTerminalResult>(
-    `/execution/runtime/terminals/${encodeURIComponent(terminalId)}/close`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        scope_id: scopeId,
-        force,
-      }),
-    },
-  );
 
