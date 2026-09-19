@@ -45,10 +45,6 @@ class Settings(BaseSettings):
     device_pairing_minutes: int = 10
     device_online_window_seconds: int = 90
 
-    # JACE_4BS5_DEVICE_SOCKET_CONFIG
-    device_socket_heartbeat_seconds: int = 20
-
-
 
 
 

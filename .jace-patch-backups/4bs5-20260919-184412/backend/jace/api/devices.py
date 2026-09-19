@@ -1,14 +1,6 @@
 from __future__ import annotations
 
-from fastapi import (
-    APIRouter,
-    Header,
-    HTTPException,
-    Request,
-    WebSocket,
-    WebSocketDisconnect,
-    status,
-)
+from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from jace.config import settings
 from jace.database import SessionLocal
@@ -33,8 +25,6 @@ from jace.devices.service import (
     rename_device,
     revoke_device,
 )
-from jace.db.models import utc_now
-from jace.devices.connections import device_connections
 from jace.runtime import runtime_events
 
 
@@ -224,124 +214,3 @@ async def remove_device(device_id: str, request: Request):
 
     await runtime_events.publish("device.revoked", device_id=row.id, name=row.name)
     return device_response(row)
-
-# JACE_4BS5_DEVICE_SOCKET
-@router.websocket("/connect")
-async def connect_device(websocket: WebSocket):
-    # Maintain an authenticated outbound Device Agent connection.
-    authorization = websocket.headers.get("Authorization")
-
-    try:
-        token = _device_token(authorization)
-    except HTTPException:
-        await websocket.close(code=4401)
-        return
-
-    async with SessionLocal() as session:
-        device = await authenticate_device(session, token)
-
-    if device is None:
-        await websocket.close(code=4401)
-        return
-
-    await websocket.accept()
-    await device_connections.register(device.id, websocket)
-    connected_event_sent = False
-
-    try:
-        while True:
-            message = await websocket.receive_json()
-            message_type = str(message.get("type", ""))
-
-            if message_type in {"hello", "heartbeat"}:
-                payload = message.get("device") or {}
-
-                if not isinstance(payload, dict):
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "error": "device payload must be an object",
-                        }
-                    )
-                    continue
-
-                async with SessionLocal() as session:
-                    current = await authenticate_device(session, token)
-
-                    if current is None:
-                        await websocket.close(code=4401)
-                        return
-
-                    current = await heartbeat(
-                        session,
-                        device=current,
-                        agent_version=payload.get("agent_version"),
-                        platform=payload.get("platform"),
-                        os_version=payload.get("os_version"),
-                        architecture=payload.get("architecture"),
-                        capabilities=payload.get("capabilities"),
-                        metadata=payload.get("metadata"),
-                    )
-
-                if message_type == "hello" and not connected_event_sent:
-                    connected_event_sent = True
-                    await runtime_events.publish(
-                        "device.connected",
-                        device_id=current.id,
-                        name=current.name,
-                        hostname=current.hostname,
-                        platform=current.platform,
-                        agent_version=current.agent_version,
-                    )
-                    await websocket.send_json(
-                        {
-                            "type": "welcome",
-                            "device_id": current.id,
-                            "heartbeat_interval_seconds": settings.device_socket_heartbeat_seconds,
-                            "server_time": utc_now().isoformat(),
-                        }
-                    )
-                else:
-                    await websocket.send_json(
-                        {
-                            "type": "heartbeat_ack",
-                            "device_id": current.id,
-                            "server_time": utc_now().isoformat(),
-                        }
-                    )
-                continue
-
-            if message_type == "pong":
-                continue
-
-            if message_type == "capability.result":
-                await runtime_events.publish(
-                    "device.capability.result.unhandled",
-                    device_id=device.id,
-                    request_id=message.get("request_id"),
-                    status=message.get("status"),
-                )
-                continue
-
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": (
-                        "Unsupported Device Agent message type: "
-                        f"{message_type or '<missing>'}"
-                    ),
-                }
-            )
-
-    except WebSocketDisconnect:
-        pass
-
-    finally:
-        removed = await device_connections.unregister(device.id, websocket)
-        if removed:
-            await runtime_events.publish(
-                "device.disconnected",
-                device_id=device.id,
-                name=device.name,
-            )
-
