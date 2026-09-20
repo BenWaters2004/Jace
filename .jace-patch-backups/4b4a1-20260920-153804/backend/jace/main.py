@@ -38,8 +38,6 @@ from jace.api.tools import router as tools_router
 from jace.api.voice import router as voice_router
 from jace.calendar.service import ensure_default_jace_calendar
 from jace.config import settings
-from jace.api.actor_context import router as actor_context_router
-from jace.auth.resource_ownership import ResourceOwnership  # JACE_4B4A1_ACTOR_OWNERSHIP_FOUNDATION
 from jace.database import SessionLocal, close_database, init_database
 from jace.db.settings import get_or_create_assistant_settings
 from jace.runtime import runtime_events
@@ -52,7 +50,6 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _ = ResourceOwnership
     del app
 
 
@@ -151,7 +148,6 @@ app.add_middleware(
     ],
 )
 
-app.include_router(actor_context_router)
 app.include_router(system_router)
 app.include_router(model_gateway_router)
 app.include_router(privacy_router)

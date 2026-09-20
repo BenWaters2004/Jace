@@ -24,8 +24,6 @@ class ToolContext:
     conversation_id: str | None
     user_message: str
     capability_binding: dict[str, Any] | None = None
-    actor_id: str | None = None
-    client_id: str | None = None
 
 
 @dataclass
