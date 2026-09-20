@@ -5,7 +5,7 @@ import posixpath
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from jace.api.processes import (
@@ -16,8 +16,7 @@ from jace.api.terminals import (
     TerminalResponse,
     _response as terminal_response,
 )
-from jace.auth.actor_context import ActorContext, require_actor
-from jace.auth.resource_ownership import require_or_claim_local
+from jace.config import settings
 from jace.database import SessionLocal
 from jace.db.models import (
     ComputerWorkspace,
@@ -102,28 +101,27 @@ class ScopedTerminalResult(BaseModel):
     terminal: TerminalResponse
 
 
-def _runtime_user_id(
-    actor: ActorContext,
-) -> str | None:
-    if actor.server_mode:
-        if not actor.actor_id:
-            raise HTTPException(
-                status_code=401,
-                detail="Authenticated actor identity is required.",
-            )
-        return actor.actor_id
-
-    return None
+def _require_local_surface() -> None:
+    if settings.mode == "server":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "The desktop execution runtime surface is fail-closed in "
+                "server mode until authenticated actor/device ownership is "
+                "implemented in 4B.4A."
+            ),
+        )
 
 
 async def _require_scope(
-    actor: ActorContext,
     *,
     scope_id: str,
     shell: str,
     process: bool = False,
     terminal: bool = False,
 ) -> tuple[ExecutionScope, Device]:
+    _require_local_surface()
+
     async with SessionLocal() as session:
         scope = await session.get(
             ExecutionScope,
@@ -136,15 +134,6 @@ async def _require_scope(
                 detail="Execution scope not found or inactive.",
             )
 
-        await require_or_claim_local(
-            session,
-            resource_kind="execution_scope",
-            resource_id=scope.id,
-            actor_id=actor.actor_id,
-            client_id=actor.client_id,
-            server_mode=actor.server_mode,
-        )
-
         workspace = await session.get(
             ComputerWorkspace,
             scope.workspace_id,
@@ -155,15 +144,6 @@ async def _require_scope(
                 status_code=409,
                 detail="The execution scope workspace is missing or inactive.",
             )
-
-        await require_or_claim_local(
-            session,
-            resource_kind="workspace",
-            resource_id=workspace.id,
-            actor_id=actor.actor_id,
-            client_id=actor.client_id,
-            server_mode=actor.server_mode,
-        )
 
         if not workspace.read_enabled:
             raise HTTPException(
@@ -191,17 +171,8 @@ async def _require_scope(
             or device.revoked_at is not None
         ):
             raise HTTPException(
-                status_code=404,
+                status_code=409,
                 detail="The execution scope device is missing or revoked.",
-            )
-
-        if (
-            actor.server_mode
-            and device.owner_user_id != actor.actor_id
-        ):
-            raise HTTPException(
-                status_code=404,
-                detail="The execution scope device was not found.",
             )
 
         if shell not in set(scope_shells(scope)):
@@ -298,18 +269,16 @@ def _runtime_within_scope(
 
 
 async def _require_process_in_scope(
-    actor: ActorContext,
     process_id: str,
     scope_id: str,
 ):
     row = await process_runtime.get_process(
         process_id,
-        user_id=_runtime_user_id(actor),
-        server_mode=actor.server_mode,
+        user_id=None,
+        server_mode=False,
     )
 
     scope, device = await _require_scope(
-        actor,
         scope_id=scope_id,
         shell=row.shell,
         process=True,
@@ -334,18 +303,16 @@ async def _require_process_in_scope(
 
 
 async def _require_terminal_in_scope(
-    actor: ActorContext,
     terminal_id: str,
     scope_id: str,
 ):
     row = await terminal_runtime.get_terminal(
         terminal_id,
-        user_id=_runtime_user_id(actor),
-        server_mode=actor.server_mode,
+        user_id=None,
+        server_mode=False,
     )
 
     scope, device = await _require_scope(
-        actor,
         scope_id=scope_id,
         shell=row.shell,
         terminal=True,
@@ -371,7 +338,6 @@ async def _require_terminal_in_scope(
 
 
 async def _create_ui_audit(
-    actor: ActorContext,
     *,
     tool_name: str,
     arguments: dict,
@@ -386,8 +352,6 @@ async def _create_ui_audit(
             configured_permission="explicit_user_action",
             session_grant_used=False,
             session_grant_available=False,
-            actor_id=actor.actor_id,
-            client_id=actor.client_id,
         )
 
 
@@ -429,16 +393,13 @@ def _runtime_error(exc: Exception) -> HTTPException:
 )
 async def start_scoped_process(
     payload: ScopedProcessStart,
-    actor: ActorContext = Depends(require_actor),
 ):
     audit = await _create_ui_audit(
-        actor,
         tool_name="ui_run_device_command",
         arguments=payload.model_dump(),
     )
 
     scope, device = await _require_scope(
-        actor,
         scope_id=payload.scope_id,
         shell=payload.shell,
         process=True,
@@ -451,7 +412,7 @@ async def start_scoped_process(
         )
 
         row = await process_runtime.start_process(
-            user_id=_runtime_user_id(actor),
+            user_id=None,
             device_id=device.id,
             shell=payload.shell,
             command=payload.command,
@@ -497,10 +458,8 @@ async def start_scoped_process(
 async def terminate_scoped_process(
     process_id: str,
     payload: ScopedProcessMutation,
-    actor: ActorContext = Depends(require_actor),
 ):
     audit = await _create_ui_audit(
-        actor,
         tool_name="ui_stop_device_process",
         arguments={
             "scope_id": payload.scope_id,
@@ -510,7 +469,6 @@ async def terminate_scoped_process(
     )
 
     scope, _row = await _require_process_in_scope(
-        actor,
         process_id,
         payload.scope_id,
     )
@@ -518,8 +476,8 @@ async def terminate_scoped_process(
     try:
         row = await process_runtime.terminate_process(
             process_id,
-            user_id=_runtime_user_id(actor),
-            server_mode=actor.server_mode,
+            user_id=None,
+            server_mode=False,
             force=payload.force,
         )
     except (LookupError, RuntimeError) as exc:
@@ -551,16 +509,13 @@ async def terminate_scoped_process(
 )
 async def open_scoped_terminal(
     payload: ScopedTerminalOpen,
-    actor: ActorContext = Depends(require_actor),
 ):
     audit = await _create_ui_audit(
-        actor,
         tool_name="ui_open_device_terminal",
         arguments=payload.model_dump(),
     )
 
     scope, device = await _require_scope(
-        actor,
         scope_id=payload.scope_id,
         shell=payload.shell,
         terminal=True,
@@ -573,7 +528,7 @@ async def open_scoped_terminal(
         )
 
         row = await terminal_runtime.open_terminal(
-            user_id=_runtime_user_id(actor),
+            user_id=None,
             device_id=device.id,
             shell=payload.shell,
             cwd=cwd,
@@ -618,10 +573,8 @@ async def open_scoped_terminal(
 async def scoped_terminal_input(
     terminal_id: str,
     payload: ScopedTerminalInput,
-    actor: ActorContext = Depends(require_actor),
 ):
     scope, _row = await _require_terminal_in_scope(
-        actor,
         terminal_id,
         payload.scope_id,
     )
@@ -629,8 +582,8 @@ async def scoped_terminal_input(
     try:
         row = await terminal_runtime.write_input(
             terminal_id,
-            user_id=_runtime_user_id(actor),
-            server_mode=actor.server_mode,
+            user_id=None,
+            server_mode=False,
             data=payload.data,
         )
     except (
@@ -654,10 +607,8 @@ async def scoped_terminal_input(
 async def scoped_terminal_resize(
     terminal_id: str,
     payload: ScopedTerminalResize,
-    actor: ActorContext = Depends(require_actor),
 ):
     scope, _row = await _require_terminal_in_scope(
-        actor,
         terminal_id,
         payload.scope_id,
     )
@@ -665,8 +616,8 @@ async def scoped_terminal_resize(
     try:
         row = await terminal_runtime.resize_terminal(
             terminal_id,
-            user_id=_runtime_user_id(actor),
-            server_mode=actor.server_mode,
+            user_id=None,
+            server_mode=False,
             cols=payload.cols,
             rows=payload.rows,
         )
@@ -691,10 +642,8 @@ async def scoped_terminal_resize(
 async def scoped_terminal_close(
     terminal_id: str,
     payload: ScopedTerminalClose,
-    actor: ActorContext = Depends(require_actor),
 ):
     audit = await _create_ui_audit(
-        actor,
         tool_name="ui_close_device_terminal",
         arguments={
             "scope_id": payload.scope_id,
@@ -704,7 +653,6 @@ async def scoped_terminal_close(
     )
 
     scope, _row = await _require_terminal_in_scope(
-        actor,
         terminal_id,
         payload.scope_id,
     )
@@ -712,8 +660,8 @@ async def scoped_terminal_close(
     try:
         row = await terminal_runtime.close_terminal(
             terminal_id,
-            user_id=_runtime_user_id(actor),
-            server_mode=actor.server_mode,
+            user_id=None,
+            server_mode=False,
             force=payload.force,
         )
     except (LookupError, RuntimeError) as exc:

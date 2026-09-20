@@ -1,14 +1,12 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from jace.capabilities.permissions import (
     set_permission as set_capability_permission,
 )
 from jace.config import settings
 from jace.database import SessionLocal
-from jace.auth.actor_context import ActorContext, require_actor
-from jace.auth.resource_ownership import clear_owned_audit, filter_or_claim_local
 from jace.schemas import (
     PendingToolApprovalResponse,
     PendingToolApprovalsResponse,
@@ -33,7 +31,6 @@ from jace.tools.registry import registry
 
 
 router = APIRouter(prefix="/tools", tags=["tools"])
-# JACE_4B4A2_TOOL_API_OWNERSHIP
 
 
 def _arguments(value: str) -> dict:
@@ -116,21 +113,12 @@ async def patch_tool_permission(
 async def tool_audit(
     limit: int = Query(default=100, ge=1, le=500),
     tool_name: str | None = None,
-    actor: ActorContext = Depends(require_actor),
 ):
     async with SessionLocal() as session:
         entries = await list_tool_audit(
             session,
             limit=limit,
             tool_name=tool_name,
-        )
-        entries = await filter_or_claim_local(
-            session,
-            resource_kind="audit",
-            actor_id=actor.actor_id,
-            client_id=actor.client_id,
-            server_mode=actor.server_mode,
-            rows=entries,
         )
 
     return ToolAuditListResponse(
@@ -158,9 +146,9 @@ async def tool_audit(
 
 
 @router.delete("/audit")
-async def clear_audit(actor: ActorContext = Depends(require_actor)):
+async def clear_audit():
     async with SessionLocal() as session:
-        count = await clear_owned_audit(session, actor_id=actor.actor_id)
+        count = await clear_tool_audit(session)
 
     return {
         "success": True,
@@ -169,7 +157,7 @@ async def clear_audit(actor: ActorContext = Depends(require_actor)):
 
 
 @router.get("/approvals", response_model=PendingToolApprovalsResponse)
-async def pending_approvals(actor: ActorContext = Depends(require_actor)):
+async def pending_approvals():
     return PendingToolApprovalsResponse(
         approvals=[
             PendingToolApprovalResponse(
@@ -193,7 +181,7 @@ async def pending_approvals(actor: ActorContext = Depends(require_actor)):
                     is not None
                 ),
             )
-            for approval in approval_manager.list_for_actor(actor.actor_id)
+            for approval in approval_manager.list()
         ]
     )
 
@@ -204,11 +192,9 @@ async def pending_approvals(actor: ActorContext = Depends(require_actor)):
 )
 async def clear_session_grants(
     conversation_id: str,
-    actor: ActorContext = Depends(require_actor),
 ):
     cleared = approval_manager.clear_conversation_grants(
-        conversation_id,
-        actor.actor_id,
+        conversation_id
     )
 
     return {
@@ -225,9 +211,8 @@ async def clear_session_grants(
 async def resolve_approval(
     approval_id: str,
     request: ToolApprovalDecisionRequest,
-    actor: ActorContext = Depends(require_actor),
 ):
-    approval = approval_manager.get_for_actor(approval_id, actor.actor_id)
+    approval = approval_manager.get(approval_id)
 
     if approval is None:
         raise HTTPException(

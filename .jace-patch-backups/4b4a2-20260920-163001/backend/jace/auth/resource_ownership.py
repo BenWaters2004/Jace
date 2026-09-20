@@ -5,11 +5,11 @@ from typing import Iterable, Literal
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import DateTime, String, UniqueConstraint, delete, select
+from sqlalchemy import DateTime, String, UniqueConstraint, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from jace.db.models import Base, ToolAuditLog
+from jace.db.models import Base
 
 
 ResourceKind = Literal[
@@ -29,6 +29,14 @@ def utc_now() -> datetime:
 
 
 class ResourceOwnership(Base):
+    """
+    Sidecar ownership registry.
+
+    4B.4A deliberately uses a sidecar table rather than adding actor_id columns
+    to every existing runtime table in one migration. This gives every security
+    boundary a single ownership primitive while preserving current local data.
+    """
+
     __tablename__ = "resource_ownership"
     __table_args__ = (
         UniqueConstraint(
@@ -77,8 +85,10 @@ async def ownership_for(
 ) -> ResourceOwnership | None:
     result = await session.execute(
         select(ResourceOwnership).where(
-            ResourceOwnership.resource_kind == resource_kind,
-            ResourceOwnership.resource_id == resource_id,
+            ResourceOwnership.resource_kind
+            == resource_kind,
+            ResourceOwnership.resource_id
+            == resource_id,
         )
     )
     return result.scalar_one_or_none()
@@ -104,6 +114,7 @@ async def claim_resource(
                 status_code=404,
                 detail="Resource not found.",
             )
+
         return existing
 
     row = ResourceOwnership(
@@ -131,52 +142,18 @@ async def require_owned_resource(
         resource_id,
     )
 
-    if existing is None or existing.actor_id != actor_id:
+    if (
+        existing is None
+        or existing.actor_id != actor_id
+    ):
+        # Return 404 rather than 403 so UUID existence is not leaked across
+        # users.
         raise HTTPException(
             status_code=404,
             detail="Resource not found.",
         )
 
     return existing
-
-
-async def require_or_claim_local(
-    session: AsyncSession,
-    *,
-    resource_kind: ResourceKind,
-    resource_id: str,
-    actor_id: str,
-    client_id: str | None,
-    server_mode: bool,
-) -> ResourceOwnership:
-    """Local may adopt old rows; server mode never auto-adopts them."""
-    existing = await ownership_for(
-        session,
-        resource_kind,
-        resource_id,
-    )
-
-    if existing is not None:
-        if existing.actor_id != actor_id:
-            raise HTTPException(
-                status_code=404,
-                detail="Resource not found.",
-            )
-        return existing
-
-    if server_mode:
-        raise HTTPException(
-            status_code=404,
-            detail="Resource not found.",
-        )
-
-    return await claim_resource(
-        session,
-        resource_kind=resource_kind,
-        resource_id=resource_id,
-        actor_id=actor_id,
-        client_id=client_id,
-    )
 
 
 async def owned_resource_ids(
@@ -187,83 +164,34 @@ async def owned_resource_ids(
 ) -> set[str]:
     result = await session.execute(
         select(ResourceOwnership.resource_id).where(
-            ResourceOwnership.resource_kind == resource_kind,
-            ResourceOwnership.actor_id == actor_id,
+            ResourceOwnership.resource_kind
+            == resource_kind,
+            ResourceOwnership.actor_id
+            == actor_id,
         )
     )
     return set(result.scalars().all())
 
 
-async def filter_or_claim_local(
+async def filter_owned(
     session: AsyncSession,
     *,
     resource_kind: ResourceKind,
     actor_id: str,
-    client_id: str | None,
-    server_mode: bool,
     rows: Iterable,
 ) -> list:
-    visible: list = []
-
-    for row in rows:
-        resource_id = str(
-            getattr(row, "id", "")
-        ).strip()
-
-        if not resource_id:
-            continue
-
-        existing = await ownership_for(
-            session,
-            resource_kind,
-            resource_id,
-        )
-
-        if existing is not None:
-            if existing.actor_id == actor_id:
-                visible.append(row)
-            continue
-
-        if not server_mode:
-            await claim_resource(
-                session,
-                resource_kind=resource_kind,
-                resource_id=resource_id,
-                actor_id=actor_id,
-                client_id=client_id,
-            )
-            visible.append(row)
-
-    return visible
-
-
-async def clear_owned_audit(
-    session: AsyncSession,
-    *,
-    actor_id: str,
-) -> int:
-    ids = await owned_resource_ids(
+    owned = await owned_resource_ids(
         session,
-        resource_kind="audit",
+        resource_kind=resource_kind,
         actor_id=actor_id,
     )
 
-    if not ids:
-        return 0
-
-    result = await session.execute(
-        delete(ToolAuditLog).where(
-            ToolAuditLog.id.in_(ids)
-        )
-    )
-    await session.execute(
-        delete(ResourceOwnership).where(
-            ResourceOwnership.resource_kind == "audit",
-            ResourceOwnership.actor_id == actor_id,
-        )
-    )
-    await session.commit()
-    return result.rowcount or 0
+    return [
+        row
+        for row in rows
+        if str(getattr(row, "id", ""))
+        in owned
+    ]
 
 
 async def release_resource(
@@ -279,5 +207,6 @@ async def release_resource(
         resource_id=resource_id,
         actor_id=actor_id,
     )
+
     await session.delete(existing)
     await session.commit()

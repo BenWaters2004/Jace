@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jace.config import settings
 from jace.db.models import ToolAuditLog, ToolPermission
-from jace.auth.resource_ownership import claim_resource
 from jace.tools import ensure_tools_registered
 from jace.tools.registry import registry
 from jace.tools.execution_audit import (
@@ -214,8 +213,6 @@ async def create_tool_audit(
     configured_permission: str | None = None,
     session_grant_used: bool | None = None,
     session_grant_available: bool | None = None,
-    actor_id: str | None = None,
-    client_id: str | None = None,
     provider_id: str | None = None,
     connection_id: str | None = None,
     capability_id: str | None = None,
@@ -259,21 +256,6 @@ async def create_tool_audit(
     session.add(entry)
     await session.commit()
     await session.refresh(entry)
-
-    # JACE_4B4A2_AUDIT_OWNERSHIP
-    resolved_actor_id = actor_id
-    if resolved_actor_id is None and settings.mode != "server":
-        resolved_actor_id = "local"
-
-    if resolved_actor_id is not None:
-        await claim_resource(
-            session,
-            resource_kind="audit",
-            resource_id=entry.id,
-            actor_id=resolved_actor_id,
-            client_id=client_id,
-        )
-
     return entry
 
 

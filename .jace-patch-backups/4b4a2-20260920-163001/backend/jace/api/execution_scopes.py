@@ -1,20 +1,12 @@
 from __future__ import annotations
 
 from fastapi import (
-    Depends,
     APIRouter,
     HTTPException,
 )
 from pydantic import BaseModel, Field
 
 from jace.database import SessionLocal
-from jace.auth.actor_context import ActorContext, require_actor
-from jace.auth.resource_ownership import (
-    claim_resource,
-    filter_or_claim_local,
-    require_or_claim_local,
-)
-from jace.db.models import Device
 from jace.execution_scopes import (
     create_execution_scope,
     delete_execution_scope,
@@ -31,35 +23,6 @@ router = APIRouter(
     prefix="/execution/scopes",
     tags=["execution"],
 )
-
-# JACE_4B4A2_SCOPE_OWNERSHIP
-
-async def _owned_scopes(session, actor: ActorContext, *, active_only: bool):
-    rows = await list_execution_scopes(session, active_only=active_only)
-    return await filter_or_claim_local(
-        session,
-        resource_kind="execution_scope",
-        actor_id=actor.actor_id,
-        client_id=actor.client_id,
-        server_mode=actor.server_mode,
-        rows=rows,
-    )
-
-
-async def _owned_scope(session, scope_id: str, actor: ActorContext):
-    row = await get_execution_scope(session, scope_id)
-    if row is None:
-        return None
-    await require_or_claim_local(
-        session,
-        resource_kind="execution_scope",
-        resource_id=row.id,
-        actor_id=actor.actor_id,
-        client_id=actor.client_id,
-        server_mode=actor.server_mode,
-    )
-    return row
-
 
 
 class ExecutionScopeCreate(BaseModel):
@@ -171,12 +134,10 @@ def _response(
 )
 async def execution_scopes(
     active_only: bool = True,
-    actor: ActorContext = Depends(require_actor),
 ):
     async with SessionLocal() as session:
-        rows = await _owned_scopes(
+        rows = await list_execution_scopes(
             session,
-            actor,
             active_only=active_only,
         )
 
@@ -198,24 +159,9 @@ async def execution_scopes(
 )
 async def create_scope(
     payload: ExecutionScopeCreate,
-    actor: ActorContext = Depends(require_actor),
 ):
     try:
         async with SessionLocal() as session:
-            await require_or_claim_local(
-                session,
-                resource_kind="workspace",
-                resource_id=payload.workspace_id,
-                actor_id=actor.actor_id,
-                client_id=actor.client_id,
-                server_mode=actor.server_mode,
-            )
-            device = await session.get(Device, payload.device_id)
-            if (
-                device is None
-                or (actor.server_mode and device.owner_user_id != actor.actor_id)
-            ):
-                raise HTTPException(status_code=404, detail="Device not found.")
             row = await create_execution_scope(
                 session,
                 label=payload.label,
@@ -235,13 +181,6 @@ async def create_scope(
                 terminal_enabled=(
                     payload.terminal_enabled
                 ),
-            )
-            await claim_resource(
-                session,
-                resource_kind="execution_scope",
-                resource_id=row.id,
-                actor_id=actor.actor_id,
-                client_id=actor.client_id,
             )
     except ValueError as exc:
         raise HTTPException(
@@ -265,13 +204,11 @@ async def create_scope(
 async def update_scope(
     scope_id: str,
     payload: ExecutionScopeUpdate,
-    actor: ActorContext = Depends(require_actor),
 ):
     async with SessionLocal() as session:
-        row = await _owned_scope(
+        row = await get_execution_scope(
             session,
             scope_id,
-            actor,
         )
 
         if row is None:
@@ -321,13 +258,11 @@ async def update_scope(
 )
 async def delete_scope(
     scope_id: str,
-    actor: ActorContext = Depends(require_actor),
 ):
     async with SessionLocal() as session:
-        row = await _owned_scope(
+        row = await get_execution_scope(
             session,
             scope_id,
-            actor,
         )
 
         if row is None:

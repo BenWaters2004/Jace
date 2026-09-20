@@ -70,7 +70,6 @@ def actor_from_state(
         )
 
     direct_actor_keys = (
-        "auth_user_id",
         "actor_id",
         "user_id",
         "authenticated_user_id",
@@ -79,7 +78,6 @@ def actor_from_state(
         "sub",
     )
     direct_client_keys = (
-        "auth_session_id",
         "client_id",
         "authenticated_client_id",
         "session_id",

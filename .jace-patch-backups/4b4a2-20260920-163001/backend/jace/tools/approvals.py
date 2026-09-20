@@ -27,8 +27,6 @@ class PendingApproval:
     task_id: str | None = None
     agent_id: str | None = None
     configured_permission: str | None = None
-    actor_id: str | None = None
-    client_id: str | None = None
     provider_id: str | None = None
     connection_id: str | None = None
     capability_id: str | None = None
@@ -61,7 +59,7 @@ class ApprovalManager:
         # JACE_4B3D_SESSION_APPROVAL_GRANTS
         self._approval_grant_keys: dict[str, tuple[str, str]] = {}
         self._session_grants: set[
-            tuple[str, str, str, str, str]
+            tuple[str, str, str, str]
         ] = set()
 
     def create(
@@ -81,8 +79,6 @@ class ApprovalManager:
         capability_id: str | None = None,
         account_hint: str | None = None,
         configured_permission: str | None = None,
-        actor_id: str | None = None,
-        client_id: str | None = None,
     ) -> PendingApproval:
         loop = asyncio.get_running_loop()
         approval = PendingApproval(
@@ -103,8 +99,6 @@ class ApprovalManager:
             connection_id=connection_id,
             capability_id=capability_id,
             account_hint=account_hint,
-            actor_id=actor_id,
-            client_id=client_id,
         )
         self._pending[approval.approval_id] = approval
         return approval
@@ -176,22 +170,19 @@ class ApprovalManager:
 
     def is_session_granted(
         self,
-        actor_id: str | None,
         conversation_id: str | None,
         tool_name: str,
         grant_key: str | None,
         arguments: dict | None = None,
     ) -> bool:
         if (
-            not actor_id
-            or not conversation_id
+            not conversation_id
             or not grant_key
             or arguments is None
         ):
             return False
 
         return (
-            actor_id,
             conversation_id,
             tool_name,
             grant_key,
@@ -232,7 +223,6 @@ class ApprovalManager:
 
         self._session_grants.add(
             (
-                approval.actor_id or "local",
                 approval.conversation_id,
                 approval.tool_name,
                 grant_key,
@@ -245,15 +235,12 @@ class ApprovalManager:
     def clear_conversation_grants(
         self,
         conversation_id: str,
-        actor_id: str | None = None,
     ) -> int:
         matches = {
             item
             for item in self._session_grants
-            if (
-                (actor_id is None or item[0] == actor_id)
-                and item[1] == conversation_id
-            )
+            if item[0]
+            == conversation_id
         }
 
         self._session_grants.difference_update(
@@ -262,30 +249,6 @@ class ApprovalManager:
 
         return len(
             matches
-        )
-
-    # JACE_4B4A2_APPROVAL_OWNERSHIP
-    def get_for_actor(
-        self,
-        approval_id: str,
-        actor_id: str,
-    ) -> PendingApproval | None:
-        approval = self._pending.get(approval_id)
-        if approval is None or (approval.actor_id or "local") != actor_id:
-            return None
-        return approval
-
-    def list_for_actor(
-        self,
-        actor_id: str,
-    ) -> list[PendingApproval]:
-        return sorted(
-            (
-                approval
-                for approval in self._pending.values()
-                if (approval.actor_id or "local") == actor_id
-            ),
-            key=lambda approval: approval.created_at,
         )
 
     def get(self, approval_id: str) -> PendingApproval | None:

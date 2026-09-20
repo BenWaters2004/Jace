@@ -2,7 +2,7 @@ import asyncio
 import time
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError
@@ -20,8 +20,6 @@ from jace.attachments.service import assign_attachments_to_message, get_attachme
 from jace.api.helpers import ndjson_event, nanoseconds_to_ms, tokens_per_second
 from jace.config import settings as env_settings
 from jace.database import SessionLocal
-from jace.auth.actor_context import require_actor
-from jace.auth.resource_ownership import require_or_claim_local
 from jace.db.conversations import (
     add_message,
     get_conversation,
@@ -47,12 +45,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("/stream")
-async def send_streaming_chat(
-    request: PersistentChatRequest,
-    http_request: Request,
-):
-    # JACE_4B4A2_CHAT_ACTOR
-    actor = await require_actor(http_request)
+async def send_streaming_chat(request: PersistentChatRequest):
     if not request.message.strip() and not request.attachment_ids:
         raise HTTPException(status_code=400, detail="Enter a message or attach a file.")
     if len(request.attachment_ids) > env_settings.attachment_max_count:
@@ -60,15 +53,6 @@ async def send_streaming_chat(
 
     async with SessionLocal() as session:
         conversation = await get_conversation(session, request.conversation_id)
-        if conversation is not None:
-            await require_or_claim_local(
-                session,
-                resource_kind="conversation",
-                resource_id=conversation.id,
-                actor_id=actor.actor_id,
-                client_id=actor.client_id,
-                server_mode=actor.server_mode,
-            )
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
@@ -460,8 +444,6 @@ async def send_streaming_chat(
                 reasoning_mode=reasoning_mode,
                 temperature=temperature,
                 conversation_id=conversation_id,
-                actor_id=actor.actor_id,
-                client_id=actor.client_id,
                 # Use the effective capability message for execution policy only.
                 # Conversation history still contains the literal follow-up text.
                 user_message=capability_message,

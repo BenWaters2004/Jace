@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from jace.computer.security import ComputerPathError
 from jace.computer.service import (
@@ -15,12 +15,6 @@ from jace.computer.service import (
 )
 from jace.config import settings
 from jace.database import SessionLocal
-from jace.auth.actor_context import ActorContext, require_actor
-from jace.auth.resource_ownership import (
-    claim_resource,
-    filter_or_claim_local,
-    require_or_claim_local,
-)
 from jace.schemas import (
     ComputerCommandPresetCreate,
     ComputerCommandPresetResponse,
@@ -34,50 +28,6 @@ from jace.schemas import (
 
 
 router = APIRouter(prefix="/computer", tags=["computer"])
-
-# JACE_4B4A2_COMPUTER_OWNERSHIP
-
-async def _owned_workspaces(session, actor: ActorContext):
-    rows = await list_workspaces(session, active_only=False)
-    return await filter_or_claim_local(
-        session,
-        resource_kind="workspace",
-        actor_id=actor.actor_id,
-        client_id=actor.client_id,
-        server_mode=actor.server_mode,
-        rows=rows,
-    )
-
-
-async def _owned_workspace(session, workspace_id: str, actor: ActorContext):
-    workspace = await get_workspace(session, workspace_id)
-    if workspace is None:
-        return None
-    await require_or_claim_local(
-        session,
-        resource_kind="workspace",
-        resource_id=workspace.id,
-        actor_id=actor.actor_id,
-        client_id=actor.client_id,
-        server_mode=actor.server_mode,
-    )
-    return workspace
-
-
-async def _owned_command(session, command_id: str, actor: ActorContext):
-    command = await get_command_preset(session, command_id)
-    if command is None:
-        return None
-    await require_or_claim_local(
-        session,
-        resource_kind="workspace",
-        resource_id=command.workspace_id,
-        actor_id=actor.actor_id,
-        client_id=actor.client_id,
-        server_mode=actor.server_mode,
-    )
-    return command
-
 
 
 def command_response(command) -> ComputerCommandPresetResponse:
@@ -110,9 +60,9 @@ def workspace_response(workspace) -> ComputerWorkspaceResponse:
 
 
 @router.get("/status", response_model=ComputerStatusResponse)
-async def computer_status(actor: ActorContext = Depends(require_actor)):
+async def computer_status():
     async with SessionLocal() as session:
-        workspaces = await _owned_workspaces(session, actor)
+        workspaces = await list_workspaces(session, active_only=False)
 
     return ComputerStatusResponse(
         enabled=settings.computer_enabled,
@@ -124,9 +74,9 @@ async def computer_status(actor: ActorContext = Depends(require_actor)):
 
 
 @router.get("/workspaces", response_model=ComputerWorkspaceListResponse)
-async def computer_workspaces(actor: ActorContext = Depends(require_actor)):
+async def computer_workspaces():
     async with SessionLocal() as session:
-        workspaces = await _owned_workspaces(session, actor)
+        workspaces = await list_workspaces(session, active_only=False)
     return ComputerWorkspaceListResponse(
         enabled=settings.computer_enabled,
         workspaces=[workspace_response(item) for item in workspaces],
@@ -134,7 +84,7 @@ async def computer_workspaces(actor: ActorContext = Depends(require_actor)):
 
 
 @router.post("/workspaces", response_model=ComputerWorkspaceResponse)
-async def add_computer_workspace(request: ComputerWorkspaceCreate, actor: ActorContext = Depends(require_actor)):
+async def add_computer_workspace(request: ComputerWorkspaceCreate):
     if not settings.computer_enabled:
         raise HTTPException(status_code=409, detail="Computer access is disabled by backend configuration.")
 
@@ -149,20 +99,13 @@ async def add_computer_workspace(request: ComputerWorkspaceCreate, actor: ActorC
             )
         except (ValueError, ComputerPathError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await claim_resource(
-            session,
-            resource_kind="workspace",
-            resource_id=workspace.id,
-            actor_id=actor.actor_id,
-            client_id=actor.client_id,
-        )
     return workspace_response(workspace)
 
 
 @router.patch("/workspaces/{workspace_id}", response_model=ComputerWorkspaceResponse)
-async def patch_computer_workspace(workspace_id: str, request: ComputerWorkspaceUpdate, actor: ActorContext = Depends(require_actor)):
+async def patch_computer_workspace(workspace_id: str, request: ComputerWorkspaceUpdate):
     async with SessionLocal() as session:
-        workspace = await _owned_workspace(session, workspace_id, actor)
+        workspace = await get_workspace(session, workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found.")
         try:
@@ -181,9 +124,9 @@ async def patch_computer_workspace(workspace_id: str, request: ComputerWorkspace
 
 
 @router.delete("/workspaces/{workspace_id}")
-async def remove_computer_workspace(workspace_id: str, actor: ActorContext = Depends(require_actor)):
+async def remove_computer_workspace(workspace_id: str):
     async with SessionLocal() as session:
-        workspace = await _owned_workspace(session, workspace_id, actor)
+        workspace = await get_workspace(session, workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found.")
         await delete_workspace_configuration(session, workspace)
@@ -194,9 +137,9 @@ async def remove_computer_workspace(workspace_id: str, actor: ActorContext = Dep
     "/workspaces/{workspace_id}/commands",
     response_model=ComputerCommandPresetResponse,
 )
-async def add_command(workspace_id: str, request: ComputerCommandPresetCreate, actor: ActorContext = Depends(require_actor)):
+async def add_command(workspace_id: str, request: ComputerCommandPresetCreate):
     async with SessionLocal() as session:
-        workspace = await _owned_workspace(session, workspace_id, actor)
+        workspace = await get_workspace(session, workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found.")
         try:
@@ -215,9 +158,9 @@ async def add_command(workspace_id: str, request: ComputerCommandPresetCreate, a
 
 
 @router.patch("/commands/{command_id}", response_model=ComputerCommandPresetResponse)
-async def patch_command(command_id: str, request: ComputerCommandPresetUpdate, actor: ActorContext = Depends(require_actor)):
+async def patch_command(command_id: str, request: ComputerCommandPresetUpdate):
     async with SessionLocal() as session:
-        command = await _owned_command(session, command_id, actor)
+        command = await get_command_preset(session, command_id)
         if command is None:
             raise HTTPException(status_code=404, detail="Command preset not found.")
         try:
@@ -237,9 +180,9 @@ async def patch_command(command_id: str, request: ComputerCommandPresetUpdate, a
 
 
 @router.delete("/commands/{command_id}")
-async def remove_command(command_id: str, actor: ActorContext = Depends(require_actor)):
+async def remove_command(command_id: str):
     async with SessionLocal() as session:
-        command = await _owned_command(session, command_id, actor)
+        command = await get_command_preset(session, command_id)
         if command is None:
             raise HTTPException(status_code=404, detail="Command preset not found.")
         await delete_command_preset(session, command)

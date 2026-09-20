@@ -29,10 +29,6 @@ from jace.execution_scopes.security import (
 from jace.execution_scopes.service import (
     scope_shells,
 )
-from jace.auth.resource_ownership import (
-    ownership_for,
-    require_or_claim_local,
-)
 from jace.process_runtime import (
     process_runtime,
 )
@@ -59,34 +55,14 @@ ShellName = Literal[
 ]
 
 
-# JACE_4B4A3_SERVER_EXECUTION
-def _require_execution_actor(
-    context: ToolContext,
-) -> str:
-    actor_id = str(
-        context.actor_id
-        or ""
-    ).strip()
-
-    if settings.mode == "server" and not actor_id:
-        raise ToolError(
-            "Authenticated actor identity is required for server execution."
-        )
-
-    return actor_id or "local"
-
-
-def _runtime_user_id(
-    context: ToolContext,
-) -> str | None:
-    actor_id = _require_execution_actor(
-        context
-    )
-
+def _require_local_execution_mode() -> None:
+    # JACE_4B3D keeps agent-driven execution fail-closed in server mode until
+    # authenticated actor identity is threaded into ToolContext.
     if settings.mode == "server":
-        return actor_id
-
-    return None
+        raise ToolError(
+            "Agent execution tools are temporarily disabled in server mode "
+            "until authenticated actor identity is available in ToolContext."
+        )
 
 
 def _device_payload(
@@ -209,21 +185,6 @@ async def _require_scope(
     ComputerWorkspace,
     Device,
 ]:
-    actor_id = _require_execution_actor(
-        context
-    )
-
-    await require_or_claim_local(
-        context.session,
-        resource_kind="execution_scope",
-        resource_id=scope_id,
-        actor_id=actor_id,
-        client_id=context.client_id,
-        server_mode=(
-            settings.mode == "server"
-        ),
-    )
-
     result = await context.session.execute(
         select(ExecutionScope).where(
             ExecutionScope.id
@@ -255,17 +216,6 @@ async def _require_scope(
             "The execution scope's computer workspace is missing or inactive."
         )
 
-    await require_or_claim_local(
-        context.session,
-        resource_kind="workspace",
-        resource_id=workspace.id,
-        actor_id=actor_id,
-        client_id=context.client_id,
-        server_mode=(
-            settings.mode == "server"
-        ),
-    )
-
     if not workspace.read_enabled:
         raise ToolError(
             "The execution scope's computer workspace is not readable."
@@ -292,14 +242,6 @@ async def _require_scope(
     ):
         raise ToolError(
             "The execution scope's device does not exist or is revoked."
-        )
-
-    if (
-        settings.mode == "server"
-        and device.owner_user_id != actor_id
-    ):
-        raise ToolError(
-            "The execution scope's device does not exist."
         )
 
     allowed_shells = set(
@@ -1106,7 +1048,7 @@ async def list_execution_devices_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1185,7 +1127,7 @@ async def list_execution_scopes_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1210,21 +1152,6 @@ async def list_execution_scopes_tool(
     for scope in (
         result.scalars().all()
     ):
-        if settings.mode == "server":
-            owner = await ownership_for(
-                context.session,
-                "execution_scope",
-                scope.id,
-            )
-            if (
-                owner is None
-                or owner.actor_id
-                != _require_execution_actor(
-                    context
-                )
-            ):
-                continue
-
         workspace = (
             await context.session.get(
                 ComputerWorkspace,
@@ -1293,7 +1220,7 @@ async def _run_command(
     *,
     inspection_only: bool,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     (
         scope,
@@ -1341,7 +1268,7 @@ async def _run_command(
 
     row = (
         await process_runtime.start_process(
-            user_id=_runtime_user_id(context),
+            user_id=None,
             device_id=device.id,
             shell=payload.shell,
             command=payload.command,
@@ -1374,8 +1301,8 @@ async def _run_command(
         row = (
             await process_runtime.wait_for_exit(
                 row.id,
-                user_id=_runtime_user_id(context),
-                server_mode=(settings.mode == "server"),
+                user_id=None,
+                server_mode=False,
                 timeout_seconds=(
                     wait_timeout_seconds
                 ),
@@ -1385,8 +1312,8 @@ async def _run_command(
     chunks = (
         await process_runtime.output(
             row.id,
-            user_id=_runtime_user_id(context),
-            server_mode=(settings.mode == "server"),
+            user_id=None,
+            server_mode=False,
             after_sequence=0,
             limit=500,
         )
@@ -1464,7 +1391,7 @@ async def get_device_process_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1475,8 +1402,8 @@ async def get_device_process_tool(
     try:
         row = await process_runtime.get_process(
             payload.process_id,
-            user_id=_runtime_user_id(context),
-            server_mode=(settings.mode == "server"),
+            user_id=None,
+            server_mode=False,
         )
     except LookupError as exc:
         raise ToolError(
@@ -1502,7 +1429,7 @@ async def read_device_process_output_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1514,8 +1441,8 @@ async def read_device_process_output_tool(
         chunks = (
             await process_runtime.output(
                 payload.process_id,
-                user_id=_runtime_user_id(context),
-                server_mode=(settings.mode == "server"),
+                user_id=None,
+                server_mode=False,
                 after_sequence=(
                     payload.after_sequence
                 ),
@@ -1562,7 +1489,7 @@ async def stop_device_process_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1574,8 +1501,8 @@ async def stop_device_process_tool(
         row = (
             await process_runtime.terminate_process(
                 payload.process_id,
-                user_id=_runtime_user_id(context),
-                server_mode=(settings.mode == "server"),
+                user_id=None,
+                server_mode=False,
                 force=payload.force,
             )
         )
@@ -1603,7 +1530,7 @@ async def open_device_terminal_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1630,7 +1557,7 @@ async def open_device_terminal_tool(
 
     row = (
         await terminal_runtime.open_terminal(
-            user_id=_runtime_user_id(context),
+            user_id=None,
             device_id=device.id,
             shell=payload.shell,
             cwd=cwd,
@@ -1674,7 +1601,7 @@ async def read_device_terminal_output_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1686,8 +1613,8 @@ async def read_device_terminal_output_tool(
         chunks = (
             await terminal_runtime.output(
                 payload.terminal_id,
-                user_id=_runtime_user_id(context),
-                server_mode=(settings.mode == "server"),
+                user_id=None,
+                server_mode=False,
                 after_sequence=(
                     payload.after_sequence
                 ),
@@ -1734,7 +1661,7 @@ async def send_device_terminal_input_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1746,8 +1673,8 @@ async def send_device_terminal_input_tool(
         row = (
             await terminal_runtime.write_input(
                 payload.terminal_id,
-                user_id=_runtime_user_id(context),
-                server_mode=(settings.mode == "server"),
+                user_id=None,
+                server_mode=False,
                 data=payload.data,
             )
         )
@@ -1787,7 +1714,7 @@ async def resize_device_terminal_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1799,8 +1726,8 @@ async def resize_device_terminal_tool(
         row = (
             await terminal_runtime.resize_terminal(
                 payload.terminal_id,
-                user_id=_runtime_user_id(context),
-                server_mode=(settings.mode == "server"),
+                user_id=None,
+                server_mode=False,
                 cols=payload.cols,
                 rows=payload.rows,
             )
@@ -1834,7 +1761,7 @@ async def close_device_terminal_tool(
     data: BaseModel,
     context: ToolContext,
 ) -> ToolExecutionResult:
-    _require_execution_actor(context)
+    _require_local_execution_mode()
 
     payload = data
     assert isinstance(
@@ -1846,8 +1773,8 @@ async def close_device_terminal_tool(
         row = (
             await terminal_runtime.close_terminal(
                 payload.terminal_id,
-                user_id=_runtime_user_id(context),
-                server_mode=(settings.mode == "server"),
+                user_id=None,
+                server_mode=False,
                 force=payload.force,
             )
         )

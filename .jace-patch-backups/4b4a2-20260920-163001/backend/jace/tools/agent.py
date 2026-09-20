@@ -261,15 +261,12 @@ def _capability_binding_error(
     return None
 
 
-# JACE_4B4A2_AGENT_ACTOR
 async def _execute_tool_call(
     *,
     call: dict[str, Any],
     conversation_id: str | None,
     user_message: str,
     capability_bindings: dict[str, dict[str, Any]] | None = None,
-    actor_id: str | None = None,
-    client_id: str | None = None,
 ):
     """
     Yield public tool events and finish with one private `_tool_message` event
@@ -379,7 +376,6 @@ async def _execute_tool_call(
             permission == "ask"
             and session_grant_key
             and approval_manager.is_session_granted(
-                actor_id or "local",
                 conversation_id,
                 tool_name,
                 session_grant_key,
@@ -460,8 +456,6 @@ async def _execute_tool_call(
             connection_id=(capability_binding or {}).get("connection_id"),
             capability_id=(capability_binding or {}).get("capability_id"),
             account_hint=(capability_binding or {}).get("account_hint"),
-            actor_id=actor_id,
-            client_id=client_id,
         )
 
     call_id = audit.id
@@ -526,8 +520,6 @@ async def _execute_tool_call(
             connection_id=(capability_binding or {}).get("connection_id"),
             capability_id=(capability_binding or {}).get("capability_id"),
             account_hint=(capability_binding or {}).get("account_hint"),
-            actor_id=actor_id or "local",
-            client_id=client_id,
         )
         if session_grant_key:
             # JACE_4B3D_EXACT_GRANT_EXECUTOR_V2
@@ -675,8 +667,6 @@ async def _execute_tool_call(
                 conversation_id=conversation_id,
                 user_message=user_message,
                 capability_binding=capability_binding,
-                actor_id=actor_id,
-                client_id=client_id,
             )
             result = await definition.execute(arguments, context)
 
@@ -963,8 +953,6 @@ async def stream_agent(
     current_images: list[str] | None = None,
     attachment_context: str = "",
     capability_bindings: dict[str, dict[str, Any]] | None = None,
-    actor_id: str | None = None,
-    client_id: str | None = None,
 ):
     """Streaming multi-turn agent loop with guarded final-answer recovery.
 
@@ -1449,8 +1437,6 @@ async def stream_agent(
                 conversation_id=conversation_id,
                 user_message=user_message,
                 capability_bindings=capability_bindings,
-                actor_id=actor_id,
-                client_id=client_id,
             ):
                 if event.get("type") == "_tool_message":
                     tool_message = event["message"]
