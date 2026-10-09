@@ -15,40 +15,38 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
-
+    name: Validate
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Check out pushed commit
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
-
-      - name: Check backend syntax
+          python-version: '3.12'
+      - name: Check backend Python syntax
         run: python -m compileall -q backend/jace
-
-      - uses: actions/setup-node@v4
+      - name: Set up Node
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: '20'
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
-
       - name: Install desktop dependencies
         working-directory: apps/desktop
         run: npm ci
-
       - name: Build desktop
         working-directory: apps/desktop
         run: npm run build
 
   deploy:
+    name: Deploy production
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: production
-
     steps:
-      - uses: actions/checkout@v4
-
+      - name: Check out validated commit
+        uses: actions/checkout@v7
       - name: Build clean server bundle
         id: bundle
         shell: bash
@@ -56,10 +54,8 @@ jobs:
           set -euo pipefail
           stage="${RUNNER_TEMP}/jace-stage"
           bundle="${RUNNER_TEMP}/jace-server-${GITHUB_SHA}.tar.gz"
-
           rm -rf "${stage}"
           mkdir -p "${stage}/jace"
-
           rsync -a \
             --exclude='.git' \
             --exclude='.github' \
@@ -81,71 +77,34 @@ jobs:
             --exclude='.env.*' \
             --exclude='*.pyc' \
             --exclude='*.pyo' \
-            "${GITHUB_WORKSPACE}/" \
-            "${stage}/jace/"
-
+            "${GITHUB_WORKSPACE}/" "${stage}/jace/"
           printf '%s\n' "${GITHUB_SHA}" > "${stage}/jace/.jace-deploy-commit"
           tar -C "${stage}" -czf "${bundle}" jace
-          sha256sum "${bundle}"
-
+          bundle_sha="$(sha256sum "${bundle}" | awk '{print $1}')"
+          echo "Bundle SHA256: ${bundle_sha}"
           echo "path=${bundle}" >> "${GITHUB_OUTPUT}"
-          echo "name=jace-server-${GITHUB_SHA}.tar.gz" >> "${GITHUB_OUTPUT}"
-
-      - name: Configure deployment SSH
+          echo "sha256=${bundle_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Deploy over HTTPS
         shell: bash
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          test -n "${SSH_PRIVATE_KEY}"
-          test -n "${SSH_KNOWN_HOSTS}"
-
-          install -d -m 0700 "${HOME}/.ssh"
-          printf '%s\n' "${SSH_PRIVATE_KEY}" > "${HOME}/.ssh/jace_deploy"
-          chmod 0600 "${HOME}/.ssh/jace_deploy"
-          printf '%s\n' "${SSH_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
-          chmod 0600 "${HOME}/.ssh/known_hosts"
-
-      - name: Upload bundle
-        shell: bash
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_PORT: ${{ secrets.VPS_PORT }}
+          DEPLOY_URL: ${{ secrets.JACE_DEPLOY_URL }}
+          DEPLOY_TOKEN: ${{ secrets.JACE_DEPLOY_TOKEN }}
           BUNDLE: ${{ steps.bundle.outputs.path }}
-          BUNDLE_NAME: ${{ steps.bundle.outputs.name }}
+          BUNDLE_SHA256: ${{ steps.bundle.outputs.sha256 }}
         run: |
           set -euo pipefail
-          port="${VPS_PORT:-22}"
-
-          scp \
-            -P "${port}" \
-            -i "${HOME}/.ssh/jace_deploy" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            "${BUNDLE}" \
-            "jace-deploy@${VPS_HOST}:/home/jace-deploy/incoming/${BUNDLE_NAME}"
-
-      - name: Deploy bundle
-        shell: bash
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_PORT: ${{ secrets.VPS_PORT }}
-          BUNDLE_NAME: ${{ steps.bundle.outputs.name }}
-        run: |
-          set -euo pipefail
-          port="${VPS_PORT:-22}"
-
-          ssh \
-            -p "${port}" \
-            -i "${HOME}/.ssh/jace_deploy" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            "jace-deploy@${VPS_HOST}" \
-            "sudo /usr/local/sbin/jace-deploy-bundle '/home/jace-deploy/incoming/${BUNDLE_NAME}'"
-
-      - name: Remove local deployment key
-        if: always()
-        run: rm -f "${HOME}/.ssh/jace_deploy"
+          test -n "${DEPLOY_URL}"
+          test -n "${DEPLOY_TOKEN}"
+          curl \
+            --fail-with-body \
+            --show-error \
+            --silent \
+            --connect-timeout 15 \
+            --max-time 900 \
+            -X POST \
+            -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
+            -H "X-Jace-Commit: ${GITHUB_SHA}" \
+            -H "X-Jace-SHA256: ${BUNDLE_SHA256}" \
+            -H 'Content-Type: application/gzip' \
+            --data-binary "@${BUNDLE}" \
+            "${DEPLOY_URL}"
