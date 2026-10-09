@@ -19,8 +19,10 @@ from jace_device_agent.identity import collect_identity
 from jace_device_agent.process_runtime import ProcessRuntimeManager
 from jace_device_agent.terminal_runtime import TerminalRuntimeManager
 from jace_device_agent.executor import execute_capability
+from jace_device_agent.protocol import PROTOCOL_VERSION
 
 
+# JACE_4B4B_SECURE_REMOTE_DEVICE_TRANSPORT
 class DeviceAgentClient:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
@@ -129,6 +131,8 @@ class DeviceAgentClient:
                 json.dumps(
                     {
                         "type": "hello",
+                        "protocol_version": PROTOCOL_VERSION,
+                        "device_id": self.config.device_id,
                         "device": identity,
                     }
                 )
@@ -143,6 +147,26 @@ class DeviceAgentClient:
             if welcome.get("type") != "welcome":
                 raise RuntimeError(
                     "Jace Core did not accept the Device Agent hello."
+                )
+
+            if welcome.get("protocol_version") != PROTOCOL_VERSION:
+                raise RuntimeError(
+                    "Jace Core returned an incompatible Device Agent "
+                    "transport protocol version."
+                )
+
+            if str(welcome.get("device_id") or "") != self.config.device_id:
+                raise RuntimeError(
+                    "Jace Core accepted the connection for a different "
+                    "device identity."
+                )
+
+            connection_id = str(
+                welcome.get("connection_id") or ""
+            ).strip()
+            if not connection_id:
+                raise RuntimeError(
+                    "Jace Core did not return a transport connection ID."
                 )
 
             heartbeat_seconds = int(
@@ -170,6 +194,7 @@ class DeviceAgentClient:
                 self._heartbeat_loop(
                     websocket,
                     heartbeat_seconds,
+                    connection_id,
                 )
             )
             stopper = asyncio.create_task(
@@ -201,6 +226,7 @@ class DeviceAgentClient:
         self,
         websocket,
         heartbeat_seconds: int,
+        connection_id: str,
     ) -> None:
         while not self._stopping.is_set():
             identity = collect_identity(
@@ -208,12 +234,18 @@ class DeviceAgentClient:
                 process_runtime_enabled=(
                     self.config.allow_process_execution
                 ),
+                terminal_runtime_enabled=(
+                    self.config.allow_terminal_sessions
+                ),
             )
 
             await websocket.send(
                 json.dumps(
                     {
                         "type": "heartbeat",
+                        "protocol_version": PROTOCOL_VERSION,
+                        "device_id": self.config.device_id,
+                        "connection_id": connection_id,
                         "device": identity,
                         "sent_at": datetime.now(
                             timezone.utc

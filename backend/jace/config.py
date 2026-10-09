@@ -47,6 +47,7 @@ class Settings(BaseSettings):
 
     # JACE_4BS5_DEVICE_SOCKET_CONFIG
     device_socket_heartbeat_seconds: int = 20
+    device_socket_hello_timeout_seconds: int = 15
 
 
 

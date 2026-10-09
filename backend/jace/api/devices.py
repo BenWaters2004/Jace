@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import (
     APIRouter,
     Header,
@@ -35,6 +37,12 @@ from jace.devices.service import (
 )
 from jace.db.models import utc_now
 from jace.devices.connections import device_connections
+from jace.devices.transport import (
+    PROTOCOL_VERSION,
+    DeviceTransportProtocolError,
+    validate_device_heartbeat,
+    validate_device_hello,
+)
 from jace.runtime import runtime_events
 
 
@@ -222,13 +230,21 @@ async def remove_device(device_id: str, request: Request):
             raise HTTPException(status_code=404, detail="Device not found.")
         row = await revoke_device(session, device=row)
 
+    await device_connections.disconnect(
+        row.id,
+        code=4003,
+        reason="Device revoked by its owner.",
+    )
+
     await runtime_events.publish("device.revoked", device_id=row.id, name=row.name)
     return device_response(row)
 
 # JACE_4BS5_DEVICE_SOCKET
+# JACE_4B4B_SECURE_REMOTE_DEVICE_TRANSPORT
 @router.websocket("/connect")
 async def connect_device(websocket: WebSocket):
-    # Maintain an authenticated outbound Device Agent connection.
+    """Accept one authenticated, owner-bound Device Agent transport session."""
+
     authorization = websocket.headers.get("Authorization")
 
     try:
@@ -244,37 +260,148 @@ async def connect_device(websocket: WebSocket):
         await websocket.close(code=4401)
         return
 
+    if settings.mode == "server" and not device.owner_user_id:
+        await websocket.close(code=4403)
+        return
+
     await websocket.accept()
-    await device_connections.register(device.id, websocket)
-    connected_event_sent = False
+    connection = None
 
     try:
+        try:
+            hello = await asyncio.wait_for(
+                websocket.receive_json(),
+                timeout=settings.device_socket_hello_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            await websocket.close(
+                code=4408,
+                reason="Device Agent hello timed out.",
+            )
+            return
+
+        try:
+            payload = validate_device_hello(
+                hello,
+                expected_device_id=device.id,
+            )
+        except DeviceTransportProtocolError as exc:
+            await websocket.send_json({"type": "error", "error": str(exc)})
+            await websocket.close(code=4400, reason=str(exc)[:120])
+            return
+
+        async with SessionLocal() as session:
+            current = await authenticate_device(session, token)
+            if current is None:
+                await websocket.close(code=4401)
+                return
+
+            if (
+                settings.mode == "server"
+                and current.owner_user_id != device.owner_user_id
+            ):
+                await websocket.close(code=4403)
+                return
+
+            current = await heartbeat(
+                session,
+                device=current,
+                agent_version=payload.get("agent_version"),
+                platform=payload.get("platform"),
+                os_version=payload.get("os_version"),
+                architecture=payload.get("architecture"),
+                capabilities=payload.get("capabilities"),
+                metadata=payload.get("metadata"),
+            )
+
+        connection = await device_connections.register(
+            device_id=current.id,
+            owner_user_id=current.owner_user_id,
+            websocket=websocket,
+        )
+
+        await runtime_events.publish(
+            "device.connected",
+            device_id=current.id,
+            owner_user_id=current.owner_user_id,
+            connection_id=connection.connection_id,
+            name=current.name,
+            hostname=current.hostname,
+            platform=current.platform,
+            agent_version=current.agent_version,
+            protocol_version=PROTOCOL_VERSION,
+        )
+
+        sent = await device_connections.send(
+            current.id,
+            {
+                "type": "welcome",
+                "protocol_version": PROTOCOL_VERSION,
+                "device_id": current.id,
+                "connection_id": connection.connection_id,
+                "heartbeat_interval_seconds": settings.device_socket_heartbeat_seconds,
+                "server_time": utc_now().isoformat(),
+            },
+            owner_user_id=current.owner_user_id,
+        )
+        if not sent:
+            return
+
         while True:
             message = await websocket.receive_json()
+            if not isinstance(message, dict):
+                await device_connections.send(
+                    current.id,
+                    {
+                        "type": "error",
+                        "error": "Device Agent message must be a JSON object.",
+                    },
+                    owner_user_id=current.owner_user_id,
+                )
+                continue
+
             message_type = str(message.get("type", ""))
 
-            if message_type in {"hello", "heartbeat"}:
-                payload = message.get("device") or {}
+            if message_type == "hello":
+                await websocket.close(
+                    code=4400,
+                    reason="Device hello may only be sent once.",
+                )
+                return
 
-                if not isinstance(payload, dict):
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "error": "device payload must be an object",
-                        }
+            if message_type == "heartbeat":
+                try:
+                    payload = validate_device_heartbeat(
+                        message,
+                        expected_device_id=current.id,
+                        expected_connection_id=connection.connection_id,
                     )
-                    continue
+                except DeviceTransportProtocolError as exc:
+                    await websocket.close(code=4400, reason=str(exc)[:120])
+                    return
 
                 async with SessionLocal() as session:
-                    current = await authenticate_device(session, token)
+                    refreshed = await authenticate_device(session, token)
+                    if refreshed is None:
+                        await websocket.close(
+                            code=4401,
+                            reason="Device credential revoked or invalid.",
+                        )
+                        return
 
-                    if current is None:
-                        await websocket.close(code=4401)
+                    if (
+                        settings.mode == "server"
+                        and refreshed.owner_user_id != current.owner_user_id
+                    ):
+                        await websocket.close(
+                            code=4403,
+                            reason="Device ownership changed.",
+                        )
                         return
 
                     current = await heartbeat(
                         session,
-                        device=current,
+                        device=refreshed,
                         agent_version=payload.get("agent_version"),
                         platform=payload.get("platform"),
                         os_version=payload.get("os_version"),
@@ -283,113 +410,96 @@ async def connect_device(websocket: WebSocket):
                         metadata=payload.get("metadata"),
                     )
 
-                if message_type == "hello" and not connected_event_sent:
-                    connected_event_sent = True
-                    await runtime_events.publish(
-                        "device.connected",
-                        device_id=current.id,
-                        name=current.name,
-                        hostname=current.hostname,
-                        platform=current.platform,
-                        agent_version=current.agent_version,
-                    )
-                    await websocket.send_json(
-                        {
-                            "type": "welcome",
-                            "device_id": current.id,
-                            "heartbeat_interval_seconds": settings.device_socket_heartbeat_seconds,
-                            "server_time": utc_now().isoformat(),
-                        }
-                    )
-                else:
-                    await websocket.send_json(
-                        {
-                            "type": "heartbeat_ack",
-                            "device_id": current.id,
-                            "server_time": utc_now().isoformat(),
-                        }
-                    )
+                await device_connections.send(
+                    current.id,
+                    {
+                        "type": "heartbeat_ack",
+                        "protocol_version": PROTOCOL_VERSION,
+                        "device_id": current.id,
+                        "connection_id": connection.connection_id,
+                        "server_time": utc_now().isoformat(),
+                    },
+                    owner_user_id=current.owner_user_id,
+                )
                 continue
 
             if message_type == "pong":
                 continue
 
             if message_type.startswith("terminal."):
-                # JACE_4B3B2_TERMINAL_DEVICE_ROUTING
                 from jace.terminal_runtime import terminal_runtime
 
                 handled = await terminal_runtime.handle_device_message(
-                    device_id=device.id,
+                    device_id=current.id,
                     message=message,
                 )
-
                 if not handled:
                     await runtime_events.publish(
                         "device.terminal.message.unmatched",
-                        device_id=device.id,
+                        device_id=current.id,
                         terminal_id=message.get("terminal_id"),
                         message_type=message_type,
                     )
-
                 continue
 
             if message_type.startswith("process."):
-                # JACE_4B3B1_PROCESS_DEVICE_ROUTING
                 from jace.process_runtime import process_runtime
 
                 handled = await process_runtime.handle_device_message(
-                    device_id=device.id,
+                    device_id=current.id,
                     message=message,
                 )
-
                 if not handled:
                     await runtime_events.publish(
                         "device.process.message.unmatched",
-                        device_id=device.id,
+                        device_id=current.id,
                         process_id=message.get("process_id"),
                         message_type=message_type,
                     )
-
                 continue
 
             if message_type == "capability.result":
-                # JACE_4BS6_DEVICE_RESULT_ROUTING
                 from jace.capabilities.device_broker import device_capability_broker
 
                 handled = await device_capability_broker.resolve_result(
-                    device_id=device.id,
+                    device_id=current.id,
                     message=message,
                 )
-
                 if not handled:
                     await runtime_events.publish(
                         "device.capability.result.unmatched",
-                        device_id=device.id,
+                        device_id=current.id,
                         request_id=message.get("request_id"),
                         status=message.get("status"),
                     )
-
                 continue
 
-            await websocket.send_json(
+            await device_connections.send(
+                current.id,
                 {
                     "type": "error",
                     "error": (
                         "Unsupported Device Agent message type: "
                         f"{message_type or '<missing>'}"
                     ),
-                }
+                },
+                owner_user_id=current.owner_user_id,
             )
 
     except WebSocketDisconnect:
         pass
 
     finally:
-        removed = await device_connections.unregister(device.id, websocket)
-        if removed:
-            await runtime_events.publish(
-                "device.disconnected",
-                device_id=device.id,
-                name=device.name,
+        if connection is not None:
+            removed = await device_connections.unregister(
+                device.id,
+                websocket,
             )
-
+            if removed:
+                await runtime_events.publish(
+                    "device.disconnected",
+                    device_id=device.id,
+                    owner_user_id=device.owner_user_id,
+                    connection_id=connection.connection_id,
+                    name=device.name,
+                )
