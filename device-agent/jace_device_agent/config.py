@@ -37,6 +37,8 @@ class AgentConfig:
     reconnect_min_seconds: float = 1.0
     reconnect_max_seconds: float = 30.0
     allow_insecure_remote: bool = False
+    # JACE_4B4C1_HOST_SECURITY_BOUNDARY
+    require_strong_host_isolation: bool = True
     # JACE_4B3B1_PROCESS_AGENT_CONFIG
     allow_process_execution: bool = False
     process_history_bytes: int = 2097152

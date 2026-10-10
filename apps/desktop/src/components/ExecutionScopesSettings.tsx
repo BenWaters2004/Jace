@@ -362,12 +362,11 @@ export function ExecutionScopesSettings() {
       </div>
 
       <div className="execution-scope-warning" role="note">
-        <strong>Scope boundary, not a sandbox.</strong>
+        <strong>Two-sided execution boundary.</strong>
         <span>
-          The configured root controls Jace&apos;s launch directory and approval
-          context. An approved shell still runs as the Device Agent OS user and
-          can explicitly address other host paths. Strong host isolation comes
-          later in 4B.4C.
+          Core scopes must also match a root approved locally by the Device
+          Agent. Arbitrary process and terminal execution remains fail-closed
+          until the Windows isolation runner is installed in 4B.4C.2.
         </span>
       </div>
 

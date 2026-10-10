@@ -11,6 +11,7 @@ from typing import Any
 import psutil
 
 from jace_device_agent import __version__
+from jace_device_agent.host_policy import host_policy_registry
 
 
 SUPPORTED_CAPABILITIES = {
@@ -110,6 +111,12 @@ def _filesystem_list(parameters: dict[str, Any]) -> dict[str, Any]:
     path = Path(
         os.path.expandvars(os.path.expanduser(raw_path))
     ).resolve()
+
+    # JACE_4B4C1_LOCAL_READ_BOUNDARY
+    host_policy_registry.authorise_path(
+        path,
+        operation="filesystem.list",
+    )
 
     if not path.exists():
         raise FileNotFoundError(f"Directory does not exist: {path}")

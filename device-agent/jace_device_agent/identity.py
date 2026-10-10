@@ -9,12 +9,15 @@ from typing import Any
 
 from jace_device_agent import __version__
 from jace_device_agent.executor import advertised_execution_capabilities
+from jace_device_agent.host_policy import host_policy_registry
 
 
 from jace_device_agent.config import AgentConfig
 def discover_capabilities(
     process_runtime_enabled: bool = False,
     terminal_runtime_enabled: bool = False,
+    strong_isolation_ready: bool = False,
+    require_strong_host_isolation: bool = True,
 ) -> list[str]:
     """Advertise host capabilities that later phases may broker.
 
@@ -27,6 +30,7 @@ def discover_capabilities(
         "filesystem.local",
         "process.local",
         "applications.local",
+        "host.policy",
     }
 
     system = platform.system().lower()
@@ -50,12 +54,16 @@ def discover_capabilities(
     if shutil.which("ollama"):
         capabilities.add("model.ollama")
 
-    # JACE_4B3B1_PROCESS_RUNTIME_CAPABILITY
-    if process_runtime_enabled:
+    runtime_security_ready = (
+        strong_isolation_ready
+        or not require_strong_host_isolation
+    )
+
+    # JACE_4B4C1_FAIL_CLOSED_RUNTIME_ADVERTISEMENT
+    if process_runtime_enabled and runtime_security_ready:
         capabilities.add("process.runtime")
 
-    # JACE_4B3B2_TERMINAL_RUNTIME_CAPABILITY
-    if terminal_runtime_enabled:
+    if terminal_runtime_enabled and runtime_security_ready:
         capabilities.add("terminal.runtime")
 
     # JACE_4BS6_DEVICE_EXECUTION_CAPABILITIES
@@ -101,8 +109,23 @@ def collect_identity(
         "capabilities": discover_capabilities(
             process_runtime_enabled=process_runtime_enabled,
             terminal_runtime_enabled=terminal_runtime_enabled,
+            strong_isolation_ready=host_policy_registry.strong_isolation_ready,
+            require_strong_host_isolation=(
+                AgentConfig.load().require_strong_host_isolation
+            ),
         ),
         "metadata": {
+            "host_security": {
+                "approved_root_count": (
+                    host_policy_registry.status()["approved_root_count"]
+                ),
+                "strong_isolation_backend": (
+                    host_policy_registry.strong_isolation_backend
+                ),
+                "strong_isolation_ready": (
+                    host_policy_registry.strong_isolation_ready
+                ),
+            },
             "python_version": platform.python_version(),
             "python_implementation": platform.python_implementation(),
             "executable": sys.executable,

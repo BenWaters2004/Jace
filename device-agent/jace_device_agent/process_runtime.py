@@ -16,6 +16,7 @@ from typing import Any
 import psutil
 
 from jace_device_agent.config import AgentConfig
+from jace_device_agent.host_policy import host_policy_registry
 from jace_device_agent.scope_security import resolve_scoped_cwd
 
 
@@ -278,6 +279,16 @@ class ProcessRuntimeManager:
         )
 
         try:
+            # JACE_4B4C1_HOST_RUNTIME_POLICY
+            host_policy_registry.authorise_runtime(
+                scope_root=scope_root,
+                shell=shell,
+                runtime_kind="process",
+                require_strong_isolation=(
+                    self.config.require_strong_host_isolation
+                ),
+            )
+
             args = self._invocation(
                 shell,
                 command,
