@@ -54,17 +54,24 @@ def discover_capabilities(
     if shutil.which("ollama"):
         capabilities.add("model.ollama")
 
-    runtime_security_ready = (
-        strong_isolation_ready
+    # JACE_4B4C2_PROCESS_ISOLATION_CAPABILITIES
+    process_security_ready = (
+        host_policy_registry.process_isolation_ready
+        or not require_strong_host_isolation
+    )
+    terminal_security_ready = (
+        host_policy_registry.terminal_isolation_ready
         or not require_strong_host_isolation
     )
 
-    # JACE_4B4C1_FAIL_CLOSED_RUNTIME_ADVERTISEMENT
-    if process_runtime_enabled and runtime_security_ready:
+    if process_runtime_enabled and process_security_ready:
         capabilities.add("process.runtime")
 
-    if terminal_runtime_enabled and runtime_security_ready:
+    if terminal_runtime_enabled and terminal_security_ready:
         capabilities.add("terminal.runtime")
+
+    if host_policy_registry.process_isolation_ready:
+        capabilities.add("host.isolation.windows-sandbox")
 
     # JACE_4BS6_DEVICE_EXECUTION_CAPABILITIES
     capabilities.update(advertised_execution_capabilities())
@@ -124,6 +131,15 @@ def collect_identity(
                 ),
                 "strong_isolation_ready": (
                     host_policy_registry.strong_isolation_ready
+                ),
+                "process_isolation_ready": (
+                    host_policy_registry.process_isolation_ready
+                ),
+                "terminal_isolation_ready": (
+                    host_policy_registry.terminal_isolation_ready
+                ),
+                "isolated_process_shells": (
+                    host_policy_registry.isolated_process_shells
                 ),
             },
             "python_version": platform.python_version(),

@@ -18,6 +18,10 @@ import psutil
 from jace_device_agent.config import AgentConfig
 from jace_device_agent.host_policy import host_policy_registry
 from jace_device_agent.scope_security import resolve_scoped_cwd
+from jace_device_agent.windows_sandbox_runner import (
+    create_request_file,
+    sandbox_command_argv,
+)
 
 
 _FINAL = {
@@ -289,16 +293,40 @@ class ProcessRuntimeManager:
                 ),
             )
 
-            args = self._invocation(
-                shell,
-                command,
-            )
-
             # JACE_4B3D_DEVICE_PROCESS_SCOPE_ENFORCEMENT
             cwd = resolve_scoped_cwd(
                 cwd,
                 scope_root,
             )
+
+            # JACE_4B4C2_WINDOWS_SANDBOX_PROCESS
+            if self.config.require_strong_host_isolation:
+                request_file = create_request_file(
+                    shell=shell,
+                    command=command,
+                    scope_root=scope_root or "",
+                    cwd=cwd or "",
+                    timeout_seconds=timeout_seconds,
+                )
+                args = sandbox_command_argv(
+                    request_file
+                )
+                watchdog_timeout_seconds = (
+                    (
+                        int(timeout_seconds)
+                        if timeout_seconds is not None
+                        else 3600
+                    )
+                    + 150
+                )
+            else:
+                args = self._invocation(
+                    shell,
+                    command,
+                )
+                watchdog_timeout_seconds = (
+                    timeout_seconds
+                )
 
             kwargs: dict[
                 str,
@@ -339,7 +367,7 @@ class ProcessRuntimeManager:
                 command=command,
                 cwd=cwd,
                 mode=mode,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=watchdog_timeout_seconds,
                 process=process,
                 pid=int(
                     process.pid
@@ -725,7 +753,13 @@ class ProcessRuntimeManager:
             exit_code
         )
 
-        if managed.timed_out:
+        if (
+            managed.timed_out
+            or (
+                self.config.require_strong_host_isolation
+                and exit_code == 124
+            )
+        ):
             managed.status = "timed_out"
         elif managed.cancel_requested:
             managed.status = "cancelled"

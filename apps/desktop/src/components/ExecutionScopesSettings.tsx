@@ -362,11 +362,12 @@ export function ExecutionScopesSettings() {
       </div>
 
       <div className="execution-scope-warning" role="note">
-        <strong>Two-sided execution boundary.</strong>
+        <strong>Host-isolated process execution.</strong>
         <span>
-          Core scopes must also match a root approved locally by the Device
-          Agent. Arbitrary process and terminal execution remains fail-closed
-          until the Windows isolation runner is installed in 4B.4C.2.
+          Core scopes must also match a locally approved Device Agent root.
+          Verified PowerShell/CMD processes run in a disposable Windows
+          Sandbox with only that workspace mapped in. WSL and interactive
+          terminals remain fail-closed.
         </span>
       </div>
 
