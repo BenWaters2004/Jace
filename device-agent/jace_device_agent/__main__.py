@@ -16,6 +16,7 @@ from jace_device_agent.config import (
 )
 from jace_device_agent.credentials import credential_store
 from jace_device_agent.identity import collect_identity
+from jace_device_agent.host_policy import host_policy_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,6 +94,19 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["enable", "disable", "status"],
     )
 
+    # JACE_4B4C3_PROCESS_MODE_CLI
+    process_mode_parser = subparsers.add_parser(
+        "process-mode",
+        help=(
+            "Choose the local process backend. Native is normal trusted-host "
+            "execution; sandbox is optional for untrusted code."
+        ),
+    )
+    process_mode_parser.add_argument(
+        "action",
+        choices=["native", "sandbox", "status"],
+    )
+
     return parser
 
 
@@ -159,6 +173,7 @@ def show_status() -> int:
                 "device_name": config.device_name,
                 "credential_present": token_present,
                 "process_runtime_enabled": config.allow_process_execution,
+                "process_execution_mode": config.process_execution_mode,
                 "terminal_runtime_enabled": config.allow_terminal_sessions,
             },
             indent=2,
@@ -253,12 +268,52 @@ def main() -> int:
                     "enabled": (
                         config.allow_process_execution
                     ),
+                    "execution_mode": (
+                        config.process_execution_mode
+                    ),
                     "config_path": str(
                         config_path()
                     ),
                 },
                 indent=2,
             )
+        )
+        return 0
+
+    if args.command == "process-mode":
+        config = AgentConfig.load()
+
+        if args.action == "status":
+            print(
+                json.dumps(
+                    {
+                        "execution_mode": config.process_execution_mode,
+                        "sandbox_available": (
+                            host_policy_registry.process_isolation_ready
+                        ),
+                        "config_path": str(config_path()),
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+
+        if (
+            args.action == "sandbox"
+            and not host_policy_registry.process_isolation_ready
+        ):
+            print(
+                "Cannot select sandbox mode because Windows Sandbox has not "
+                "passed the local Jace isolation verification.",
+                file=sys.stderr,
+            )
+            return 1
+
+        config.process_execution_mode = args.action
+        config.save()
+        print(
+            f"Device Agent process execution mode set to {args.action}. "
+            "Restart the Device Agent to refresh advertised capabilities."
         )
         return 0
 

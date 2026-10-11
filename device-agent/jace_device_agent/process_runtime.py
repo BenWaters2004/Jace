@@ -288,8 +288,8 @@ class ProcessRuntimeManager:
                 scope_root=scope_root,
                 shell=shell,
                 runtime_kind="process",
-                require_strong_isolation=(
-                    self.config.require_strong_host_isolation
+                execution_mode=(
+                    self.config.process_execution_mode
                 ),
             )
 
@@ -299,8 +299,10 @@ class ProcessRuntimeManager:
                 scope_root,
             )
 
-            # JACE_4B4C2_WINDOWS_SANDBOX_PROCESS
-            if self.config.require_strong_host_isolation:
+            # JACE_4B4C3_TRUSTED_HOST_PROCESS
+            # Native is normal trusted-host execution. Sandbox remains a local
+            # opt-in backend for deliberately untrusted code.
+            if self.config.process_execution_mode == "sandbox":
                 request_file = create_request_file(
                     shell=shell,
                     command=command,
@@ -756,7 +758,7 @@ class ProcessRuntimeManager:
         if (
             managed.timed_out
             or (
-                self.config.require_strong_host_isolation
+                self.config.process_execution_mode == "sandbox"
                 and exit_code == 124
             )
         ):

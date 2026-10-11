@@ -250,7 +250,8 @@ class HostPolicyRegistry:
         scope_root: str | None,
         shell: str,
         runtime_kind: str,
-        require_strong_isolation: bool,
+        require_strong_isolation: bool | None = None,
+        execution_mode: str | None = None,
     ) -> ApprovedRoot:
         shell = str(shell or "").strip().lower()
         root = self.find_exact_root(scope_root)
@@ -269,23 +270,43 @@ class HostPolicyRegistry:
                 raise PermissionError(
                     f"Remote process execution is not locally approved for {root.path}."
                 )
-            if require_strong_isolation:
+
+            # JACE_4B4C3_NATIVE_PROCESS_POLICY
+            # The backend mode is selected only by local Device Agent config.
+            # Core cannot promote native/sandbox access over WSS.
+            mode = str(
+                execution_mode
+                or (
+                    "sandbox"
+                    if require_strong_isolation
+                    else "native"
+                )
+            ).strip().lower()
+
+            if mode == "native":
+                pass
+            elif mode == "sandbox":
                 if not self.process_isolation_ready:
                     raise PermissionError(
-                        "Windows Sandbox process isolation has not passed local verification."
+                        "Windows Sandbox process isolation has not passed "
+                        "local verification."
                     )
                 if shell not in SUPPORTED_PROCESS_SHELLS:
                     raise PermissionError(
                         f"Shell {shell!r} is not supported by the verified "
-                        "Windows Sandbox process backend yet."
+                        "Windows Sandbox process backend."
                     )
+            else:
+                raise PermissionError(
+                    f"Unsupported local process execution mode: {mode!r}."
+                )
 
         elif runtime_kind == "terminal":
             if not root.terminal_enabled:
                 raise PermissionError(
                     f"Remote terminal access is not locally approved for {root.path}."
                 )
-            if require_strong_isolation:
+            if bool(require_strong_isolation):
                 raise PermissionError(
                     "Strong isolation for interactive terminals is not implemented yet."
                 )
@@ -306,6 +327,11 @@ class HostPolicyRegistry:
             "process_isolation_ready": self.process_isolation_ready,
             "terminal_isolation_ready": self.terminal_isolation_ready,
             "isolated_process_shells": self.isolated_process_shells,
+            "process_execution_modes": [
+                "native",
+                "sandbox",
+            ],
+            "native_process_shells": sorted(_ALLOWED_SHELLS),
         }
 
 

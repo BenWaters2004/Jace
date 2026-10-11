@@ -12,12 +12,16 @@ from jace_device_agent.executor import advertised_execution_capabilities
 from jace_device_agent.host_policy import host_policy_registry
 
 
-from jace_device_agent.config import AgentConfig
+from jace_device_agent.config import (
+    AgentConfig,
+    normalise_process_execution_mode,
+)
 def discover_capabilities(
     process_runtime_enabled: bool = False,
     terminal_runtime_enabled: bool = False,
     strong_isolation_ready: bool = False,
     require_strong_host_isolation: bool = True,
+    process_execution_mode: str = "native",
 ) -> list[str]:
     """Advertise host capabilities that later phases may broker.
 
@@ -54,11 +58,21 @@ def discover_capabilities(
     if shutil.which("ollama"):
         capabilities.add("model.ollama")
 
-    # JACE_4B4C2_PROCESS_ISOLATION_CAPABILITIES
-    process_security_ready = (
-        host_policy_registry.process_isolation_ready
-        or not require_strong_host_isolation
+    # JACE_4B4C3_TRUSTED_HOST_CAPABILITIES
+    process_mode = normalise_process_execution_mode(
+        process_execution_mode
     )
+
+    process_security_ready = (
+        process_mode == "native"
+        or (
+            process_mode == "sandbox"
+            and host_policy_registry.process_isolation_ready
+        )
+    )
+
+    # Interactive terminals remain on the earlier fail-closed gate until the
+    # dedicated native-terminal phase.
     terminal_security_ready = (
         host_policy_registry.terminal_isolation_ready
         or not require_strong_host_isolation
@@ -70,6 +84,12 @@ def discover_capabilities(
     if terminal_runtime_enabled and terminal_security_ready:
         capabilities.add("terminal.runtime")
 
+    if process_mode == "native":
+        capabilities.add("host.execution.native")
+    elif host_policy_registry.process_isolation_ready:
+        capabilities.add("host.execution.sandbox")
+
+    # Preserve Sandbox as an optional locally selectable backend.
     if host_policy_registry.process_isolation_ready:
         capabilities.add("host.isolation.windows-sandbox")
 
@@ -120,11 +140,17 @@ def collect_identity(
             require_strong_host_isolation=(
                 AgentConfig.load().require_strong_host_isolation
             ),
+            process_execution_mode=(
+                AgentConfig.load().process_execution_mode
+            ),
         ),
         "metadata": {
             "host_security": {
                 "approved_root_count": (
                     host_policy_registry.status()["approved_root_count"]
+                ),
+                "process_execution_mode": (
+                    AgentConfig.load().process_execution_mode
                 ),
                 "strong_isolation_backend": (
                     host_policy_registry.strong_isolation_backend

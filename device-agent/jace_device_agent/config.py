@@ -28,6 +28,23 @@ def config_path() -> Path:
     return data_directory() / "config.json"
 
 
+_PROCESS_EXECUTION_MODES = {
+    "native",
+    "sandbox",
+}
+
+
+def normalise_process_execution_mode(value: str | None) -> str:
+    mode = str(value or "native").strip().lower()
+
+    if mode not in _PROCESS_EXECUTION_MODES:
+        raise ValueError(
+            "Device Agent process execution mode must be 'native' or 'sandbox'."
+        )
+
+    return mode
+
+
 @dataclass(slots=True)
 class AgentConfig:
     server_url: str
@@ -38,7 +55,15 @@ class AgentConfig:
     reconnect_max_seconds: float = 30.0
     allow_insecure_remote: bool = False
     # JACE_4B4C1_HOST_SECURITY_BOUNDARY
+    # Kept for backwards-compatible config loading and the terminal fail-closed
+    # gate. Process execution now uses process_execution_mode instead.
     require_strong_host_isolation: bool = True
+
+    # JACE_4B4C3_TRUSTED_HOST_EXECUTION
+    # Native is normal trusted-host execution. Sandbox is optional for
+    # deliberately untrusted code.
+    process_execution_mode: str = "native"
+
     # JACE_4B3B1_PROCESS_AGENT_CONFIG
     allow_process_execution: bool = False
     process_history_bytes: int = 2097152
@@ -59,9 +84,20 @@ class AgentConfig:
             )
 
         data = json.loads(path.read_text(encoding="utf-8"))
+
+        # Older paired configs do not contain this field. They migrate to
+        # native trusted-host execution without needing re-pairing.
+        data["process_execution_mode"] = normalise_process_execution_mode(
+            data.get("process_execution_mode")
+        )
+
         return cls(**data)
 
     def save(self) -> None:
+        self.process_execution_mode = normalise_process_execution_mode(
+            self.process_execution_mode
+        )
+
         directory = data_directory()
         directory.mkdir(parents=True, exist_ok=True)
 

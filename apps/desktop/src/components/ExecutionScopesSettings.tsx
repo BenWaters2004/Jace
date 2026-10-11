@@ -362,12 +362,12 @@ export function ExecutionScopesSettings() {
       </div>
 
       <div className="execution-scope-warning" role="note">
-        <strong>Host-isolated process execution.</strong>
+        <strong>Trusted host execution.</strong>
         <span>
-          Core scopes must also match a locally approved Device Agent root.
-          Verified PowerShell/CMD processes run in a disposable Windows
-          Sandbox with only that workspace mapped in. WSL and interactive
-          terminals remain fail-closed.
+          Core scopes must also match a root and shell approved locally by the
+          Device Agent. Native execution is the normal mode and runs on the
+          selected host; Windows Sandbox remains an optional local mode for
+          untrusted code. Interactive terminals remain fail-closed for now.
         </span>
       </div>
 
