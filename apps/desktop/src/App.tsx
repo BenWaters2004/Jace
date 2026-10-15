@@ -61,7 +61,14 @@ import {
   updateVoiceSettings,
   resetVoiceSettings,
   uploadAttachment,
+  getAuthStatus,
+  getCurrentAuthUser,
+  loginAuth,
 } from "./api";
+import {
+  getAuthAccessToken,
+  getOrCreateClientId,
+} from "./auth";
 import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
 import { CalendarWorkspace } from "./components/CalendarWorkspace";
@@ -184,6 +191,11 @@ export default function App(
   );
   // JACE_SETTINGS_FULLPAGE_V2
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
@@ -417,6 +429,26 @@ export default function App(
     setError(null);
 
     try {
+      const authStatus = await getAuthStatus();
+
+      if (authStatus.auth_required) {
+        if (!getAuthAccessToken()) {
+          setAuthRequired(true);
+          setConnectionState("checking");
+          return;
+        }
+
+        try {
+          await getCurrentAuthUser();
+        } catch {
+          setAuthRequired(true);
+          setConnectionState("checking");
+          return;
+        }
+      }
+
+      setAuthRequired(false);
+
       const currentHealth = await getHealth();
       setHealth(currentHealth);
 
@@ -505,6 +537,37 @@ export default function App(
   }, [refreshControl, requestedConversationId]);
 
   useEffect(() => { void initialise(); }, [initialise]);
+
+  async function handleServerLogin(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (authLoading) return;
+
+    setAuthLoading(true);
+    setAuthError(null);
+
+    try {
+      await loginAuth({
+        email: authEmail.trim(),
+        password: authPassword,
+        client_id: getOrCreateClientId(),
+        client_name: "Jace Desktop",
+      });
+
+      setAuthPassword("");
+      await initialise();
+    } catch (error) {
+      setAuthError(
+        error instanceof Error
+          ? error.message
+          : "Unable to sign in to Jace Core.",
+      );
+    } finally {
+      setAuthLoading(false);
+    }
+  }
 
 
   useEffect(() => {
@@ -1509,6 +1572,64 @@ export default function App(
     } catch (automationError) {
       setError(automationError instanceof Error ? automationError.message : "Could not clear notifications.");
     }
+  }
+
+  if (authRequired) {
+    return (
+      <main className="boot-screen">
+        <div className="welcome-mark">J</div>
+
+        <h1>Sign in to Jace</h1>
+
+        <p>
+          Connect to your central Jace Core.
+        </p>
+
+        <form
+          onSubmit={(event) => void handleServerLogin(event)}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            width: "min(360px, 90vw)",
+          }}
+        >
+          <input
+            type="email"
+            value={authEmail}
+            onChange={(event) =>
+              setAuthEmail(event.target.value)
+            }
+            placeholder="Email address"
+            autoComplete="username"
+            required
+          />
+
+          <input
+            type="password"
+            value={authPassword}
+            onChange={(event) =>
+              setAuthPassword(event.target.value)
+            }
+            placeholder="Password"
+            autoComplete="current-password"
+            required
+          />
+
+          {authError && (
+            <p role="alert">{authError}</p>
+          )}
+
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={authLoading}
+          >
+            {authLoading ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+      </main>
+    );
   }
 
   if (!settings || !voiceSettings) {
