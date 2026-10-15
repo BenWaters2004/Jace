@@ -19,15 +19,24 @@ async def _run_tool(
     call: dict[str, Any],
     conversation_id: str | None,
     user_message: str,
+    capability_bindings: dict[str, dict[str, Any]] | None = None,
+    actor_id: str | None = None,
+    client_id: str | None = None,
 ):
     from jace.tools.agent import _execute_tool_call
 
     tool_message: dict[str, Any] | None = None
     public_summary = ""
+    # JACE_4B4C3_ACTOR_PROPAGATION_HOTFIX
+    # Forced delegation/result tools must execute with the same authenticated
+    # actor/client/capability context as the normal agent tool path.
     async for event in _execute_tool_call(
         call=call,
         conversation_id=conversation_id,
         user_message=user_message,
+        capability_bindings=capability_bindings,
+        actor_id=actor_id,
+        client_id=client_id,
     ):
         if event.get("type") == "_tool_message":
             tool_message = event.get("message")
@@ -80,6 +89,8 @@ def wrap_stream_agent(
         current_images: list[str] | None = None,
         attachment_context: str = "",
         capability_bindings: dict[str, dict[str, Any]] | None = None,
+        actor_id: str | None = None,
+        client_id: str | None = None,
     ):
         # JACE_STEP4A4_BRIDGE_BINDING
         names = list(tool_names or [])
@@ -117,6 +128,8 @@ def wrap_stream_agent(
                 current_images=current_images,
                 attachment_context=attachment_context,
                 capability_bindings=capability_bindings,
+                actor_id=actor_id,
+                client_id=client_id,
             ):
                 yield event
             return
@@ -150,6 +163,9 @@ def wrap_stream_agent(
             call=forced_call,
             conversation_id=conversation_id,
             user_message=user_message,
+            capability_bindings=capability_bindings,
+            actor_id=actor_id,
+            client_id=client_id,
         ):
             if event.get("type") == "_jace_forced_tool_capture":
                 tool_message = event.get("tool_message")
