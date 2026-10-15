@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "../constants";
+import { authenticatedFetch } from "../api";
 
 export const PUSH_TO_TALK_KEY = "Home";
 export const DEFAULT_VOICE_WELCOME_LINE =
@@ -722,7 +723,7 @@ export function useVoiceController(
 
   const refreshStatus = useCallback(async (): Promise<VoiceStatusResponse | null> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/voice/status`);
+      const response = await authenticatedFetch(`${API_BASE_URL}/voice/status`);
 
       if (!response.ok) {
         throw new Error(
@@ -765,7 +766,7 @@ export function useVoiceController(
       speechAbortsRef.current.add(controller);
 
       try {
-        const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/voice/synthesize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text }),
@@ -1203,7 +1204,7 @@ export function useVoiceController(
       filename: file.name,
     });
 
-    const response = await fetch(`${API_BASE_URL}/voice/transcribe`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/voice/transcribe`, {
       method: "POST",
       body: form,
     });

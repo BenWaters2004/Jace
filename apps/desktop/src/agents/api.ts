@@ -12,12 +12,13 @@ import type {
   AgentTaskListResponse,
   AgentWorkerListResponse,
 } from "./types";
+import { authenticatedFetch } from "../api";
 
 async function agentRequest<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",

@@ -200,7 +200,7 @@ async function refreshAuthSession(): Promise<boolean> {
   return authRefreshPromise;
 }
 
-async function authenticatedFetch(
+export async function authenticatedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
   retryAuth = true,

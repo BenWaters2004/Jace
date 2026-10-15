@@ -199,6 +199,9 @@ export default function App(
   // JACE_PHASE3G_WORKSPACE_CONSOLIDATION
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
+  // Core connectivity and AI model readiness are independent.
+  const [modelWarning, setModelWarning] = useState<string | null>(null);
+  useEffect(() => { if (modelWarning) console.warn("[Jace model]", modelWarning); }, [modelWarning]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -497,14 +500,21 @@ export default function App(
         setControlActions([]);
       }
 
-      if (!currentHealth.ollama_connected) {
-        setConnectionState("ollama-offline");
-        return;
-      }
-
-      const modelResponse = await getModels();
-      setModels(modelResponse.models);
+      // A reachable, authenticated Core is online even if its current model
+      // provider is unavailable. Allow conversations and device UI to load.
       setConnectionState("online");
+      if (!currentHealth.ollama_connected) {
+        setModelWarning("Jace Core is connected, but Ollama is unavailable. AI replies may not work until a model provider is configured.");
+      } else {
+        setModelWarning(null);
+      }
+      try {
+        const modelResponse = await getModels();
+        setModels(modelResponse.models);
+      } catch (modelError) {
+        setModels([]);
+        setModelWarning(modelError instanceof Error ? `Could not load models: ${modelError.message}` : "Could not load models.");
+      }
 
       let initialConversation: ConversationDetail | null = null;
       if (requestedConversationId) {
@@ -604,7 +614,7 @@ export default function App(
   }, [initialise, isPrimaryWindow]);
   useEffect(() => {
     if (!isPrimaryWindow) return;
-    if (connectionState === "backend-offline") return;
+    if (connectionState !== "online" || authRequired) return;
 
     let cancelled = false;
 
@@ -642,7 +652,7 @@ export default function App(
   }, [connectionState]);
 
   useEffect(() => {
-    if (connectionState === "backend-offline") return;
+    if (connectionState !== "online" || authRequired) return;
     if (!(settingsOpen && settingsSection === "permissions") && !controlStatus?.active_session) return;
 
     const timer = window.setInterval(() => {
@@ -656,7 +666,7 @@ export default function App(
   // same approval modal even when no foreground chat request is generating.
   useEffect(() => {
     if (!isPrimaryWindow) return;
-    if (connectionState === "backend-offline") return;
+    if (connectionState !== "online" || authRequired) return;
 
     let cancelled = false;
     async function pollToolApprovals() {

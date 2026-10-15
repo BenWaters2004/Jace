@@ -49,10 +49,13 @@ let currentSession: AuthTokenResponse | null = null;
 
 export function setAuthSession(session: AuthTokenResponse): void {
   currentSession = session;
+  // Re-establish the runtime stream after logging into VPS Core.
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("jace:auth-session-changed"));
 }
 
 export function clearAuthSession(): void {
   currentSession = null;
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("jace:auth-session-changed"));
 }
 
 export function getAuthAccessToken(): string | null {

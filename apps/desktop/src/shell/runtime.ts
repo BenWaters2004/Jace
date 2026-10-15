@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../constants";
 import { getRuntimeStreamTicket } from "../api";
+import { getAuthAccessToken } from "../auth";
+import { getRuntimeConfig } from "../runtimeConfig";
 
 export type JaceRuntimeState =
   | "offline"
@@ -343,7 +345,13 @@ export function subscribeRuntimeEvents(
 ): () => void {
   clearDisconnectTimer();
   hub.listeners.add(listener);
-  void ensureRuntimeConnection();
+  // Authentication is completed after React hooks first mount. Retry the
+  // runtime stream when the in-memory VPS session becomes available.
+  const onAuthChanged = () => { void ensureRuntimeConnection(); };
+  window.addEventListener("jace:auth-session-changed", onAuthChanged);
+  if (!getRuntimeConfig().isRemote || getAuthAccessToken()) {
+    void ensureRuntimeConnection();
+  }
 
   if (hub.latestEvent) {
     queueMicrotask(() => {
@@ -354,6 +362,7 @@ export function subscribeRuntimeEvents(
   }
 
   return () => {
+    window.removeEventListener("jace:auth-session-changed", onAuthChanged);
     hub.listeners.delete(listener);
     scheduleDisconnectIfUnused();
   };
