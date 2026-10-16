@@ -138,6 +138,7 @@ import type {
   VoiceSettings,
   VoiceStatus,
 } from "./types";
+import { getRuntimeConfig } from "./runtimeConfig";
 import "./styles.css";
 
 type ConnectionState = "checking" | "online" | "backend-offline" | "ollama-offline";
@@ -1771,6 +1772,8 @@ export default function App(
         automations={automations}
         notifications={automationNotifications}
         online={connectionState === "online"}
+        deploymentMode={getRuntimeConfig().deploymentMode}
+        modelAvailable={Boolean(health?.ollama_connected)}
         controlActive={Boolean(controlStatus?.active_session)}
         onScreenChange={setScreen}
         onOpenSettings={() => setSettingsOpen(true)}

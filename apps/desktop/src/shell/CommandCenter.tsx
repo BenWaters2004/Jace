@@ -48,6 +48,8 @@ export function CommandCenter(props: {
   automations: AutomationRecord[];
   notifications: AutomationNotificationRecord[];
   online: boolean;
+  deploymentMode: "local" | "server";
+  modelAvailable: boolean;
   controlActive: boolean;
   voicePhase: VoicePhase;
   voiceAmplitude: number;
@@ -326,7 +328,16 @@ export function CommandCenter(props: {
           )}
         </div>
 
-        <div className="footer-private">● Local / Private</div>
+        <div
+          className="footer-private"
+          role="status"
+          title={props.deploymentMode === "server" ? "Connected to central Jace Core" : "Using local Jace Core"}
+        >
+          {props.deploymentMode === "server"
+            ? (props.online ? "● VPS Connected" : "● VPS Disconnected")
+            : (props.online ? "● Local Core" : "● Local Offline")}
+          {props.online && !props.modelAvailable ? " · Model unavailable" : ""}
+        </div>
       </footer>
 
       {drawerOpen && (
