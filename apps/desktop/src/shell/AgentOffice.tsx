@@ -27,6 +27,7 @@ import "./AgentOfficeVisuals.css";
 import "./AgentInteractions.css";
 import "./AgentReadiness.css";
 import "./AgentDiagnostics.css";
+import { DirectorWorkflowInsights } from "./DirectorWorkflowInsights";
 
 function formatElapsed(
   start: string | null,
@@ -1216,6 +1217,11 @@ export function AgentOffice(props: {
             workerCount={workerCount}
             busyCount={busyCount}
             taskCount={office.tasks.length}
+            />
+            <DirectorWorkflowInsights
+              tasks={office.tasks}
+              realtimeConnected={office.realtimeConnected}
+              onRefresh={() => { void office.refresh(); }}
             />
           </AgentSystemErrorBoundary>
         )}

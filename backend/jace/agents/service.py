@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jace.agents.definitions import AgentDefinition, get_agent_definition
 from jace.agents.models import AgentTask, AgentTaskEvent
 from jace.db.models import utc_now
+from jace.config import settings
+from jace.agents.recovery_policy import has_recorded_action_activity, metadata_is_quarantined
 
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -278,6 +280,9 @@ async def request_cancel(session: AsyncSession, task: AgentTask) -> AgentTask:
 async def prepare_retry(session: AsyncSession, task: AgentTask) -> AgentTask:
     if task.status not in {"failed", "cancelled"}:
         raise ValueError("Only failed or cancelled agent tasks can be retried.")
+    # C4C.3C: retry is not an acknowledgement that side effects are safe to duplicate.
+    if metadata_is_quarantined(task):
+        raise ValueError("Recovery-quarantined task cannot be retried. Inspect audit and start a new, explicitly authorised task.")
 
     task.status = "queued"
     task.progress = 0.0
@@ -305,6 +310,23 @@ async def prepare_retry(session: AsyncSession, task: AgentTask) -> AgentTask:
     await session.refresh(task)
     return task
 
+
+
+async def _hold_ambiguous_recovery(
+    session: AsyncSession, task: AgentTask, *, reason: str,
+) -> AgentTask:
+    """Persist an actionable failed state, never redispatch an uncertain action."""
+    metadata = task_metadata(task)
+    metadata['recovery_quarantined'] = True
+    metadata['recovery_quarantine_reason'] = reason  # A fixed enum, not raw command text.
+    task.metadata_json = json.dumps(metadata, ensure_ascii=False)
+    return await update_task_state(
+        session, task, status='failed', progress_message='Recovery requires manual review',
+        error='RECOVERY REQUIRES MANUAL REVIEW: previous tool or approval activity may have side effects; no automatic replay.',
+        completed=True, event_type='recovery_quarantined',
+        event_message='Task was not replayed because recorded tool activity may have side effects.',
+        event_data_value={'reason': reason},
+    )
 
 
 async def recover_task_after_worker_crash(
@@ -337,6 +359,10 @@ async def recover_task_after_worker_crash(
             ),
             event_data_value={"worker_id": worker_id, "executor_exit": True},
         )
+
+    # C4C.3C: persisted intent and audit evidence fences uncertain work.
+    if settings.agent_safe_recovery_enabled and await has_recorded_action_activity(session, task):
+        return await _hold_ambiguous_recovery(session, task, reason="worker_exit")
 
     metadata = task_metadata(task)
     raw_recoveries = metadata.get("worker_crash_recoveries", 0)
@@ -430,6 +456,11 @@ async def recover_incomplete_tasks(session: AsyncSession) -> list[AgentTask]:
                 message="Task was cancelled while Jace was offline.",
                 commit=False,
             )
+            continue
+
+        # C4C.3C: do not replay tools just because the worker lost its lease.
+        if settings.agent_safe_recovery_enabled and await has_recorded_action_activity(session, task):
+            await _hold_ambiguous_recovery(session, task, reason="core_restart")
             continue
 
         if task.status != "queued":

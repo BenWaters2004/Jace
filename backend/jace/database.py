@@ -73,6 +73,10 @@ async def _ensure_step4a5_columns(connection) -> None:
 
 async def init_database() -> None:
     # JACE_4BS2_DATABASE_INIT
+    # C4C.3 Fix1: lazy model registration prevents database -> agents -> runner -> database cycle.
+    # Register the mapped receipt table BEFORE metadata.create_all, on every startup.
+    from jace.agents.models import DirectorHandoffReceipt, DirectorWorkflowCheckpoint
+    _ = DirectorHandoffReceipt
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 

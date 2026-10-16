@@ -90,3 +90,34 @@ class AgentTaskEvent(Base):
     )
 
     task: Mapped["AgentTask"] = relationship(back_populates="events")
+
+
+# C4C.3: unique database receipt; one workflow produces at most one persisted handoff.
+class DirectorHandoffReceipt(Base):
+    __tablename__ = "director_handoff_receipts"
+
+    workflow_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    handoff_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    result_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(60), nullable=False, default="disabled")
+    review_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+# C4C.3B: durable bounded model-stage state; never stores keys or tool authorizations.
+class DirectorWorkflowCheckpoint(Base):
+    __tablename__ = "director_workflow_checkpoints"
+    workflow_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_json: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    temperature: Mapped[float] = mapped_column(Float, nullable=False)
+    reasoning_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    stage: Mapped[str] = mapped_column(String(24), nullable=False, default="planned")
+    synthesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)

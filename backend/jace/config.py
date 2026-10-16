@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     collaboration_retrieval_timeout_seconds: int = 150
     # C4C.1: opt-in non-tool cross-provider assessment before Director handoff.
     director_cross_review_enabled: bool = False
+    # C4C.2 opt-in: completed web + workspace source records into cross-provider review.
+    director_coordinated_review_enabled: bool = False
+    # C4C.3: idempotent final handoffs and conservative failed-task recovery.
+    director_durable_handoffs_enabled: bool = False
+    # C4C.3B stores Director plan / synthesis / review checkpoints in Jace DB.
+    director_workflow_checkpoints_enabled: bool = False
+    # C4C.3C: hold interrupted tool/approval tasks for manual review.
+    agent_safe_recovery_enabled: bool = False
     collaboration_drafter_route: str = ""
     collaboration_reviewer_route: str = ""
     collaboration_max_output_chars: int = 12000

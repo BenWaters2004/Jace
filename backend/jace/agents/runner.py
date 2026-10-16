@@ -2745,6 +2745,33 @@ def _tool_evidence_payload(
             "text": str(parsed.get("text") or "")[:18_000],
             "total_lines": parsed.get("total_lines"),
         }
+    elif tool_name == "read_web_page":
+        from datetime import datetime, timezone
+        from urllib.parse import urlsplit, urlunsplit
+        from jace.tools.webtools import _UNTRUSTED_PREFIX, _UNTRUSTED_SUFFIX
+        from jace.web.security import normalise_public_url
+        import hashlib
+        if content.startswith(_UNTRUSTED_PREFIX) and content.endswith(_UNTRUSTED_SUFFIX):
+            try:
+                raw_data = json.loads(content[len(_UNTRUSTED_PREFIX):-len(_UNTRUSTED_SUFFIX)])
+                if isinstance(raw_data, dict) and isinstance(raw_data.get("text"), str):
+                    raw_url = normalise_public_url(str(raw_data.get("url") or ""))
+                    parts = urlsplit(raw_url)
+                    redacted_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+                    raw_text = raw_data["text"]
+                    excerpt = raw_text[:5000]
+                    if len(excerpt.strip()) >= 20:
+                        payload["evidence"] = {
+                            "url": redacted_url,
+                            "title": str(raw_data.get("title") or "")[:120],
+                            "text": excerpt,
+                            "sha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest(),
+                            "truncated": len(raw_text) > len(excerpt),
+                            "captured_at": datetime.now(timezone.utc).isoformat(),
+                        }
+            except (TypeError, ValueError, json.JSONDecodeError):
+                # Do not promote malformed tool payloads into evidence.
+                pass
     elif tool_name == "search_workspace_files":
         results = parsed.get("results")
         if not isinstance(results, list):

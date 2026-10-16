@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 
 from jace.agents.definitions import get_agent_definition
 from jace.agents.cross_review_bridge import append_director_cross_review
+from jace.agents.coordinated_review_bridge import append_coordinated_review
+from jace.agents.durable_handoffs import (existing_receipt, save_handoff_once, failed_task_is_retry_safe)
+from jace.agents.workflow_checkpoints import (load_checkpoint, save_plan, save_stage, incomplete_checkpoints, existing_task_requires_manual_review)
 from jace.agents.models import AgentTask
 from jace.agents.readiness import get_agent_readiness
 from jace.agents.service import (
@@ -734,6 +737,8 @@ async def _task_tool_evidence(task_id: str) -> list[dict[str, Any]]:
         data = event_data(event)
         if not isinstance(data, dict):
             continue
+        # Timestamp comes from Jace's persisted task event, not the model.
+        data["_event_created_at"] = (event.created_at.isoformat() if getattr(event, "created_at", None) else None)
         records.append(data)
     return records
 
@@ -1225,6 +1230,12 @@ async def _run_step(
     existing: AgentTask | None,
 ) -> StepOutcome:
     row = existing
+    # C4C.3B: a resurrected active task with tool/approval activity is
+    # quarantined, not silently resumed by this Director run.
+    if settings.director_workflow_checkpoints_enabled and existing is not None and row.status not in {'completed', 'failed', 'cancelled'}:
+        if await existing_task_requires_manual_review(row.id):
+            return StepOutcome(step_id=step.id, agent_id=step.agent_id, title=step.title,
+                status='failed', task_id=row.id, error='RECOVERY REQUIRES MANUAL REVIEW: prior tool or approval activity may have side effects; not resubmitted.')
     if row is None:
         # Phase 1E: Director must respect specialist readiness before creating work.
         from jace.agents.manager import agent_manager
@@ -1311,8 +1322,12 @@ async def _run_step(
 
     row = await _wait_for_terminal(row.id)
     retried = False
-    if row.status == "failed":
-        # A single automatic retry is useful for transient local-model failures.
+    if row.status == "failed" and (
+        not settings.director_durable_handoffs_enabled
+        or await failed_task_is_retry_safe(row.id)
+    ):
+        # C4C.3: do not retry a failed task after any tool/approval attempt.
+        # A single retry remains allowed for a failure before tools ran.
         # Cancelled tasks are never retried because cancellation is user intent.
         retried = True
         await asyncio.sleep(0.25)
@@ -1608,7 +1623,51 @@ async def _run_workflow(
     reasoning_mode: ReasoningMode,
     recovered_plan: DirectorPlan | None = None,
 ) -> None:
-    if recovered_plan is None:
+    # C4C.3B: checkpoint reuse is unsafe without an atomic handoff receipt.
+    if settings.director_workflow_checkpoints_enabled and not settings.director_durable_handoffs_enabled:
+        raise RuntimeError('C4C.3B requires durable handoffs enabled')
+    # C4C.3 recovery: a committed final receipt means no more inference,
+    # specialist re-execution or second persisted handoff for this workflow.
+    if settings.director_durable_handoffs_enabled:
+        prior = await existing_receipt(workflow_id)
+        if prior is not None:
+            if settings.director_workflow_checkpoints_enabled:
+                recovered_checkpoint = await load_checkpoint(workflow_id)
+                if recovered_checkpoint and recovered_checkpoint.stage == 'reviewed':
+                    await save_stage(workflow_id, 'completed')
+            await _mark_finalized(workflow_id, prior.message_id)
+            await runtime_events.publish(
+                "agent.director.completed", workflow_id=workflow_id,
+                conversation_id=conversation_id, handoff_message_id=prior.message_id,
+                child_task_ids=[], recovered_handoff=True,
+                result_preview="Previously completed workflow; durable handoff recovered.",
+            )
+            # Reissue the established chat-refresh event after recovery.
+            # Delivery is at-least-once; the underlying message is unique.
+            past_tasks = await _existing_workflow_tasks(workflow_id)
+            last_saved_task_id = next(
+                (row.id for row in reversed(list(past_tasks.values()))), None
+            )
+            if last_saved_task_id:
+                await runtime_events.publish(
+                    "agent.task.completed", task_id=last_saved_task_id,
+                    agent_id="director", status="completed",
+                    conversation_id=conversation_id,
+                    handoff_message_id=prior.message_id,
+                    director_workflow_id=workflow_id, director_result=True,
+                    recovered_handoff=True,
+                    result_preview="Previously completed workflow; handoff recovered.",
+                )
+            return
+
+    # C4C.3B: checkpoint from a prior attempt takes precedence over fresh planning.
+    existing_checkpoint = (await load_checkpoint(workflow_id)) if settings.director_workflow_checkpoints_enabled else None
+    if existing_checkpoint is not None:
+        plan = DirectorPlan.model_validate(existing_checkpoint.plan)
+        if not _plan_valid(plan):
+            raise RuntimeError('Stored Director plan failed dependency validation')
+        model, temperature = existing_checkpoint.model, existing_checkpoint.temperature
+    elif recovered_plan is None:
         plan, model, temperature, _history = await _build_plan(
             objective=objective,
             conversation_id=conversation_id,
@@ -1617,6 +1676,13 @@ async def _run_workflow(
     else:
         model, temperature, _history = await _profile_and_context(conversation_id)
         plan = recovered_plan
+
+    if settings.director_workflow_checkpoints_enabled and existing_checkpoint is None:
+        if not settings.director_durable_handoffs_enabled:
+            raise RuntimeError('C4C.3B checkpoints require C4C.3 durable handoffs enabled')
+        await save_plan(workflow_id=workflow_id, conversation_id=conversation_id,
+            objective=objective, plan=plan.model_dump(), model=model,
+            temperature=temperature, reasoning_mode=reasoning_mode)
 
     await runtime_events.publish(
         "agent.director.planned",
@@ -1690,29 +1756,46 @@ async def _run_workflow(
             outcomes[outcome.step_id] = outcome
             pending.pop(outcome.step_id, None)
 
-    result = await _background_synthesis_turn(
-        model=model,
-        temperature=temperature,
-        objective=objective,
-        plan=plan,
-        outcomes=outcomes,
-    )
+    # C4C.3B: reuse only previously *committed* model-stage results.
+    checkpoint = await load_checkpoint(workflow_id) if settings.director_workflow_checkpoints_enabled else None
+    if checkpoint and checkpoint.stage in {'synthesized', 'reviewed', 'completed'}:
+        result = checkpoint.synthesis
+        if not result:
+            raise RuntimeError('Synthesis checkpoint is missing its saved result')
+    else:
+        result = await _background_synthesis_turn(
+            model=model, temperature=temperature, objective=objective, plan=plan, outcomes=outcomes,
+        )
+        if settings.director_workflow_checkpoints_enabled:
+            await save_stage(workflow_id, 'synthesized', synthesis=result)
 
-    # C4C.1: an OPTIONAL, read-only, bounded audit of excerpts already collected
-    # through successful specialist tools. This does not launch a new agent,
-    # grant a permission, or replace the Director's original synthesis.
-    if settings.director_cross_review_enabled:
+    # C4C.3: durable receipt stores only sanitized review counters/status.
+    receipt_review_metadata: dict[str, Any] = {"status": "disabled"}
+
+    # C4C.2: optional review of source material already captured by the
+    # authorised specialist workers. Never run extra tools or repeat actions.
+    # C4C.2 supersedes C4C.1 when both flags are enabled: only one review runs.
+    if checkpoint and checkpoint.stage in {'reviewed', 'completed'}:
+        if checkpoint.final_result is None:
+            raise RuntimeError('Review checkpoint is missing final handoff')
+        result = checkpoint.final_result
+        receipt_review_metadata = checkpoint.review_metadata
+    elif settings.director_coordinated_review_enabled or settings.director_cross_review_enabled:
         recorded: list[tuple[str, list[dict[str, Any]]]] = []
         for step in plan.steps:
             outcome = outcomes.get(step.id)
             if outcome and outcome.task_id and outcome.status == "completed":
                 recorded.append((step.id, await _task_tool_evidence(outcome.task_id)))
-        review = await append_director_cross_review(
-            objective=objective,
-            original_result=result,
-            records=recorded,
-        )
+        if settings.director_coordinated_review_enabled:
+            review = await append_coordinated_review(
+                objective=objective, original_result=result, records=recorded,
+            )
+        else:
+            review = await append_director_cross_review(
+                objective=objective, original_result=result, records=recorded,
+            )
         result = review.text
+        receipt_review_metadata = review.event_metadata()
         await runtime_events.publish(
             "agent.director.cross_review",
             workflow_id=workflow_id,
@@ -1720,11 +1803,28 @@ async def _run_workflow(
             **review.event_metadata(),
         )
 
-    handoff_message_id = await _persist_director_handoff(
-        conversation_id=conversation_id,
-        objective=objective,
-        result=result,
-    )
+    if settings.director_workflow_checkpoints_enabled:
+        cp = await load_checkpoint(workflow_id)
+        if cp and cp.stage == 'synthesized':
+            await save_stage(workflow_id, 'reviewed', final_result=result,
+                review_metadata=receipt_review_metadata)
+    if settings.director_durable_handoffs_enabled:
+        persisted = await save_handoff_once(
+            workflow_id=workflow_id, conversation_id=conversation_id,
+            objective=objective, result=result,
+            review_metadata=receipt_review_metadata,
+        )
+        handoff_message_id = persisted.message_id
+    else:
+        handoff_message_id = await _persist_director_handoff(
+            conversation_id=conversation_id,
+            objective=objective,
+            result=result,
+        )
+    if settings.director_workflow_checkpoints_enabled:
+        cp = await load_checkpoint(workflow_id)
+        if cp and cp.stage == 'reviewed':
+            await save_stage(workflow_id, 'completed')
     await _mark_finalized(workflow_id, handoff_message_id)
 
     child_task_ids = [
@@ -1819,6 +1919,21 @@ async def resume_director_workflows() -> int:
             raw_mode if raw_mode in {"fast", "balanced", "deep"} else "balanced"
         )
         candidates[workflow_id] = (objective, row.conversation_id, mode, plan)
+
+    # C4C.3B: recover even if the plan was saved before the first task.
+    if settings.director_workflow_checkpoints_enabled:
+        if not settings.director_durable_handoffs_enabled:
+            raise RuntimeError('C4C.3B requires durable handoffs')
+        for cp in await incomplete_checkpoints():
+            if cp.workflow_id in finalized:
+                continue
+            try:
+                planned = DirectorPlan.model_validate(cp.plan)
+            except Exception:
+                continue
+            if not _plan_valid(planned):
+                continue
+            candidates[cp.workflow_id] = (cp.objective, cp.conversation_id, cp.reasoning_mode, planned)
 
     resumed = 0
     for workflow_id, (objective, conversation_id, mode, plan) in candidates.items():
