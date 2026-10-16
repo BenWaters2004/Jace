@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from jace.auth.actor_context import ActorContext, require_actor
 from jace.collaboration.contracts import CollaborationRequest, CollaborationResponse
+from jace.collaboration.workflow_inspection import WorkflowInspection, load_workflow_inspection
 from jace.collaboration.retrieval import (
     RetrievalReviewRequest, run_retrieval_review, RetrievalNotAvailable, RetrievalFailed,
 )
@@ -19,6 +20,12 @@ from jace.model_gateway import model_gateway
 from jace.privacy import privacy_gateway
 
 router = APIRouter(prefix="/collaboration", tags=["collaboration"])
+
+
+# C4D2_WORKFLOW_INSPECTION: owner-checked, read-only persisted workflow facts.
+@router.get("/workflows/{workflow_id}/inspection", response_model=WorkflowInspection)
+async def workflow_inspection(workflow_id: str, actor: ActorContext = Depends(require_actor)):
+    return await load_workflow_inspection(workflow_id, actor)
 
 
 @router.get("/status")

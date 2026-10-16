@@ -43,3 +43,8 @@
 .jdi-step small { color:var(--text-secondary,#a6abb3); line-height:1.4; }
 .jdi-footnote { margin-top:14px; color:var(--text-secondary,#a6abb3); font-size:10px; line-height:1.5; }
 @media(max-width:780px){ .jdi-stats{grid-template-columns:repeat(2,minmax(0,1fr));} .jdi-layout{grid-template-columns:1fr;} .jdi-list{max-height:200px;} .jdi-details{max-height:320px;} }
+
+/* C4D1_FIX1: This is a child of SYSTEM's flex-column scrolling overlay. */
+.agent-system-view > .jace-director-insights {
+  flex: 0 0 auto;
+}

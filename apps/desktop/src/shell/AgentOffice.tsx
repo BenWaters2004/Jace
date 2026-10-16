@@ -1082,6 +1082,8 @@ function AgentSystemOverview(props: {
   workerCount: number;
   busyCount: number;
   taskCount: number;
+  tasks: AgentTask[];
+  onRefresh: () => void;
 }) {
   const safeWorkerCount = Number.isFinite(Number(props.workerCount))
     ? Math.max(0, Number(props.workerCount))
@@ -1101,6 +1103,12 @@ function AgentSystemOverview(props: {
         <article><span>Workers</span><strong>{safeWorkerCount}</strong></article>
         <article><span>Active jobs</span><strong>{safeBusyCount}</strong></article>
       </div>
+      {/* C4D1_FIX1: Render inside the opaque scrolling SYSTEM overlay. */}
+      <DirectorWorkflowInsights
+        tasks={props.tasks}
+        realtimeConnected={props.realtimeConnected}
+        onRefresh={props.onRefresh}
+      />
       <div className="agent-system-future-heading">
         <strong>System telemetry</strong>
         <span>{safeTaskCount} stored agent task{safeTaskCount === 1 ? "" : "s"}</span>
@@ -1217,11 +1225,8 @@ export function AgentOffice(props: {
             workerCount={workerCount}
             busyCount={busyCount}
             taskCount={office.tasks.length}
-            />
-            <DirectorWorkflowInsights
-              tasks={office.tasks}
-              realtimeConnected={office.realtimeConnected}
-              onRefresh={() => { void office.refresh(); }}
+            tasks={office.tasks}
+            onRefresh={() => { void office.refresh(); }}
             />
           </AgentSystemErrorBoundary>
         )}

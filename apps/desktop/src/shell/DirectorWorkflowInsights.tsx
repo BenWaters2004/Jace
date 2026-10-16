@@ -1,5 +1,6 @@
 /** C4D.1 — read-only Agent Director visibility; no new permissions or tool calls. */
 import { useEffect, useMemo, useState } from "react";
+import { CollaborationInspector } from "./CollaborationInspector"; // C4D2_WORKFLOW_INSPECTION
 import { API_BASE_URL } from "../constants";
 import { authenticatedFetch } from "../api";
 import type { AgentTask } from "../agents/types";
@@ -118,6 +119,7 @@ export function DirectorWorkflowInsights(props: {
                 </span>
               </div>)}
             </div>
+            <CollaborationInspector key={selected.id} workflowId={selected.id} />
           </div>}
         </div>
       )}
