@@ -105,6 +105,21 @@ async def embed_text(
     )
 
 
+async def embed_text_with_route(
+    text: str,
+    *,
+    model: str | None = None,
+    capability: str = "embedding",
+    local_only: bool = False,
+    privacy_classification: str | None = None,
+    privacy_mode: str | None = None,
+) -> tuple[list[float], str]:
+    """Return the vector and actual provider:model identity used."""
+    return await model_gateway.embed_with_route(
+        text, capability=capability, model=model, local_only=local_only,
+        privacy_classification=privacy_classification, privacy_mode=privacy_mode,
+    )
+
 __all__ = [
     "ModelGateway",
     "ModelGatewayError",
@@ -112,6 +127,7 @@ __all__ = [
     "ModelRoute",
     "ModelRouteError",
     "embed_text",
+    "embed_text_with_route",
     "model_gateway",
     "resolve_model_route",
     "resolved_model_name",

@@ -84,13 +84,16 @@ def _normalise_tool_call(raw: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(arguments, dict):
         arguments = {}
 
-    return {
+    result = {
         "type": "function",
         "function": {
             "name": name,
             "arguments": arguments,
         },
     }
+    if isinstance(raw.get("id"), str) and raw["id"]:
+        result["id"] = raw["id"]
+    return result
 
 
 def _dedupe_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3965,6 +3968,8 @@ async def execute_agent_task(
                 )
                 if requires_workspace_context:
                     post_tool_nudge = _workspace_failure_nudge(name, tool_error, workspace_catalog)
+            if isinstance(call.get("id"), str) and call["id"]:
+                tool_message["tool_call_id"] = call["id"]
             messages.append(tool_message)
             if post_tool_nudge:
                 messages.append({"role": "user", "content": post_tool_nudge})

@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from jace.config import settings
+from jace.model_gateway.reliability import ReliabilityPolicy, provider_reliability
 from jace.model_gateway import (
     ModelGatewayError,
     model_gateway,
@@ -19,6 +21,12 @@ class ResolveModelRequest(BaseModel):
     capability: str = Field(min_length=1, max_length=80)
     model: str | None = Field(default=None, max_length=300)
     local_only: bool = False
+
+
+@router.get("/reliability")
+async def model_gateway_reliability():
+    """Process-local passive telemetry; no provider credentials or prompts."""
+    return provider_reliability.snapshot(ReliabilityPolicy.from_settings(settings))
 
 
 @router.get("/status")

@@ -87,6 +87,9 @@ def _normalise_tool_call(raw: dict[str, Any]) -> dict[str, Any] | None:
         },
     }
 
+    if isinstance(raw.get("id"), str) and raw["id"]:
+        normalised["id"] = raw["id"]
+
     if "index" in function:
         normalised["function"]["index"] = function["index"]
 
@@ -108,6 +111,7 @@ def _dedupe_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "name": function["name"],
                 "arguments": function["arguments"],
                 "index": function.get("index"),
+                "id": normalised.get("id"),
             },
             sort_keys=True,
             ensure_ascii=False,
@@ -1501,6 +1505,8 @@ async def stream_agent(
                     "tool_name": tool_name,
                     "content": "Tool execution did not produce a result.",
                 }
+            if isinstance(call.get("id"), str) and call["id"]:
+                tool_message["tool_call_id"] = call["id"]
             agent_messages.append(tool_message)
 
     # Safety-limit finalisation: tools are removed and one complete answer is

@@ -60,6 +60,41 @@ class Settings(BaseSettings):
 
     # JACE_4BS7_MODEL_GATEWAY_CONFIG
     model_gateway_default_provider: str = "ollama"
+    # Phase C1: opt-in cloud credentials. Never commit real values.
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    cloud_max_output_tokens: int = 2048
+    # C2A: opt-in route for legacy chat/model-picker selections.
+    cloud_chat_cutover: bool = False
+    # C2B: semantic=original behaviour; hybrid=semantic + legacy lexical fallback;
+    # lexical=local, CPU-light search, no embedding provider calls.
+    memory_retrieval_mode: Literal["semantic", "hybrid", "lexical"] = "semantic"
+    memory_lexical_min_similarity: float = 0.60
+    # C3A: optional, deterministic tier selection via the Auto model.
+    smart_routing_enabled: bool = False
+    # C3B opt-in: process-local reliability and estimated costs (NOT billing).
+    cloud_reliability_enabled: bool = False
+    cloud_retry_count: int = 1
+    cloud_circuit_failure_threshold: int = 3
+    cloud_circuit_cooldown_seconds: float = 45.0
+    cloud_requests_per_minute: int = 0
+    cloud_pricing_json: str = "{}"
+    cloud_observed_cost_limit_usd: float = 0.0
+    cloud_auto_fast_fallback: bool = False
+    # C4A opt-in cross-provider editorial review. No source verification.
+    collaboration_enabled: bool = False
+    # C4B.1: separately enabled evidence review of user-supplied excerpts.
+    collaboration_evidence_enabled: bool = False
+    # C4B.2: explicit permission-gated read-only source collection before review.
+    collaboration_retrieval_enabled: bool = False
+    collaboration_retrieval_timeout_seconds: int = 150
+    # C4C.1: opt-in non-tool cross-provider assessment before Director handoff.
+    director_cross_review_enabled: bool = False
+    collaboration_drafter_route: str = ""
+    collaboration_reviewer_route: str = ""
+    collaboration_max_output_chars: int = 12000
+    collaboration_timeout_seconds: int = 120
+    model_route_conversation_balanced: str = ""
     model_route_conversation_fast: str = ""
     model_route_reasoning_high: str = ""
     model_route_coding_high: str = ""

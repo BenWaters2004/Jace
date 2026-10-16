@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 
@@ -6,6 +7,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from jace.ai.engine import OllamaRequestError, OllamaUnavailableError
+from jace.model_gateway.providers.cloud_common import CloudProviderError
+from jace.model_gateway.gateway import ModelGatewayError
+from jace.model_gateway.smart_router import select_route
+from jace.model_gateway.reliability import ReliabilityPolicy, provider_reliability, ProviderReliabilityError
+from jace.model_gateway.cutover import (
+    ChatCutoverConfigurationError, choose_chat_model,
+)
 from jace.ai.prompts import (
     PERSONALITY_ANCHOR,
     VOICE_RESPONSE_STYLE,
@@ -44,6 +52,7 @@ from jace.tools.agent import routed_tool_names, stream_agent
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+logger = logging.getLogger("uvicorn.error")
 
 
 @router.post("/stream")
@@ -73,7 +82,15 @@ async def send_streaming_chat(
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
         profile = await get_or_create_assistant_settings(session)
-        conversation_model = request.model or conversation.model or profile.default_model
+        try:
+            conversation_model = choose_chat_model(
+                request.model or conversation.model or profile.default_model,
+                cutover_enabled=env_settings.cloud_chat_cutover,
+                fast_route=env_settings.model_route_conversation_fast,
+                auto_enabled=env_settings.smart_routing_enabled,
+            )
+        except ChatCutoverConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         conversation_prompt = (
             request.system_prompt
             if request.system_prompt is not None
@@ -173,7 +190,7 @@ async def send_streaming_chat(
                         "This is an actual application result; acknowledge it accurately.\n"
                         "END MEMORY SYSTEM ACTION"
                     )
-                except (OllamaUnavailableError, OllamaRequestError) as exc:
+                except (OllamaUnavailableError, OllamaRequestError, CloudProviderError, ModelGatewayError, ProviderReliabilityError) as exc:
                     memory_action_context = (
                         "\n\nMEMORY SYSTEM ACTION\n"
                         f"The requested memory action failed: {exc}\n"
@@ -278,11 +295,36 @@ async def send_streaming_chat(
         first_token_at: float | None = None
         saved = False
         memory_hits = []
+        memory_retrieval_error = False
         response_model = conversation_model
+        route_selection = None
 
         await chat_activity.begin()
         await runtime_events.publish("jace.state.changed", state="thinking", conversation_id=conversation_id)
         try:
+            if conversation_model == "auto":
+                route_selection = select_route(
+                    message=request.message or stored_user_text,
+                    reasoning_mode=reasoning_mode,
+                    fast_route=env_settings.model_route_conversation_fast,
+                    balanced_route=env_settings.model_route_conversation_balanced,
+                    deep_route=env_settings.model_route_reasoning_high,
+                    coding_route=env_settings.model_route_coding_high,
+                    research_route=env_settings.model_route_research_high,
+                )
+                response_model = route_selection.route
+                # C3B: only Auto can preselect a healthy fast-route fallback.
+                # This is a circuit-open check BEFORE any inference/tool action.
+                policy = ReliabilityPolicy.from_settings(env_settings)
+                if (
+                    policy.enabled
+                    and env_settings.cloud_auto_fast_fallback
+                    and response_model != env_settings.model_route_conversation_fast.strip()
+                    and provider_reliability.circuit_open(response_model)
+                ):
+                    alternative = env_settings.model_route_conversation_fast.strip()
+                    if alternative and not provider_reliability.circuit_open(alternative):
+                        response_model = alternative
             attachment_started = time.perf_counter()
             attachment_context = ""
             attachment_images: list[str] = []
@@ -318,13 +360,23 @@ async def send_streaming_chat(
                         )
 
                     if memory_retrieval_used:
-                        memory_hits = await search_memories(
-                            session,
-                            request.message,
-                            limit=memory_top_k,
-                            min_similarity=memory_min_similarity,
-                            update_access=True,
-                        )
+                        try:
+                            memory_hits = await search_memories(
+                                session,
+                                request.message,
+                                limit=memory_top_k,
+                                min_similarity=memory_min_similarity,
+                                update_access=True,
+                            )
+                        except (OllamaUnavailableError, OllamaRequestError,
+                                CloudProviderError, ModelGatewayError, ProviderReliabilityError) as exc:
+                            if not env_settings.cloud_chat_cutover:
+                                raise
+                            memory_retrieval_error = True
+                            logger.warning(
+                                "Memory retrieval unavailable during cloud chat; "
+                                "continuing without retrieved memories (%s)", type(exc).__name__
+                            )
             memory_retrieval_ms = round((time.perf_counter() - memory_started) * 1000, 2)
 
             # JACE_STEP4A4_CHAT_RESOLUTION
@@ -441,6 +493,10 @@ async def send_streaming_chat(
             prompt_sections = [
                 profile_prompt,
                 memory_context,
+                ("MEMORY STATUS: Memory retrieval was unavailable for this reply. "
+                 "Do not claim to have recalled facts from long-term memory. "
+                 "Tell the user if this limitation affects the answer.")
+                if memory_retrieval_error else "",
                 memory_action_context,
                 capability_plan.prompt_context(),
                 tool_context,
@@ -559,7 +615,7 @@ async def send_streaming_chat(
                     yield ndjson_event(
                         {
                             "type": "done",
-                            "model": event.get("model", response_model),
+                            "model": response_model if route_selection else event.get("model", response_model),
                             "done_reason": event.get("done_reason"),
                             "metrics": metrics,
                             "model_turns": raw_metrics.get("model_turns", 1),
@@ -596,7 +652,7 @@ async def send_streaming_chat(
                     )
                 )
             raise
-        except (OllamaUnavailableError, OllamaRequestError) as exc:
+        except (OllamaUnavailableError, OllamaRequestError, CloudProviderError, ModelGatewayError, ProviderReliabilityError) as exc:
             if response_parts and not saved:
                 await persist_assistant(
                     "".join(response_parts),

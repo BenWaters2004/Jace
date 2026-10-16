@@ -509,9 +509,18 @@ export default function App(
       } else {
         setModelWarning(null);
       }
+      let advertisedModels: ModelInfo[] = [];
       try {
         const modelResponse = await getModels();
+        advertisedModels = modelResponse.models;
         setModels(modelResponse.models);
+        if (!currentHealth.ollama_connected && modelResponse.models.some(
+          (item) => item.name.startsWith("openai:") || item.name.startsWith("anthropic:")
+        )) {
+          // A configured cloud route can answer while Ollama is offline.
+          // API credentials/availability are validated by actual requests.
+          setModelWarning(null);
+        }
       } catch (modelError) {
         setModels([]);
         setModelWarning(modelError instanceof Error ? `Could not load models: ${modelError.message}` : "Could not load models.");
@@ -538,7 +547,14 @@ export default function App(
       if (initialConversation) {
         setActiveConversationId(initialConversation.id);
         setMessages(mapMessages(initialConversation));
-        setSelectedModel(initialConversation.model);
+        const cloudDefault = advertisedModels.find(
+          (item) => item.name.startsWith("openai:") || item.name.startsWith("anthropic:")
+        )?.name;
+        setSelectedModel(
+          advertisedModels.some((item) => item.name === initialConversation.model)
+            ? initialConversation.model
+            : cloudDefault ?? initialConversation.model
+        );
         setConversationPrompt(initialConversation.system_prompt);
       }
     } catch (initialiseError) {

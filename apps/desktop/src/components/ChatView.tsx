@@ -436,7 +436,7 @@ export function ChatView(props: ChatViewProps) {
           >
             {props.title}
           </h1>
-          <p>{props.selectedModel || "No model selected"}</p>
+          <p>{props.selectedModel === "auto" ? "Auto (Jace)" : (props.selectedModel || "No model selected")}</p>
         </div>
 
         <div className="chat-controls">
@@ -467,7 +467,7 @@ export function ChatView(props: ChatViewProps) {
           >
             {props.models.map((model) => (
               <option key={model.name} value={model.name}>
-                {model.name}
+                {model.name === "auto" ? "Auto (Jace)" : model.name}
               </option>
             ))}
           </select>

@@ -7,7 +7,10 @@ from pydantic import BaseModel
 
 from jace.config import settings
 from jace.model_gateway.provider import ModelProvider
-from jace.model_gateway.providers import OllamaProvider
+from jace.model_gateway.reliability import (
+    ReliabilityPolicy, guarded_stream, guarded_call, provider_reliability,
+)
+from jace.model_gateway.providers import OllamaProvider, OpenAIProvider, AnthropicProvider
 from jace.model_gateway.types import ModelRoute, ProviderInfo
 
 
@@ -38,7 +41,7 @@ class ModelGateway:
         self._providers: dict[str, ModelProvider] = {}
         self._route_overrides = dict(route_overrides or {})
 
-        for provider in providers or [OllamaProvider()]:
+        for provider in providers or [OllamaProvider(), OpenAIProvider(), AnthropicProvider()]:
             self.register(provider)
 
     def register(self, provider: ModelProvider) -> None:
@@ -308,13 +311,23 @@ class ModelGateway:
 
         prepared = privacy.transformed_payload
 
-        async for chunk in provider.stream_chat(
-            model=route.model,
-            messages=prepared["messages"],
-            system_prompt=prepared["system_prompt"],
-            reasoning_mode=reasoning_mode,
-            temperature=temperature,
-            tools=prepared["tools"],
+        async def _send_model_request():
+            async for item in provider.stream_chat(
+                model=route.model,
+                messages=prepared["messages"],
+                system_prompt=prepared["system_prompt"],
+                reasoning_mode=reasoning_mode,
+                temperature=temperature,
+                tools=prepared["tools"],
+            ):
+                yield item
+
+        async for chunk in guarded_stream(
+            route_id=route.route_id,
+            cloud=not route.local,
+            policy=ReliabilityPolicy.from_settings(settings),
+            monitor=provider_reliability,
+            factory=_send_model_request,
         ):
             if isinstance(chunk, dict):
                 chunk.setdefault("model_provider", route.provider)
@@ -422,12 +435,40 @@ class ModelGateway:
 
         prepared = privacy.transformed_payload
 
-        return await provider.structured_chat(
-            model=route.model,
-            messages=prepared["messages"],
-            system_prompt=prepared["system_prompt"],
-            response_model=response_model,
+        async def _send_structured():
+            return await provider.structured_chat(
+                model=route.model,
+                messages=prepared["messages"],
+                system_prompt=prepared["system_prompt"],
+                response_model=response_model,
+            )
+
+        return await guarded_call(
+            route_id=route.route_id, cloud=not route.local,
+            policy=ReliabilityPolicy.from_settings(settings),
+            monitor=provider_reliability, factory=_send_structured,
         )
+
+    async def embed_with_route(
+        self,
+        text: str,
+        *,
+        capability: str = "embedding",
+        model: str | None = None,
+        local_only: bool = False,
+        privacy_classification: str | None = None,
+        privacy_mode: str | None = None,
+    ) -> tuple[list[float], str]:
+        """Return vector and actual route after privacy policy is enforced."""
+        route = self.resolve(capability, requested_model=model, local_only=local_only)
+        route, provider, privacy = self._prepare_privacy(
+            route=route, capability=capability, payload={"text": text},
+            privacy_classification=privacy_classification, privacy_mode=privacy_mode,
+        )
+        vector = await provider.embed(
+            model=route.model, text=privacy.transformed_payload["text"]
+        )
+        return vector, route.route_id
 
     async def embed(
         self,
@@ -452,9 +493,16 @@ class ModelGateway:
             privacy_mode=privacy_mode,
         )
 
-        return await provider.embed(
-            model=route.model,
-            text=privacy.transformed_payload["text"],
+        async def _send_embedding():
+            return await provider.embed(
+                model=route.model,
+                text=privacy.transformed_payload["text"],
+            )
+
+        return await guarded_call(
+            route_id=route.route_id, cloud=not route.local,
+            policy=ReliabilityPolicy.from_settings(settings),
+            monitor=provider_reliability, factory=_send_embedding,
         )
 
     async def warm(

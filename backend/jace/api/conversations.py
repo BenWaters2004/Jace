@@ -18,6 +18,10 @@ from jace.db.conversations import (
     update_conversation,
 )
 from jace.db.settings import get_or_create_assistant_settings
+from jace.config import settings as env_settings
+from jace.model_gateway.cutover import (
+    ChatCutoverConfigurationError, choose_chat_model,
+)
 from jace.schemas import (
     ConversationCreate,
     ConversationDetail,
@@ -51,9 +55,18 @@ async def _owned_conversation(session, conversation_id: str, actor: ActorContext
 async def create_new_conversation(request: ConversationCreate, actor: ActorContext = Depends(require_actor)):
     async with SessionLocal() as session:
         profile = await get_or_create_assistant_settings(session)
+        try:
+            chosen_model = choose_chat_model(
+                request.model or profile.default_model,
+                cutover_enabled=env_settings.cloud_chat_cutover,
+                fast_route=env_settings.model_route_conversation_fast,
+                auto_enabled=env_settings.smart_routing_enabled,
+            )
+        except ChatCutoverConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         conversation = await create_conversation(
             session,
-            model=request.model or profile.default_model,
+            model=chosen_model,
             system_prompt=request.system_prompt if request.system_prompt is not None else profile.system_prompt,
         )
         conversation = await get_conversation(session, conversation.id)

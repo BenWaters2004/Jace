@@ -11,6 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from jace.agents.definitions import get_agent_definition
+from jace.agents.cross_review_bridge import append_director_cross_review
 from jace.agents.models import AgentTask
 from jace.agents.readiness import get_agent_readiness
 from jace.agents.service import (
@@ -24,8 +25,9 @@ from jace.agents.service import (
     task_metadata,
     task_used_tools,
 )
-from jace.ai.engine import OllamaRequestError, stream_chat, structured_chat
+from jace.model_gateway import stream_chat, structured_chat, ModelGatewayError
 from jace.database import SessionLocal
+from jace.config import settings
 from jace.db.conversations import add_message, get_conversation, model_history
 from jace.db.settings import get_or_create_assistant_settings
 from jace.performance import chat_activity
@@ -542,7 +544,7 @@ Rules:
         agents = _normalise_route_agents(objective, route.agents)
         plan = _plan_from_agents(objective, agents, route.rationale)
         if not _plan_valid(plan):
-            raise OllamaRequestError("Director router produced an invalid guarded plan.")
+            raise ModelGatewayError("Director router produced an invalid guarded plan.")
         return plan, model, temperature, history
     except Exception as exc:
         logger.warning(
@@ -1695,6 +1697,29 @@ async def _run_workflow(
         plan=plan,
         outcomes=outcomes,
     )
+
+    # C4C.1: an OPTIONAL, read-only, bounded audit of excerpts already collected
+    # through successful specialist tools. This does not launch a new agent,
+    # grant a permission, or replace the Director's original synthesis.
+    if settings.director_cross_review_enabled:
+        recorded: list[tuple[str, list[dict[str, Any]]]] = []
+        for step in plan.steps:
+            outcome = outcomes.get(step.id)
+            if outcome and outcome.task_id and outcome.status == "completed":
+                recorded.append((step.id, await _task_tool_evidence(outcome.task_id)))
+        review = await append_director_cross_review(
+            objective=objective,
+            original_result=result,
+            records=recorded,
+        )
+        result = review.text
+        await runtime_events.publish(
+            "agent.director.cross_review",
+            workflow_id=workflow_id,
+            conversation_id=conversation_id,
+            **review.event_metadata(),
+        )
+
     handoff_message_id = await _persist_director_handoff(
         conversation_id=conversation_id,
         objective=objective,

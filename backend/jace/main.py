@@ -33,6 +33,7 @@ from jace.api.settings import router as settings_router
 from jace.api.security import router as security_router
 from jace.api.system import router as system_router
 from jace.api.model_gateway import router as model_gateway_router
+from jace.api.collaboration import router as collaboration_router  # JACE_C4A_REVIEW_API
 from jace.api.privacy import router as privacy_router
 from jace.api.tools import router as tools_router
 from jace.api.voice import router as voice_router
@@ -81,7 +82,7 @@ async def lifespan(app: FastAPI):
         if profile.default_model:
             preload_model_name = profile.default_model
 
-    if settings.preload_default_model:
+    if settings.preload_default_model and settings.model_gateway_default_provider == "ollama":
         try:
             logger.info("Preloading Jace model %s...", preload_model_name)
             await warm_model(preload_model_name)
@@ -154,6 +155,7 @@ app.add_middleware(
 app.include_router(actor_context_router)
 app.include_router(system_router)
 app.include_router(model_gateway_router)
+app.include_router(collaboration_router)
 app.include_router(privacy_router)
 app.include_router(auth_router)
 app.include_router(voice_router)
