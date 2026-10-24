@@ -17,6 +17,7 @@ from jace.agents.durable_handoffs import (existing_receipt, save_handoff_once, f
 from jace.agents.workflow_checkpoints import (load_checkpoint, save_plan, save_stage, incomplete_checkpoints, existing_task_requires_manual_review)
 from jace.agents.models import AgentTask
 from jace.agents.readiness import get_agent_readiness
+from jace.agents.cloud_routing import resolve_agent_model
 from jace.agents.service import (
     append_event,
     create_task,
@@ -141,7 +142,8 @@ async def _profile_and_context(
 ) -> tuple[str, float, list[dict[str, str]]]:
     async with SessionLocal() as session:
         profile = await get_or_create_assistant_settings(session)
-        model = profile.default_model
+        # C5A: Director planning/synthesis use an explicit cloud route when opted in.
+        model = resolve_agent_model("director", legacy_model=profile.default_model)
         temperature = profile.temperature
         history: list[dict[str, str]] = []
         if conversation_id:

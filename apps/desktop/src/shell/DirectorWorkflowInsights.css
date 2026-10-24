@@ -48,3 +48,8 @@
 .agent-system-view > .jace-director-insights {
   flex: 0 0 auto;
 }
+
+/* C4D2_FIX1_VISIBLE: always show the inspector above scroll-limited task details. */
+.jdi-inspection-focus { margin: 14px 0; padding: 12px; border: 1px solid var(--jace-border,rgba(155,177,190,.22)); border-radius: 9px; }
+.jdi-inspection-focus > strong { display:block; margin-bottom:10px; font-size:13px; }
+.jdi-inspection-empty { margin: 0; color:var(--jace-muted,#a6abb3); line-height:1.5; }

@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     director_workflow_checkpoints_enabled: bool = False
     # C4C.3C: hold interrupted tool/approval tasks for manual review.
     agent_safe_recovery_enabled: bool = False
+    # C5A: opt-in explicit cloud routes for Director + all five specialists.
+    agent_cloud_routing_enabled: bool = False
+    agent_route_director: str = ""
+    agent_route_research: str = ""
+    agent_route_code: str = ""
+    agent_route_files: str = ""
+    agent_route_analyst: str = ""
+    agent_route_general: str = ""
     collaboration_drafter_route: str = ""
     collaboration_reviewer_route: str = ""
     collaboration_max_output_chars: int = 12000

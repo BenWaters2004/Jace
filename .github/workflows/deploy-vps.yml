@@ -26,6 +26,8 @@ jobs:
           python-version: '3.12'
       - name: Check backend Python syntax
         run: python -m compileall -q backend/jace
+      - name: Phase 0A quick quality gate
+        run: python tools/jace_quality.py --profile quick
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
