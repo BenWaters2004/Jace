@@ -1,0 +1,30 @@
+name: Jace Phase 0B Security Gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tracked-index-security:
+    name: Hygiene and current-index Gitleaks scan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+      - name: Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Set up Go for pinned Gitleaks build
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.x'
+      - name: Install pinned Gitleaks
+        run: |
+          go install github.com/gitleaks/gitleaks/v8@v8.30.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Run Phase 0B security checks
+        run: python tools/jace_quality.py --profile security

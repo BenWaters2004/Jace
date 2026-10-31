@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jace.agents.definitions import AgentDefinition, get_agent_definition
 from jace.agents.models import AgentTask, AgentTaskEvent
+from jace.agents.cloud_routing import resolve_agent_model
 from jace.db.models import utc_now
 from jace.config import settings
 from jace.agents.recovery_policy import has_recorded_action_activity, metadata_is_quarantined
@@ -161,6 +162,8 @@ async def create_task(
 
     selected_tools = _validate_tools(definition, allowed_tools)
 
+    # C5A: Pin the resolved provider:model on the task before it is queued.
+    resolved_agent_model = resolve_agent_model(definition.id, requested_model=model)
     task = AgentTask(
         conversation_id=conversation_id,
         parent_task_id=parent_task_id,
@@ -169,7 +172,7 @@ async def create_task(
         instruction=instruction.strip(),
         status="queued",
         priority=priority,
-        model=model.strip() if model else None,
+        model=resolved_agent_model,
         reasoning_mode=reasoning_mode,
         allowed_tools_json=json.dumps(selected_tools, ensure_ascii=False),
         metadata_json=json.dumps(metadata or {}, ensure_ascii=False),

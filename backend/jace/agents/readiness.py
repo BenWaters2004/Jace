@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from jace.agents.config import agent_settings
+from jace.agents.cloud_routing import AgentCloudRoutingError, resolve_agent_model
+from jace.config import settings
 from jace.agents.definitions import AgentDefinition, get_agent_definition, list_agent_definitions
 from jace.ai.engine import get_models
 from jace.computer.service import list_workspaces
@@ -120,6 +122,7 @@ def _agent_snapshot(
     readable_workspaces: list[dict[str, str]],
     writable_workspaces: list[dict[str, str]],
     workspace_error: str | None,
+    model_routing_error: str | None = None,
 ) -> dict[str, Any]:
     tools: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -162,24 +165,35 @@ def _agent_snapshot(
                 "The background-agent manager is not running.",
             )
         )
-    if not ollama_connected:
-        issues.append(
-            _issue(
-                "ollama_offline",
-                "error",
-                "Ollama is unavailable, so this specialist cannot reason or execute work.",
+    # C5A: cloud readiness checks resolved provider configuration, NOT Ollama.
+    # A configured route is not a live connectivity or successful-tool-call test.
+    if settings.agent_cloud_routing_enabled:
+        model_available = model_routing_error is None and bool(selected_model)
+        if not model_available:
+            issues.append(_issue("cloud_route_unavailable", "error",
+                model_routing_error or "Cloud model route could not be resolved."))
+        else:
+            issues.append(_issue("cloud_route_unproven", "info",
+                "Cloud route configured; live provider and tool compatibility not verified."))
+    else:
+        if not ollama_connected:
+            issues.append(
+                _issue(
+                    "ollama_offline",
+                    "error",
+                    "Ollama is unavailable, so this specialist cannot reason or execute work.",
+                )
             )
-        )
 
-    model_available = ollama_connected and _model_is_available(selected_model, installed_models)
-    if ollama_connected and not model_available:
-        issues.append(
-            _issue(
-                "model_unavailable",
-                "error",
-                f'The selected model "{selected_model}" is not installed in Ollama.',
+        model_available = ollama_connected and _model_is_available(selected_model, installed_models)
+        if ollama_connected and not model_available:
+            issues.append(
+                _issue(
+                    "model_unavailable",
+                    "error",
+                    f'The selected model "{selected_model}" is not installed in Ollama.',
+                )
             )
-        )
 
     unavailable_default_tools = [
         tool
@@ -284,16 +298,18 @@ async def build_agent_readiness_snapshot(
     installed_models: list[str] = []
     ollama_connected = False
     ollama_error: str | None = None
-    try:
-        models = await asyncio.wait_for(get_models(), timeout=READINESS_TIMEOUT_SECONDS)
-        installed_models = [model.name for model in models if model.name]
-        ollama_connected = True
-    except asyncio.TimeoutError:
-        ollama_error = (
-            f"Ollama model discovery exceeded {READINESS_TIMEOUT_SECONDS:.1f}s."
-        )
-    except Exception as exc:  # readiness must report health, not fail the endpoint
-        ollama_error = str(exc) or exc.__class__.__name__
+    # No Ollama discovery/network request is necessary for cloud-only agents.
+    if not settings.agent_cloud_routing_enabled:
+        try:
+            models = await asyncio.wait_for(get_models(), timeout=READINESS_TIMEOUT_SECONDS)
+            installed_models = [model.name for model in models if model.name]
+            ollama_connected = True
+        except asyncio.TimeoutError:
+            ollama_error = (
+                f"Ollama model discovery exceeded {READINESS_TIMEOUT_SECONDS:.1f}s."
+            )
+        except Exception as exc:  # readiness must report health, not fail the endpoint
+            ollama_error = str(exc) or exc.__class__.__name__
 
     permissions: dict[str, str] = {}
     default_model = ""
@@ -324,7 +340,15 @@ async def build_agent_readiness_snapshot(
 
     agents = []
     for definition in list_agent_definitions():
-        selected_model = (model_overrides.get(definition.id) or default_model).strip()
+        model_routing_error = None
+        try:
+            selected_model = resolve_agent_model(
+                definition.id, requested_model=model_overrides.get(definition.id),
+                legacy_model=default_model,
+            ) or ""
+        except AgentCloudRoutingError as exc:
+            selected_model = ""
+            model_routing_error = str(exc)
         agents.append(
             _agent_snapshot(
                 definition,
@@ -336,6 +360,7 @@ async def build_agent_readiness_snapshot(
                 readable_workspaces=readable_workspaces,
                 writable_workspaces=writable_workspaces,
                 workspace_error=workspace_error,
+                model_routing_error=model_routing_error,
             )
         )
 

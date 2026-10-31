@@ -1,0 +1,8 @@
+/* C4D2_FIX1_PROVIDER_UI: theme-aware, no pixel-scene layout changes. */
+.jdi-provider-actual { padding:12px; border:1px solid var(--jace-border,rgba(155,177,190,.25)); border-radius:8px; }
+.jdi-provider-actual header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+.jdi-provider-actual header span,.jdi-provider-actual small { color:var(--jace-muted,#a6abb3); font-size:11px; }
+.jdi-provider-actual p { line-height:1.5; margin:9px 0; }
+.jdi-provider-observed-list { display:flex; flex-direction:column; gap:5px; }
+.jdi-provider-observed-list>div {display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; padding:6px; border-radius:6px; background:rgba(127,142,154,.07); overflow-wrap:anywhere;}
+.jdi-provider-actual small { display:block; margin-top:10px; line-height:1.5; }

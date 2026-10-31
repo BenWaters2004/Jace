@@ -34,3 +34,6 @@ data/voice/
 
 # JACE_4BS5_DEVICE_AGENT
 device-agent/.venv/
+
+# Local generated patch backups
+.jace-patch-backups/

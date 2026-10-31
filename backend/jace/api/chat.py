@@ -442,11 +442,11 @@ async def send_streaming_chat(
                     or multimodal_tool_names.intersection(routed_tools)
                 )
             )
-            response_model = (
-                env_settings.vision_model.strip()
-                if use_specialist_vision
-                else conversation_model
-            )
+            # C4D2_FIX1_AUTO_ROUTE: preserve the selected Auto tier unless a
+            # specialist vision model is explicitly required. Previously this
+            # assignment reset every Auto selection to the literal 'auto'.
+            if use_specialist_vision:
+                response_model = env_settings.vision_model.strip()
 
             preprocess_ms = round((time.perf_counter() - started_at) * 1000, 2)
 
@@ -569,6 +569,17 @@ async def send_streaming_chat(
                     continue
 
                 if event_type == "agent_done":
+                    # C4D2_FIX1_OBSERVED: only the gateway's completed chunk can
+                    # identify the provider used. Configuration is not proof.
+                    observed_provider = str(event.get("model_provider") or "").strip().lower()
+                    observed_model = str(event.get("model") or "").strip()
+                    if observed_provider in {"openai", "anthropic", "ollama"} and observed_model:
+                        bare_model = (observed_model[len(observed_provider) + 1:]
+                                      if observed_model.startswith(observed_provider + ":")
+                                      else observed_model)
+                        observed_route = f"{observed_provider}:{bare_model}"
+                    else:
+                        observed_route = None
                     raw_metrics = event.get("metrics") or {}
                     eval_count = raw_metrics.get("eval_count")
                     eval_duration = raw_metrics.get("eval_duration")
@@ -594,7 +605,7 @@ async def send_streaming_chat(
                         full_response,
                         "complete",
                         metrics,
-                        model_name=response_model,
+                        model_name=observed_route or response_model,
                     )
                     saved = True
                     if (
@@ -615,7 +626,10 @@ async def send_streaming_chat(
                     yield ndjson_event(
                         {
                             "type": "done",
-                            "model": response_model if route_selection else event.get("model", response_model),
+                            "model": observed_route or event.get("model", response_model),
+                            "model_provider": observed_provider if observed_route else None,
+                            "provider_observed": bool(observed_route),
+                            "selected_model_route": response_model,
                             "done_reason": event.get("done_reason"),
                             "metrics": metrics,
                             "model_turns": raw_metrics.get("model_turns", 1),

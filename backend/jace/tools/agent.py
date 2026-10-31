@@ -1433,6 +1433,7 @@ async def stream_agent(
             yield {
                 "type": "agent_done",
                 "model": (final_chunk or {}).get("model", model),
+                "model_provider": (final_chunk or {}).get("model_provider"),  # C4D2_FIX1_OBSERVED
                 "done_reason": (final_chunk or {}).get("done_reason"),
                 "metrics": usage.raw_metrics(),
             }
@@ -1558,6 +1559,7 @@ async def stream_agent(
     yield {
         "type": "agent_done",
         "model": (final_chunk or {}).get("model", model),
+        "model_provider": (final_chunk or {}).get("model_provider"),  # C4D2_FIX1_OBSERVED
         "done_reason": (final_chunk or {}).get("done_reason"),
         "metrics": usage.raw_metrics(),
     }

@@ -1,6 +1,7 @@
 /** C4D.1 — read-only Agent Director visibility; no new permissions or tool calls. */
 import { useEffect, useMemo, useState } from "react";
 import { CollaborationInspector } from "./CollaborationInspector"; // C4D2_WORKFLOW_INSPECTION
+import { LiveProviderActivity } from "./LiveProviderActivity"; // C4D2_FIX1_PROVIDER_UI
 import { API_BASE_URL } from "../constants";
 import { authenticatedFetch } from "../api";
 import type { AgentTask } from "../agents/types";
@@ -90,7 +91,14 @@ export function DirectorWorkflowInsights(props: {
           <span>Evidence review: {collaboration.supplied_excerpt_review_enabled ? "enabled" : "disabled"}</span>
         </div>}
       </div>
+      <LiveProviderActivity />
       <p className="jdi-disclaimer">Configuration is not proof that a model was called. Source reads are not factual verification. Detailed cross-provider assessments remain in the Director's final chat handoff.</p>
+      {/* C4D2_FIX1_VISIBLE: inspector must never be buried in the capped-height task list. */}
+      <div className="jdi-inspection-focus" aria-label="Collaboration Inspector section">
+        <strong>Collaboration Inspector</strong>
+        {selected ? <CollaborationInspector key={selected.id} workflowId={selected.id} /> :
+          <p className="jdi-inspection-empty">No recent Director workflow is available to inspect. Start a background Director workflow, then return to SYSTEM.</p>}
+      </div>
       {workflows.length === 0 ? (
         <div className="jdi-empty">No recent Agent Director tasks are present in this feed. Start a background Director workflow to see it here.</div>
       ) : (
@@ -119,7 +127,6 @@ export function DirectorWorkflowInsights(props: {
                 </span>
               </div>)}
             </div>
-            <CollaborationInspector key={selected.id} workflowId={selected.id} />
           </div>}
         </div>
       )}

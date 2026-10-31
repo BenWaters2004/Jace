@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from jace.agents.config import agent_settings
+from jace.agents.cloud_routing import resolve_agent_model
 from jace.agents.definitions import get_agent_definition
 from jace.agents.models import AgentTask
 from jace.agents.service import (
@@ -3360,7 +3361,12 @@ async def execute_agent_task(
         if definition is None:
             raise RuntimeError(f"Unknown agent type: {task.agent_id}")
         profile = await get_or_create_assistant_settings(session)
-        model = task.model or profile.default_model
+        # C5A: never silently promote a legacy queued task to cloud inference.
+        if settings.agent_cloud_routing_enabled and not task.model:
+            raise RuntimeError("Unpinned legacy background task cannot enter cloud inference; create a new authorised task.")
+        model = resolve_agent_model(
+            task.agent_id, requested_model=task.model, legacy_model=profile.default_model
+        )
         temperature = profile.temperature
         reasoning_mode = task.reasoning_mode
         memory_auto_extract = bool(
