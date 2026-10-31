@@ -76,7 +76,9 @@ async def init_database() -> None:
     # C4C.3 Fix1: lazy model registration prevents database -> agents -> runner -> database cycle.
     # Register the mapped receipt table BEFORE metadata.create_all, on every startup.
     from jace.agents.models import DirectorHandoffReceipt, DirectorWorkflowCheckpoint
-    _ = DirectorHandoffReceipt
+    # C5B.1: register additive provider-receipt table before create_all.
+    from jace.model_gateway.receipts import ModelInvocationReceipt  # JACE_C5B1_PROVIDER_RECEIPTS
+    _ = (DirectorHandoffReceipt, ModelInvocationReceipt)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 

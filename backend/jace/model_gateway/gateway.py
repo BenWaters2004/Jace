@@ -12,6 +12,7 @@ from jace.model_gateway.reliability import (
 )
 from jace.model_gateway.providers import OllamaProvider, OpenAIProvider, AnthropicProvider
 from jace.model_gateway.types import ModelRoute, ProviderInfo
+from jace.model_gateway.receipts import traced_stream, traced_call  # JACE_C5B1_PROVIDER_RECEIPTS
 
 
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
@@ -297,6 +298,7 @@ class ModelGateway:
             requested_model=model,
             local_only=local_only,
         )
+        requested_route_id = route.route_id
         route, provider, privacy = self._prepare_privacy(
             route=route,
             capability=capability,
@@ -312,13 +314,18 @@ class ModelGateway:
         prepared = privacy.transformed_payload
 
         async def _send_model_request():
-            async for item in provider.stream_chat(
-                model=route.model,
-                messages=prepared["messages"],
-                system_prompt=prepared["system_prompt"],
-                reasoning_mode=reasoning_mode,
-                temperature=temperature,
-                tools=prepared["tools"],
+            # C5B.1: factory runs per real adapter attempt, including retries.
+            async for item in traced_stream(
+                route=route, capability=capability, operation="stream_chat",
+                privacy=privacy, requested_route=requested_route_id,
+                stream=provider.stream_chat(
+                    model=route.model,
+                    messages=prepared["messages"],
+                    system_prompt=prepared["system_prompt"],
+                    reasoning_mode=reasoning_mode,
+                    temperature=temperature,
+                    tools=prepared["tools"],
+                ),
             ):
                 yield item
 
@@ -422,6 +429,7 @@ class ModelGateway:
             requested_model=model,
             local_only=local_only,
         )
+        requested_route_id = route.route_id
         route, provider, privacy = self._prepare_privacy(
             route=route,
             capability=capability,
@@ -436,11 +444,15 @@ class ModelGateway:
         prepared = privacy.transformed_payload
 
         async def _send_structured():
-            return await provider.structured_chat(
-                model=route.model,
-                messages=prepared["messages"],
-                system_prompt=prepared["system_prompt"],
-                response_model=response_model,
+            return await traced_call(
+                route=route, capability=capability, operation="structured_chat",
+                privacy=privacy, requested_route=requested_route_id,
+                invoke=lambda: provider.structured_chat(
+                    model=route.model,
+                    messages=prepared["messages"],
+                    system_prompt=prepared["system_prompt"],
+                    response_model=response_model,
+                ),
             )
 
         return await guarded_call(
@@ -461,12 +473,17 @@ class ModelGateway:
     ) -> tuple[list[float], str]:
         """Return vector and actual route after privacy policy is enforced."""
         route = self.resolve(capability, requested_model=model, local_only=local_only)
+        requested_route_id = route.route_id
         route, provider, privacy = self._prepare_privacy(
             route=route, capability=capability, payload={"text": text},
             privacy_classification=privacy_classification, privacy_mode=privacy_mode,
         )
-        vector = await provider.embed(
-            model=route.model, text=privacy.transformed_payload["text"]
+        vector = await traced_call(
+            route=route, capability=capability, operation="embedding",
+            privacy=privacy, requested_route=requested_route_id,
+            invoke=lambda: provider.embed(
+                model=route.model, text=privacy.transformed_payload["text"]
+            ),
         )
         return vector, route.route_id
 
@@ -485,6 +502,7 @@ class ModelGateway:
             requested_model=model,
             local_only=local_only,
         )
+        requested_route_id = route.route_id
         route, provider, privacy = self._prepare_privacy(
             route=route,
             capability=capability,
@@ -494,9 +512,13 @@ class ModelGateway:
         )
 
         async def _send_embedding():
-            return await provider.embed(
-                model=route.model,
-                text=privacy.transformed_payload["text"],
+            return await traced_call(
+                route=route, capability=capability, operation="embedding",
+                privacy=privacy, requested_route=requested_route_id,
+                invoke=lambda: provider.embed(
+                    model=route.model,
+                    text=privacy.transformed_payload["text"],
+                ),
             )
 
         return await guarded_call(
